@@ -3,10 +3,9 @@ package mojito
 import (
 	"context"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
+	"github.com/rushteam/mojito/pkg/signals"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -26,6 +25,8 @@ type ServiceOptions interface {
 
 //App ..
 type App struct {
+	ctx     context.Context
+	stop    chan struct{}
 	logger  *zap.Logger
 	hooks   map[string][]func(*App)
 	service []Service
@@ -48,8 +49,10 @@ func (app *App) runHooks(stage string) {
 func Init(opts ...AppOptions) *App {
 	logger, _ := zap.NewDevelopment()
 	app := &App{
+		stop:            make(chan struct{}),
+		ctx:             context.Background(),
 		logger:          logger,
-		shutdownTimeout: time.Second * 5,
+		shutdownTimeout: time.Second * 2,
 	}
 	for _, opt := range opts {
 		opt(app)
@@ -59,38 +62,67 @@ func Init(opts ...AppOptions) *App {
 
 // Run ..
 func (app *App) Run(service ...Service) error {
-	waitSignals(app)
+	app.waitSignals()
 	var eg errgroup.Group
 	app.runHooks("before_run")
 	app.service = append(app.service, service...)
 	for _, srv := range app.service {
-		app.logger.Debug("start", zap.String("service", srv.Options().Name()))
 		eg.Go(func() error {
 			return srv.Start()
 		})
-		defer func(srv Service) {
-			app.logger.Debug("close", zap.String("service", srv.Options().Name()))
-		}(srv)
+		app.logger.Debug("start", zap.String("service", srv.Options().Name()))
 	}
 	app.runHooks("after_run")
-	return eg.Wait()
+	graceShutdown := make(chan struct{})
+	go func() {
+		eg.Wait()
+		close(graceShutdown)
+	}()
+	defer app.logger.Sync()
+	for {
+		select {
+		// case <-time.Tick(time.Second):
+		// 	app.logger.Debug(".")
+		case <-graceShutdown:
+			app.logger.Debug("grace shutdown")
+			return nil
+		case <-app.stop:
+			app.logger.Debug("force shutdown")
+			return nil
+		}
+	}
 }
 
-// Shutdown ..
-func (app *App) Shutdown() error {
+// graceShutdown ..
+func (app *App) graceShutdown() error {
+	// ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
+	// defer cancel()
+	pid := os.Getpid()
+	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	var eg errgroup.Group
-	ctx, cancel := context.WithTimeout(context.Background(), app.shutdownTimeout)
-	defer cancel()
 	for _, srv := range app.service {
 		eg.Go(func() error {
-			srv.Close(ctx)
-			return nil
+			app.logger.Debug("close", zap.String("service", srv.Options().Name()))
+			return srv.Close(app.ctx)
 		})
 	}
-	defer app.logger.Sync()
+	eg.Go(func() error {
+		<-time.After(app.shutdownTimeout)
+		close(app.stop)
+		return nil
+	})
 	return eg.Wait()
 }
 
+func (app *App) waitSignals() {
+	app.logger.Debug("init listen signal")
+	signals.Shutdown(func() {
+		app.graceShutdown()
+	})
+	// time.Sleep(time.Microsecond) //sleep 1 micro second for frist listen signal
+}
+
+/*
 func waitSignals(app *App) {
 	sig := make(chan os.Signal)
 	signal.Notify(
@@ -109,13 +141,13 @@ func waitSignals(app *App) {
 		select {
 		case s := <-sig:
 			switch s {
-			case syscall.SIGQUIT:
+			case syscall.SIGQUIT, syscall.SIGINT, syscall.SIGTERM: //syscall.SIGHUP,
 				app.logger.Debug("listen signal", zap.String("mod", "signal"), zap.String("signal", "SIGQUIT"))
-				_ = app.Shutdown() // graceful stop
-			case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL, syscall.SIGSTOP:
-				_ = app.Shutdown() // terminate now
+				app.graceShutdown() // grace stop
+				//syscall.SIGKILL, syscall.SIGSTOP terminate now
 			}
 		}
 	}()
 	time.Sleep(time.Microsecond) //sleep 1 micro second for frist listen signal
 }
+*/

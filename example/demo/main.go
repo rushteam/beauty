@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"github.com/rushteam/mojito"
-	"github.com/rushteam/mojito/service/demo"
+	"github.com/rushteam/mojito/pkg/service/demo"
 )
 
 func main() {

@@ -46,7 +46,20 @@ type Demo struct {
 func (d *Demo) Start() error {
 	log.Println("demo start")
 	d.closed = make(chan struct{})
-	for {
+	select {
+	case <-d.closed:
+		time.Sleep(time.Second * 1)
+		return nil
+		// case <-time.After(time.Second * 15):
+		// 	return nil
+	}
+}
+
+// Close ..
+func (d *Demo) Close(ctx context.Context) error {
+	// time.Sleep(time.Second * 8)
+	close(d.closed)
+	/*
 		select {
 		case _, ok := <-d.closed:
 			if !ok {
@@ -56,19 +69,15 @@ func (d *Demo) Start() error {
 			log.Println("demo close")
 			return nil
 		}
-	}
-}
-
-// Close ..
-func (d *Demo) Close(ctx context.Context) error {
-	go func() {
-		time.Sleep(time.Second * 15)
-		d.closed <- struct{}{}
-	}()
-	select {
-	case <-ctx.Done():
-		close(d.closed)
-	}
+		//--------------------
+			go func() {
+				time.Sleep(time.Second * 15)
+				d.closed <- struct{}{}
+			}()
+			select {
+			case <-ctx.Done():
+				close(d.closed)
+			}*/
 	return nil
 }
 

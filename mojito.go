@@ -81,39 +81,8 @@ func (app *App) Run(service ...Service) error {
 		close(app.quit)
 	}()
 	defer app.logger.Sync()
-	for {
-		select {
-		case <-app.quit:
-			return nil
-		}
-	}
-
-	// select {
-	// case :
-	// 	app.logger.Debug("grace shutdown")
-	// 	return nil
-	// case <-app.ctx.Done():
-	// 	app.logger.Debug("force shutdown")
-	// 	return nil
-	// }
-	/*
-		graceShutdown := make(chan struct{})
-		go func() {
-			eg.Wait()
-			close(graceShutdown)
-		}()
-		for {
-			select {
-			case <-time.Tick(time.Second):
-				app.logger.Debug(".")
-			case <-graceShutdown:
-				app.logger.Debug("grace shutdown")
-				return nil
-			case <-app.stop:
-				app.logger.Debug("force shutdown")
-				return nil
-			}
-		}*/
+	<-app.quit
+	return nil
 }
 
 // graceShutdown ..
@@ -131,7 +100,6 @@ func (app *App) graceShutdown() error {
 	}
 	eg.Go(func() error {
 		defer func() {
-			// time.Sleep(time.Microsecond)
 			app.logger.Debug("timeout shutdown")
 			close(app.quit)
 		}()
@@ -140,27 +108,6 @@ func (app *App) graceShutdown() error {
 		return nil
 	})
 	return eg.Wait()
-	/*
-		// defer cancel()
-		pid := os.Getpid()
-		app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
-		var eg errgroup.Group
-		for _, srv := range app.service {
-			eg.Go(func() error {
-				app.logger.Debug("close", zap.String("service", srv.Options().Name()))
-				return srv.Close(ctx)
-			})
-		}
-		go func() {
-			eg.Wait()
-			cancel()
-		}()
-		select {
-		case <-ctx.Done():
-			// close(app.stop)
-			return nil
-		}
-	*/
 }
 
 func (app *App) waitSignals() {
@@ -171,7 +118,6 @@ func (app *App) waitSignals() {
 			app.logger.Debug(err.Error())
 		}
 	})
-	// time.Sleep(time.Microsecond) //sleep 1 micro second for frist listen signal
 }
 
 /*

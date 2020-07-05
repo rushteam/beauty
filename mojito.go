@@ -14,7 +14,7 @@ import (
 type Service interface {
 	Options() ServiceOptions
 	Start() error
-	Close(context.Context) error
+	Close() error
 }
 
 //ServiceOptions ..
@@ -103,7 +103,7 @@ func (app *App) graceShutdown() error {
 	for _, srv := range app.service {
 		eg.Go(func() error {
 			app.logger.Debug("close", zap.String("service", srv.Options().Name()))
-			return srv.Close(app.ctx)
+			return srv.Close()
 		})
 	}
 	eg.Go(func() error {

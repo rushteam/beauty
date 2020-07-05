@@ -1,7 +1,6 @@
 package demo
 
 import (
-	"context"
 	"log"
 	"time"
 
@@ -56,28 +55,8 @@ func (d *Demo) Start() error {
 }
 
 // Close ..
-func (d *Demo) Close(ctx context.Context) error {
-	// time.Sleep(time.Second * 8)
+func (d *Demo) Close() error {
 	close(d.closed)
-	/*
-		select {
-		case _, ok := <-d.closed:
-			if !ok {
-				log.Println("demo close with timeout")
-				return nil
-			}
-			log.Println("demo close")
-			return nil
-		}
-		//--------------------
-			go func() {
-				time.Sleep(time.Second * 15)
-				d.closed <- struct{}{}
-			}()
-			select {
-			case <-ctx.Done():
-				close(d.closed)
-			}*/
 	return nil
 }
 

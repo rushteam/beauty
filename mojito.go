@@ -119,7 +119,7 @@ func (app *App) Run(service ...Service) error {
 // graceShutdown ..
 func (app *App) graceShutdown() error {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
-	defer cancel()
+	// defer cancel()
 	pid := os.Getpid()
 	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	var eg errgroup.Group
@@ -136,6 +136,7 @@ func (app *App) graceShutdown() error {
 			close(app.quit)
 		}()
 		<-ctx.Done()
+		cancel()
 		return nil
 	})
 	return eg.Wait()

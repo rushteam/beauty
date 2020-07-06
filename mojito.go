@@ -2,6 +2,7 @@ package mojito
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -68,10 +69,13 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_run")
 	app.service = append(app.service, service...)
 	for _, srv := range app.service {
-		eg.Go(func() error {
-			return srv.Start()
-		})
-		app.logger.Debug("start", zap.String("service", srv.Options().Name()))
+		func(srv Service) {
+			eg.Go(func() error {
+				fmt.Println("srv:", srv)
+				return srv.Start()
+			})
+			app.logger.Debug("start", zap.String("service", srv.Options().ID()))
+		}(srv)
 	}
 	app.runHooks("after_run")
 	go func() {
@@ -84,7 +88,7 @@ func (app *App) Run(service ...Service) error {
 	return nil
 }
 
-// graceShutdown ..
+// graceShutdown ...
 func (app *App) graceShutdown() error {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
 	// defer cancel()
@@ -92,13 +96,15 @@ func (app *App) graceShutdown() error {
 	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	var eg errgroup.Group
 	for _, srv := range app.service {
-		eg.Go(func() error {
-			err := srv.Close(ctx)
-			if err != nil {
-				app.logger.Debug("service close", zap.String("service", srv.Options().Name()), zap.String("err", err.Error()))
-			}
-			return nil
-		})
+		func(srv Service) {
+			eg.Go(func() error {
+				err := srv.Close(ctx)
+				if err != nil {
+					app.logger.Debug("service close", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
+				}
+				return nil
+			})
+		}(srv)
 	}
 	eg.Go(func() error {
 		defer func() {
@@ -112,6 +118,7 @@ func (app *App) graceShutdown() error {
 	return eg.Wait()
 }
 
+// waitSignals wait signal
 func (app *App) waitSignals() {
 	app.logger.Debug("init listen signal")
 	signals.Shutdown(func() {

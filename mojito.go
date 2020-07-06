@@ -74,7 +74,6 @@ func (app *App) Run(service ...Service) error {
 		app.logger.Debug("start", zap.String("service", srv.Options().Name()))
 	}
 	app.runHooks("after_run")
-
 	go func() {
 		eg.Wait()
 		app.logger.Debug("grace shutdown")
@@ -94,8 +93,11 @@ func (app *App) graceShutdown() error {
 	var eg errgroup.Group
 	for _, srv := range app.service {
 		eg.Go(func() error {
-			app.logger.Debug("close", zap.String("service", srv.Options().Name()))
-			return srv.Close(ctx)
+			err := srv.Close(ctx)
+			if err != nil {
+				app.logger.Debug("service close", zap.String("service", srv.Options().Name()), zap.String("err", err.Error()))
+			}
+			return nil
 		})
 	}
 	eg.Go(func() error {
@@ -119,33 +121,3 @@ func (app *App) waitSignals() {
 		}
 	})
 }
-
-/*
-func waitSignals(app *App) {
-	sig := make(chan os.Signal)
-	signal.Notify(
-		sig,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-		syscall.SIGUSR1,
-		syscall.SIGUSR2,
-		// syscall.SIGSTOP,
-		// syscall.SIGKILL,
-	)
-	go func() {
-		app.logger.Debug("init listen signal")
-		select {
-		case s := <-sig:
-			switch s {
-			case syscall.SIGQUIT, syscall.SIGINT, syscall.SIGTERM: //syscall.SIGHUP,
-				app.logger.Debug("listen signal", zap.String("mod", "signal"), zap.String("signal", "SIGQUIT"))
-				app.graceShutdown() // grace stop
-				//syscall.SIGKILL, syscall.SIGSTOP terminate now
-			}
-		}
-	}()
-	time.Sleep(time.Microsecond) //sleep 1 micro second for frist listen signal
-}
-*/

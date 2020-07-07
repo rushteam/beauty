@@ -2,7 +2,6 @@ package mojito
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -71,7 +70,6 @@ func (app *App) Run(service ...Service) error {
 	for _, srv := range app.service {
 		func(srv Service) {
 			eg.Go(func() error {
-				fmt.Println("srv:", srv)
 				return srv.Start()
 			})
 			app.logger.Debug("start", zap.String("service", srv.Options().ID()))
@@ -88,8 +86,8 @@ func (app *App) Run(service ...Service) error {
 	return nil
 }
 
-// graceShutdown ...
-func (app *App) graceShutdown() error {
+// Shutdown ...
+func (app *App) Shutdown() error {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
 	// defer cancel()
 	pid := os.Getpid()
@@ -122,7 +120,7 @@ func (app *App) graceShutdown() error {
 func (app *App) waitSignals() {
 	app.logger.Debug("init listen signal")
 	signals.Shutdown(func() {
-		err := app.graceShutdown()
+		err := app.Shutdown()
 		if err != nil {
 			app.logger.Debug(err.Error())
 		}

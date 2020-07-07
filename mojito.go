@@ -90,11 +90,6 @@ func (app *App) Run(service ...Service) error {
 		}(srv)
 	}
 	app.runHooks("after_run")
-	// go func() {
-	// 	app.eg.Wait()
-	// 	app.logger.Debug("grace shutdown")
-	// 	close(app.quit)
-	// }()
 	defer app.logger.Sync()
 	<-app.quit
 	return nil
@@ -103,7 +98,7 @@ func (app *App) Run(service ...Service) error {
 // Shutdown ...
 func (app *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
-	// defer cancel()
+	defer cancel()
 	pid := os.Getpid()
 	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	for _, srv := range app.service {
@@ -127,7 +122,6 @@ func (app *App) Shutdown() {
 		app.logger.Debug("timeout shutdown")
 		close(app.quit)
 	}
-	cancel()
 	return
 }
 

@@ -94,7 +94,7 @@ func (app *App) Run(service ...Service) error {
 			app.start(func() error {
 				return srv.Start()
 			})
-			app.logger.Debug("start", zap.String("service", srv.Options().ID()))
+			app.logger.Info("start", zap.String("service", srv.Options().ID()))
 		}(srv)
 	}
 	app.runHooks("after_start")
@@ -114,7 +114,7 @@ func (app *App) Shutdown() {
 			app.start(func() error {
 				err := srv.Close(ctx)
 				if err != nil {
-					app.logger.Debug("service close fail", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
+					app.logger.Error("service close fail", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
 				}
 				return nil
 			})
@@ -122,12 +122,12 @@ func (app *App) Shutdown() {
 	}
 	select {
 	case <-app.wait():
-		app.logger.Debug("grace shutdown")
+		app.logger.Info("grace shutdown")
 		close(app.quit)
 		//正常结束
 	case <-ctx.Done():
 		//超时
-		app.logger.Debug("timeout shutdown")
+		app.logger.Info("timeout shutdown")
 		close(app.quit)
 	}
 	return
@@ -135,7 +135,7 @@ func (app *App) Shutdown() {
 
 // waitSignals wait signal
 func (app *App) waitSignals() {
-	app.logger.Debug("init listen signal")
+	app.logger.Info("init listen signal")
 	signals.Shutdown(func() {
 		app.Shutdown()
 	})

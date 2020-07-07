@@ -80,7 +80,7 @@ func (app *App) wait() <-chan error {
 func (app *App) Run(service ...Service) error {
 	app.service = service
 	app.waitSignals()
-	app.runHooks("before_run")
+	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
 			app.start(func() error {
@@ -89,7 +89,7 @@ func (app *App) Run(service ...Service) error {
 			app.logger.Debug("start", zap.String("service", srv.Options().ID()))
 		}(srv)
 	}
-	app.runHooks("after_run")
+	app.runHooks("after_start")
 	defer app.logger.Sync()
 	<-app.quit
 	return nil

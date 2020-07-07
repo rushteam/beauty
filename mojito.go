@@ -3,6 +3,7 @@ package mojito
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/rushteam/mojito/pkg/signals"
@@ -31,6 +32,7 @@ type App struct {
 	service []Service
 	//shutdownTimeout timeout will be forces stop
 	shutdownTimeout time.Duration
+	shutdowning     sync.Locker
 
 	quit chan struct{}
 }
@@ -77,7 +79,9 @@ func (app *App) Run(service ...Service) error {
 	}
 	app.runHooks("after_run")
 	go func() {
-		eg.Wait()
+		if err := eg.Wait(); err != nil {
+			app.Shutdown()
+		}
 		app.logger.Debug("grace shutdown")
 		close(app.quit)
 	}()
@@ -88,6 +92,8 @@ func (app *App) Run(service ...Service) error {
 
 // Shutdown ...
 func (app *App) Shutdown() error {
+	app.shutdowning.Lock()
+	defer app.shutdowning.Unlock()
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
 	// defer cancel()
 	pid := os.Getpid()

@@ -31,8 +31,8 @@ type App struct {
 	service []Service
 	//shutdownTimeout timeout will be forces stop
 	shutdownTimeout time.Duration
-
-	quit chan struct{}
+	quit            chan struct{}
+	eg              *errgroup.Group
 }
 
 //AppOptions ..
@@ -54,6 +54,7 @@ func Init(opts ...AppOptions) *App {
 		logger:          logger,
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
+		eg:              &errgroup.Group{},
 	}
 	for _, opt := range opts {
 		opt(app)
@@ -61,68 +62,79 @@ func Init(opts ...AppOptions) *App {
 	return app
 }
 
+func (app *App) start(fn func() error) {
+	app.eg.Go(fn)
+}
+func (app *App) wait() <-chan error {
+	errCh := make(chan error)
+	go func() {
+		if err := app.eg.Wait(); err != nil {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+	return errCh
+}
+
 // Run ..
 func (app *App) Run(service ...Service) error {
+	app.service = service
 	app.waitSignals()
-	var eg errgroup.Group
 	app.runHooks("before_run")
-	app.service = append(app.service, service...)
 	for _, srv := range app.service {
 		func(srv Service) {
-			eg.Go(func() error {
+			app.start(func() error {
 				return srv.Start()
 			})
 			app.logger.Debug("start", zap.String("service", srv.Options().ID()))
 		}(srv)
 	}
 	app.runHooks("after_run")
-	go func() {
-		eg.Wait()
-		app.logger.Debug("grace shutdown")
-		close(app.quit)
-	}()
+	// go func() {
+	// 	app.eg.Wait()
+	// 	app.logger.Debug("grace shutdown")
+	// 	close(app.quit)
+	// }()
 	defer app.logger.Sync()
 	<-app.quit
 	return nil
 }
 
 // Shutdown ...
-func (app *App) Shutdown() error {
+func (app *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
 	// defer cancel()
 	pid := os.Getpid()
 	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
-	var eg errgroup.Group
 	for _, srv := range app.service {
 		func(srv Service) {
-			eg.Go(func() error {
+			app.start(func() error {
 				err := srv.Close(ctx)
 				if err != nil {
-					app.logger.Debug("service close", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
+					app.logger.Debug("service close fail", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
 				}
 				return nil
 			})
 		}(srv)
 	}
-	eg.Go(func() error {
-		defer func() {
-			app.logger.Debug("timeout shutdown")
-			close(app.quit)
-		}()
-		<-ctx.Done()
-		cancel()
-		return nil
-	})
-	return eg.Wait()
+	select {
+	case <-app.wait():
+		app.logger.Debug("grace shutdown")
+		close(app.quit)
+		//正常结束
+	case <-ctx.Done():
+		//超时
+		app.logger.Debug("timeout shutdown")
+		close(app.quit)
+	}
+	cancel()
+	return
 }
 
 // waitSignals wait signal
 func (app *App) waitSignals() {
 	app.logger.Debug("init listen signal")
 	signals.Shutdown(func() {
-		err := app.Shutdown()
-		if err != nil {
-			app.logger.Debug(err.Error())
-		}
+		app.Shutdown()
 	})
 }

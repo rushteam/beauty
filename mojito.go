@@ -27,7 +27,7 @@ type ServiceOptions interface {
 type App struct {
 	ctx     context.Context
 	logger  *zap.Logger
-	hooks   map[string][]func(*App)
+	hooks   map[string][]HookFunc
 	service []Service
 	//shutdownTimeout timeout will be forces stop
 	shutdownTimeout time.Duration
@@ -38,6 +38,13 @@ type App struct {
 //AppOptions ..
 type AppOptions func(app *App)
 
+//HookFunc ..
+type HookFunc func(*App)
+
+//AddHook add a hook func to stage
+func (app *App) AddHook(stage string, fn HookFunc) {
+	app.hooks[stage] = append(app.hooks[stage], fn)
+}
 func (app *App) runHooks(stage string) {
 	if hooks, ok := app.hooks[stage]; ok {
 		for _, h := range hooks {
@@ -52,6 +59,7 @@ func Init(opts ...AppOptions) *App {
 	app := &App{
 		ctx:             context.Background(),
 		logger:          logger,
+		hooks:           make(map[string][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
 		eg:              &errgroup.Group{},

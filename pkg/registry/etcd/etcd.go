@@ -42,7 +42,7 @@ func NewRegistry() (mojito.Registry, error) {
 	e.client = client
 	return e, nil
 }
-func (e *etcdRegistry) Register(s mojito.ServiceOptions) {
+func (e *etcdRegistry) Register(s mojito.ServiceOptions) error {
 	nodeKey := ""
 	e.RLock()
 	leaseID, ok := e.leases[s.Name()+s.ID()]
@@ -56,32 +56,37 @@ func (e *etcdRegistry) Register(s mojito.ServiceOptions) {
 		if err != nil {
 			return err
 		}
+		// get the existing lease
+		for _, kv := range rsp.Kvs {
+			if kv.Lease > 0 {
+				leaseID = clientv3.LeaseID(kv.Lease)
+				// decode the existing node
+				srv := decode(kv.Value)
+				if srv == nil || len(srv.Nodes) == 0 {
+					continue
+				}
+
+				// create hash of service; uint64
+				h, err := hash.Hash(srv.Nodes[0], nil)
+				if err != nil {
+					continue
+				}
+
+				// save the info
+				e.Lock()
+				e.leases[s.Name+node.Id] = leaseID
+				e.register[s.Name+node.Id] = h
+				e.Unlock()
+
+				break
+			}
+		}
 	}
 }
 func (e *etcdRegistry) Deregister(info mojito.ServiceOptions) {
 
 }
 func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, opts ...registry.RegisterOption) error {
-	if len(s.Nodes) == 0 {
-		return errors.New("Require at least one node")
-	}
-
-	// check existing lease cache
-	e.RLock()
-	leaseID, ok := e.leases[s.Name+node.Id]
-	e.RUnlock()
-
-	if !ok {
-		// missing lease, check if the key exists
-		ctx, cancel := context.WithTimeout(context.Background(), e.options.Timeout)
-		defer cancel()
-
-		// look for the existing key
-		rsp, err := e.client.Get(ctx, nodePath(s.Name, node.Id), clientv3.WithSerializable())
-		if err != nil {
-			return err
-		}
-
 		// get the existing lease
 		for _, kv := range rsp.Kvs {
 			if kv.Lease > 0 {

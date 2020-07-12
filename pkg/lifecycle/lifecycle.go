@@ -33,7 +33,7 @@ func (c *Cycle) Run(fn func() error) {
 func (c *Cycle) Done() <-chan error {
 	errCh := make(chan error)
 	go func() {
-		if err := app.eg.Wait(); err != nil {
+		if err := c.eg.Wait(); err != nil {
 			errCh <- err
 		}
 		close(errCh)
@@ -43,7 +43,7 @@ func (c *Cycle) Done() <-chan error {
 
 //DoneAndClose ..
 func (c *Cycle) DoneAndClose() {
-	<-c.Done
+	<-c.Done()
 	c.Close()
 }
 
@@ -58,5 +58,5 @@ func (c *Cycle) Close() {
 
 // Wait blocked for a life cycle
 func (c *Cycle) Wait() <-chan struct{} {
-	return <-c.quit
+	return c.quit
 }

@@ -1,11 +1,12 @@
 package mojito
 
+//RegistryOptions ..
 type RegistryOptions struct{}
 
 //Registry ..
 type Registry interface {
-	Register(info ServiceOptions)
-	Deregister(info ServiceOptions)
+	Register(ServiceOptions)
+	Deregister(ServiceOptions)
 }
 
 //Registry ..

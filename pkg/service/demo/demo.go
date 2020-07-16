@@ -5,35 +5,15 @@ import (
 	"log"
 	"time"
 
-	"github.com/nats-io/nuid"
 	"github.com/rushteam/mojito"
+	"github.com/rushteam/mojito/pkg/service"
 )
 
 // New ..
-func New() mojito.Service {
-	n := nuid.New()
+func New(opts ...service.OptionsFunc) mojito.Service {
 	return &Demo{
-		opts: &Options{
-			name: "demo",
-			uuid: n.Next(),
-		},
+		opts: service.NewOptions(opts...),
 	}
-}
-
-// Options ..
-type Options struct {
-	uuid string
-	name string
-}
-
-//ID ...
-func (o *Options) ID() string {
-	return o.name + "-" + o.uuid
-}
-
-//Name ...
-func (o *Options) Name() string {
-	return o.name
 }
 
 // Demo is a demo service

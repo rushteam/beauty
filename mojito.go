@@ -5,9 +5,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/rushteam/mojito/pkg/lifecycle"
 	"github.com/rushteam/mojito/pkg/signals"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
 //Service ..
@@ -19,8 +19,10 @@ type Service interface {
 
 //ServiceOptions ..
 type ServiceOptions interface {
-	ID() string
+	UUID() string
 	Name() string
+	Version() string
+	Metadata() map[string]string
 }
 
 //App ..
@@ -32,7 +34,7 @@ type App struct {
 	//shutdownTimeout timeout will be forces stop
 	shutdownTimeout time.Duration
 	quit            chan struct{}
-	eg              *errgroup.Group
+	lc              *lifecycle.Cycle
 }
 
 //AppOptions ..
@@ -62,26 +64,12 @@ func Init(opts ...AppOptions) *App {
 		hooks:           make(map[string][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
-		eg:              &errgroup.Group{},
+		lc:              lifecycle.NewCycle(),
 	}
 	for _, opt := range opts {
 		opt(app)
 	}
 	return app
-}
-
-func (app *App) start(fn func() error) {
-	app.eg.Go(fn)
-}
-func (app *App) wait() <-chan error {
-	errCh := make(chan error)
-	go func() {
-		if err := app.eg.Wait(); err != nil {
-			errCh <- err
-		}
-		close(errCh)
-	}()
-	return errCh
 }
 
 // Run ..
@@ -91,7 +79,7 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
-			app.start(func() error {
+			app.lc.Run(func() error {
 				return srv.Start()
 			})
 			app.logger.Info("start", zap.String("service", srv.Options().ID()))
@@ -99,7 +87,7 @@ func (app *App) Run(service ...Service) error {
 	}
 	app.runHooks("after_start")
 	defer app.logger.Sync()
-	<-app.quit
+	<-app.lc.Wait()
 	return nil
 }
 
@@ -111,7 +99,7 @@ func (app *App) Shutdown() {
 	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	for _, srv := range app.service {
 		func(srv Service) {
-			app.start(func() error {
+			app.lc.Run(func() error {
 				err := srv.Close(ctx)
 				if err != nil {
 					app.logger.Error("service close fail", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
@@ -121,14 +109,14 @@ func (app *App) Shutdown() {
 		}(srv)
 	}
 	select {
-	case <-app.wait():
+	case <-app.lc.Done():
 		app.logger.Info("grace shutdown")
-		close(app.quit)
+		app.lc.Close()
 		//正常结束
 	case <-ctx.Done():
 		//超时
 		app.logger.Info("timeout shutdown")
-		close(app.quit)
+		app.lc.Close()
 	}
 	return
 }

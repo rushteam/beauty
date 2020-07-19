@@ -1,15 +1,30 @@
-package mojito
+package registry
 
-//RegistryOptions ..
-type RegistryOptions struct{}
+var (
+	prefix = "/mojito/registry/"
+)
+
+//Options ..
+type Options struct{}
+
+//Registry ..
+type Registry interface {
+	Register(s Service) error
+	Deregister(s Service) error
+}
 
 //Service info
-type Service struct {
-	Name     string            `json:"name"`
-	Version  string            `json:"version"`
-	Metadata map[string]string `json:"metadata"`
-	// Endpoints []*Endpoint       `json:"endpoints"`
-	// Nodes     []*Node           `json:"nodes"`
+// type Service struct {
+// 	Name     string            `json:"name"`
+// 	Version  string            `json:"version"`
+// 	Metadata map[string]string `json:"metadata"`
+// 	// Endpoints []*Endpoint       `json:"endpoints"`
+// 	// Nodes     []*Node           `json:"nodes"`
+// }
+type Service interface {
+	Name() string
+	UUID() string
+	Version() string
 }
 
 //Node info

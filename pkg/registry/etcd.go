@@ -1,4 +1,4 @@
-package etcd
+package registry
 
 import (
 	"context"
@@ -6,16 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/mojito"
 	"github.com/rushteam/mojito/pkg/service"
 	"github.com/rushteam/registry"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
-var (
-	prefix = "/mojito/registry/"
-)
+var _ Registry = (*etcdRegistry)(nil)
 
 type etcdRegistry struct {
 	sync.RWMutex
@@ -26,8 +23,8 @@ type etcdRegistry struct {
 	}
 }
 
-//NewRegistry ..
-func NewRegistry() (mojito.Registry, error) {
+//NewEtcdRegistry ..
+func NewEtcdRegistry() (Registry, error) {
 	e := &etcdRegistry{
 		leases: make(map[string]clientv3.LeaseID),
 	}
@@ -41,15 +38,15 @@ func NewRegistry() (mojito.Registry, error) {
 	e.client = client
 	return e, nil
 }
-func (e *etcdRegistry) Register(s mojito.ServiceOptions) error {
-	nodeKey := fmt.Sprintf("%v/%v/%v", prefix, s.Name(), s.UUID())
+func (e *etcdRegistry) Register(s Service) error {
+	key := fmt.Sprintf("%v/%v/%v", prefix, s.Name(), s.UUID())
 	e.RLock()
-	leaseID, ok := e.leases[nodeKey]
+	leaseID, ok := e.leases[key]
 	e.RUnlock()
 	if !ok {
 		ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
 		defer cancel()
-		rsp, err := e.client.Get(ctx, nodeKey, clientv3.WithSerializable())
+		rsp, err := e.client.Get(ctx, key, clientv3.WithSerializable())
 		if err != nil {
 			return err
 		}
@@ -58,7 +55,7 @@ func (e *etcdRegistry) Register(s mojito.ServiceOptions) error {
 				leaseID = clientv3.LeaseID(kv.Lease)
 				// save the info
 				e.Lock()
-				e.leases[nodeKey] = leaseID
+				e.leases[key] = leaseID
 				e.Unlock()
 				break
 			}
@@ -108,24 +105,6 @@ func (e *etcdRegistry) Register(s mojito.ServiceOptions) error {
 	}
 }
 
-func (e *etcdRegistry) Deregister(info mojito.ServiceOptions) {
-
-}
-func (e *etcdRegistry) registerNode(s *registry.Service, node *registry.Node, opts ...registry.RegisterOption) error {
-	// create an entry for the node
-
-	if err != nil {
-		return err
-	}
-
-	e.Lock()
-	// save our hash of the service
-	e.register[s.Name+node.Id] = h
-	// save our leaseID of the service
-	if lgr != nil {
-		e.leases[s.Name+node.Id] = lgr.ID
-	}
-	e.Unlock()
-
+func (e *etcdRegistry) Deregister(s Service) error {
 	return nil
 }

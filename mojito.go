@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rushteam/mojito/pkg/lifecycle"
+	"github.com/rushteam/mojito/pkg/registry"
 	"github.com/rushteam/mojito/pkg/signals"
 	"go.uber.org/zap"
 )
@@ -19,22 +20,9 @@ type Service interface {
 
 //ServiceOptions ..
 type ServiceOptions interface {
-	UUID() string
 	Name() string
 	Version() string
 	Metadata() map[string]string
-}
-
-//App ..
-type App struct {
-	ctx     context.Context
-	logger  *zap.Logger
-	hooks   map[string][]HookFunc
-	service []Service
-	//shutdownTimeout timeout will be forces stop
-	shutdownTimeout time.Duration
-	quit            chan struct{}
-	lc              *lifecycle.Cycle
 }
 
 //AppOptions ..
@@ -42,6 +30,19 @@ type AppOptions func(app *App)
 
 //HookFunc ..
 type HookFunc func(*App)
+
+//App ..
+type App struct {
+	ctx      context.Context
+	logger   *zap.Logger
+	hooks    map[string][]HookFunc
+	service  []Service
+	registry registry.Registry
+	//shutdownTimeout timeout will be forces stop
+	shutdownTimeout time.Duration
+	quit            chan struct{}
+	cycle           *lifecycle.Cycle
+}
 
 //AddHook add a hook func to stage
 func (app *App) AddHook(stage string, fn HookFunc) {
@@ -57,19 +58,32 @@ func (app *App) runHooks(stage string) {
 
 //Init ..
 func Init(opts ...AppOptions) *App {
-	logger, _ := zap.NewDevelopment()
+
 	app := &App{
 		ctx:             context.Background(),
-		logger:          logger,
 		hooks:           make(map[string][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
-		lc:              lifecycle.NewCycle(),
+		cycle:           lifecycle.NewCycle(),
 	}
+	logger, _ := zap.NewDevelopment()
+	app.SetLogger(logger)
+	registry, _ := registry.NewEtcdRegistry()
+	app.SetRegistry(registry)
 	for _, opt := range opts {
 		opt(app)
 	}
 	return app
+}
+
+//SetLogger ...
+func (app *App) SetLogger(l *zap.Logger) {
+	app.logger = l
+}
+
+//SetRegistry ...
+func (app *App) SetRegistry(r registry.Registry) {
+	app.registry = r
 }
 
 // Run ..
@@ -79,15 +93,15 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
-			app.lc.Run(func() error {
+			app.cycle.Run(func() error {
 				return srv.Start()
 			})
-			app.logger.Info("start", zap.String("service", srv.Options().ID()))
+			app.logger.Info("start", zap.String("service", srv.Options().Name()))
 		}(srv)
 	}
 	app.runHooks("after_start")
 	defer app.logger.Sync()
-	<-app.lc.Wait()
+	<-app.cycle.Wait()
 	return nil
 }
 
@@ -99,24 +113,20 @@ func (app *App) Shutdown() {
 	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	for _, srv := range app.service {
 		func(srv Service) {
-			app.lc.Run(func() error {
-				err := srv.Close(ctx)
-				if err != nil {
-					app.logger.Error("service close fail", zap.String("service", srv.Options().ID()), zap.String("err", err.Error()))
-				}
-				return nil
+			app.cycle.Run(func() error {
+				return srv.Close(ctx)
 			})
 		}(srv)
 	}
 	select {
-	case <-app.lc.Done():
+	case <-app.cycle.Done():
 		app.logger.Info("grace shutdown")
-		app.lc.Close()
+		app.cycle.Close()
 		//正常结束
 	case <-ctx.Done():
 		//超时
 		app.logger.Info("timeout shutdown")
-		app.lc.Close()
+		app.cycle.Close()
 	}
 	return
 }

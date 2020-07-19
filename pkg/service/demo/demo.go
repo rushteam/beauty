@@ -12,7 +12,7 @@ import (
 // New ..
 func New(opts ...service.OptionsFunc) mojito.Service {
 	return &Demo{
-		opts: service.NewOptions(opts...),
+		opts: service.NewOptions("demo", opts...),
 	}
 }
 

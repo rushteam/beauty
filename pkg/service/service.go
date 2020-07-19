@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+
 	"github.com/google/uuid"
 	"github.com/rushteam/mojito"
 )
@@ -9,21 +11,23 @@ var _ mojito.ServiceOptions = (*Options)(nil)
 
 // Options ..
 type Options struct {
+	kind     string
 	name     string
+	uuid     string
 	version  string
 	metadata map[string]string
-	uuid     string
 }
 
 //OptionsFunc ..
 type OptionsFunc func(o *Options)
 
 //NewOptions new a options
-func NewOptions(opts ...OptionsFunc) *Options {
+func NewOptions(kind string, opts ...OptionsFunc) *Options {
 	o := &Options{
-		version:  "0.0.0",
-		metadata: make(map[string]string),
+		kind:     kind,
+		name:     kind,
 		uuid:     uuid.New().String(),
+		metadata: make(map[string]string),
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -45,14 +49,9 @@ func Version(verison string) OptionsFunc {
 	}
 }
 
-//UUID ...
-func (o *Options) UUID() string {
-	return o.uuid
-}
-
 //Name ...
 func (o *Options) Name() string {
-	return o.name
+	return fmt.Sprintf("%v-%v", o.kind, o.name)
 }
 
 //Version ...

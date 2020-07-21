@@ -6,8 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/mojito/pkg/service"
-	"github.com/rushteam/registry"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
@@ -19,90 +17,88 @@ type etcdRegistry struct {
 	client *clientv3.Client
 	leases map[string]clientv3.LeaseID
 	opts   struct {
-		Timeout time.Duration
+		Timeout  time.Duration
+		leaseTTL time.Duration
 	}
+	config clientv3.Config
 }
 
 //NewEtcdRegistry ..
-func NewEtcdRegistry() (Registry, error) {
+func NewEtcdRegistry(endpoints ...string) (Registry, error) {
+	if len(endpoints) == 0 {
+		endpoints = []string{"127.0.0.1:2739"}
+	}
 	e := &etcdRegistry{
 		leases: make(map[string]clientv3.LeaseID),
 	}
-	config := clientv3.Config{
-		Endpoints: []string{"127.0.0.1:2739"},
-	}
-	client, err := clientv3.New(config)
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: endpoints,
+	})
 	if err != nil {
 		return nil, err
 	}
 	e.client = client
 	return e, nil
 }
-func (e *etcdRegistry) Register(s Service) error {
-	key := fmt.Sprintf("%v/%v/%v", prefix, s.Name(), s.UUID())
+func (e *etcdRegistry) loadLeaseID(k string) (clientv3.LeaseID, error) {
+	//from struct cache
 	e.RLock()
-	leaseID, ok := e.leases[key]
+	leaseID, ok := e.leases[k]
 	e.RUnlock()
-	if !ok {
-		ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
-		defer cancel()
-		rsp, err := e.client.Get(ctx, key, clientv3.WithSerializable())
-		if err != nil {
-			return err
-		}
+	if ok {
+		return leaseID, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
+	defer cancel()
+	//from etcd
+	if rsp, err := e.client.Get(ctx, k, clientv3.WithSerializable()); err == nil {
 		for _, kv := range rsp.Kvs {
 			if kv.Lease > 0 {
 				leaseID = clientv3.LeaseID(kv.Lease)
-				// save the info
 				e.Lock()
-				e.leases[key] = leaseID
+				e.leases[k] = leaseID
 				e.Unlock()
 				break
 			}
 		}
-	}
-	var needPut bool
-
-	// renew the lease if it exists
-	if leaseID > 0 {
 		if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
 			if err != rpctypes.ErrLeaseNotFound {
-				return err
+				return leaseID, nil
 			}
-			// lease not found do register
-			needPut = true
 		}
 	}
-	if needPut == true {
-		info := &registry.Service{
-			Name:    s.Name(),
-			Version: s.Version(),
-			// Metadata: s.Metadata(),
-			// Endpoints: s.Endpoints,
-			// Nodes:     []*registry.Node{node},
-		}
-		fmt.Println(info)
-		var options registry.RegisterOptions
-		for _, o := range opts {
-			o(&options)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), e.options.Timeout)
-		defer cancel()
-		var leaseRsp *clientv3.LeaseGrantResponse
-		if options.TTL.Seconds() > 0 {
-			// get a lease used to expire keys since we have a ttl
-			leaseRsp, err = e.client.Grant(ctx, int64(options.TTL.Seconds()))
-			if err != nil {
-				return err
-			}
-			if leaseRsp != nil {
-				_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), encode(service), clientv3.WithLease(lgr.ID))
-			} else {
-				_, err = e.client.Put(ctx, nodePath(service.Name, node.Id), encode(service))
-			}
-		}
+	//new lease
+	rsp, err := e.client.Grant(ctx, int64(e.opts.leaseTTL.Seconds()))
+	if err != nil {
+		return leaseID, err
+	}
+	e.Lock()
+	e.leases[k] = rsp.ID
+	e.Unlock()
+	return rsp.ID, nil
+}
 
+func (e *etcdRegistry) Register(s Service) error {
+	key := fmt.Sprintf("%v/%v/%v", prefix, s.Name(), s.UUID())
+	ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
+	defer cancel()
+	if e.opts.leaseTTL.Seconds() > 0 {
+		leaseID, err := e.loadLeaseID(key)
+		if err != nil {
+			return err
+		}
+		// info := &registry.Service{
+		// 	Name:    s.Name(),
+		// 	Version: s.Version(),
+		// 	// Metadata: s.Metadata(),
+		// 	// Endpoints: s.Endpoints,
+		// 	// Nodes:     []*registry.Node{node},
+		// }
+		_, err = e.client.Put(ctx, key, s.Encode(), clientv3.WithLease(leaseID))
+		return err
 	}
+	_, err := e.client.Put(ctx, key, s.Encode())
+	return err
 }
 
 func (e *etcdRegistry) Deregister(s Service) error {

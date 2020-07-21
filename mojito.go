@@ -58,7 +58,6 @@ func (app *App) runHooks(stage string) {
 
 //Init ..
 func Init(opts ...AppOptions) *App {
-
 	app := &App{
 		ctx:             context.Background(),
 		hooks:           make(map[string][]HookFunc),

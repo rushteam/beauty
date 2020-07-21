@@ -25,6 +25,7 @@ type Service interface {
 	Name() string
 	UUID() string
 	Version() string
+	Encode() string
 }
 
 //Node info
@@ -47,6 +48,10 @@ type Value struct {
 	Name   string   `json:"name"`
 	Type   string   `json:"type"`
 	Values []*Value `json:"values"`
+}
+
+func encode() string {
+	return ""
 }
 
 //Registry ..

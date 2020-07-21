@@ -10,6 +10,8 @@ import (
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
+var prefix = "/mojito/service/"
+
 var _ Registry = (*etcdRegistry)(nil)
 
 type etcdRegistry struct {
@@ -79,7 +81,7 @@ func (e *etcdRegistry) loadLeaseID(k string) (clientv3.LeaseID, error) {
 }
 
 func (e *etcdRegistry) Register(s Service) error {
-	key := fmt.Sprintf("%v/%v/%v", prefix, s.Name(), s.UUID())
+	key := fmt.Sprintf("%v/%v/%v", prefix, s.String(), s.ID())
 	ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
 	defer cancel()
 	if e.opts.leaseTTL.Seconds() > 0 {

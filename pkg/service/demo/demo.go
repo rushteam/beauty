@@ -6,19 +6,18 @@ import (
 	"time"
 
 	"github.com/rushteam/mojito"
-	"github.com/rushteam/mojito/pkg/service"
 )
 
 // New ..
-func New(opts ...service.OptionsFunc) mojito.Service {
+func New(opts ...mojito.OptionsFunc) mojito.Service {
 	return &Demo{
-		opts: service.NewOptions("demo", opts...),
+		opts: mojito.NewOptions("demo", opts...),
 	}
 }
 
 // Demo is a demo service
 type Demo struct {
-	opts   mojito.ServiceOptions
+	opts   *mojito.Options
 	closed chan struct{}
 }
 
@@ -43,6 +42,6 @@ func (d *Demo) Close(ctx context.Context) error {
 }
 
 //Options ..
-func (d *Demo) Options() mojito.ServiceOptions {
+func (d *Demo) Options() *mojito.Options {
 	return d.opts
 }

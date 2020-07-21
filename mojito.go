@@ -13,16 +13,9 @@ import (
 
 //Service ..
 type Service interface {
-	Options() ServiceOptions
+	Options() *Options
 	Start() error
 	Close(context.Context) error
-}
-
-//ServiceOptions ..
-type ServiceOptions interface {
-	Name() string
-	Version() string
-	Metadata() map[string]string
 }
 
 //AppOptions ..
@@ -67,8 +60,8 @@ func Init(opts ...AppOptions) *App {
 	}
 	logger, _ := zap.NewDevelopment()
 	app.SetLogger(logger)
-	registry, _ := registry.NewEtcdRegistry()
-	app.SetRegistry(registry)
+	reg, _ := registry.NewEtcdRegistry()
+	app.SetRegistry(reg)
 	for _, opt := range opts {
 		opt(app)
 	}
@@ -92,10 +85,11 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
+			app.registry.Register(srv.Options())
 			app.cycle.Run(func() error {
 				return srv.Start()
 			})
-			app.logger.Info("start", zap.String("service", srv.Options().Name()))
+			app.logger.Info("start", zap.String("service", srv.Options().Name))
 		}(srv)
 	}
 	app.runHooks("after_start")

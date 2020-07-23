@@ -28,7 +28,7 @@ type etcdRegistry struct {
 //LoadEtcdRegistry ..
 func LoadEtcdRegistry() (Registry, error) {
 	config := clientv3.Config{
-		Endpoints: []string{"127.0.0.1:2379"},
+		Endpoints: []string{"http://127.0.0.1:2379"},
 	}
 	return NewEtcdRegistry(config)
 }

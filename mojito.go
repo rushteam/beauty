@@ -60,7 +60,7 @@ func Init(opts ...AppOptions) *App {
 	}
 	logger, _ := zap.NewDevelopment()
 	app.SetLogger(logger)
-	reg, _ := registry.NewEtcdRegistry()
+	reg, _ := registry.LoadEtcdRegistry()
 	app.SetRegistry(reg)
 	for _, opt := range opts {
 		opt(app)

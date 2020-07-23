@@ -25,17 +25,20 @@ type etcdRegistry struct {
 	config clientv3.Config
 }
 
-//NewEtcdRegistry ..
-func NewEtcdRegistry(endpoints ...string) (Registry, error) {
-	if len(endpoints) == 0 {
-		endpoints = []string{"127.0.0.1:2739"}
+//LoadEtcdRegistry ..
+func LoadEtcdRegistry() (Registry, error) {
+	config := clientv3.Config{
+		Endpoints: []string{"127.0.0.1:2379"},
 	}
+	return NewEtcdRegistry(config)
+}
+
+//NewEtcdRegistry ..
+func NewEtcdRegistry(config clientv3.Config) (Registry, error) {
 	e := &etcdRegistry{
 		leases: make(map[string]clientv3.LeaseID),
 	}
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: endpoints,
-	})
+	client, err := clientv3.New(config)
 	if err != nil {
 		return nil, err
 	}
@@ -53,31 +56,21 @@ func (e *etcdRegistry) loadLeaseID(k string) (clientv3.LeaseID, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
 	defer cancel()
 	//from etcd
-	if rsp, err := e.client.Get(ctx, k, clientv3.WithSerializable()); err == nil {
-		for _, kv := range rsp.Kvs {
-			if kv.Lease > 0 {
-				leaseID = clientv3.LeaseID(kv.Lease)
-				e.Lock()
-				e.leases[k] = leaseID
-				e.Unlock()
-				break
+	if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
+		if err == rpctypes.ErrLeaseNotFound {
+			//new lease
+			rsp, err := e.client.Grant(ctx, int64(e.opts.leaseTTL.Seconds()))
+			if err != nil {
+				return leaseID, err
 			}
+			e.Lock()
+			e.leases[k] = rsp.ID
+			e.Unlock()
+			return rsp.ID, nil
 		}
-		if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
-			if err != rpctypes.ErrLeaseNotFound {
-				return leaseID, nil
-			}
-		}
-	}
-	//new lease
-	rsp, err := e.client.Grant(ctx, int64(e.opts.leaseTTL.Seconds()))
-	if err != nil {
 		return leaseID, err
 	}
-	e.Lock()
-	e.leases[k] = rsp.ID
-	e.Unlock()
-	return rsp.ID, nil
+	return leaseID, nil
 }
 
 func (e *etcdRegistry) Register(s Service) error {
@@ -89,13 +82,6 @@ func (e *etcdRegistry) Register(s Service) error {
 		if err != nil {
 			return err
 		}
-		// info := &registry.Service{
-		// 	Name:    s.Name(),
-		// 	Version: s.Version(),
-		// 	// Metadata: s.Metadata(),
-		// 	// Endpoints: s.Endpoints,
-		// 	// Nodes:     []*registry.Node{node},
-		// }
 		_, err = e.client.Put(ctx, key, s.Encode(), clientv3.WithLease(leaseID))
 		return err
 	}

@@ -9,9 +9,9 @@ import (
 
 func main() {
 	app := mojito.Init()
-	d1 := demo.New()
-	d2 := demo.New()
-	err := app.Run(d1, d2)
+	s1 := demo.New()
+	s2 := demo.New()
+	err := app.Run(s1, s2)
 	if err != nil {
 		log.Fatalln(err)
 	}

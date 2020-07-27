@@ -1,8 +1,13 @@
 package registry
 
+import (
+	"context"
+	"time"
+)
+
 //Registry ..
 type Registry interface {
-	Register(s Service) error
+	Register(s Service, ttl time.Duration) error
 	Deregister(s Service) error
 }
 
@@ -11,6 +16,7 @@ type Service interface {
 	String() string
 	ID() string
 	Encode() string
+	Context() context.Context
 }
 
 //Service info

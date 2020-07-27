@@ -85,7 +85,9 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
-			app.registry.Register(srv.Options())
+			if err := app.registry.Register(srv.Options(), 5*time.Second); err != nil {
+				app.logger.Error("register error", zap.String("service", srv.Options().Name), zap.Error(err))
+			}
 			app.cycle.Run(func() error {
 				return srv.Start()
 			})
@@ -114,13 +116,12 @@ func (app *App) Shutdown() {
 	select {
 	case <-app.cycle.Done():
 		app.logger.Info("grace shutdown")
-		app.cycle.Close()
 		//正常结束
 	case <-ctx.Done():
 		//超时
 		app.logger.Info("timeout shutdown")
-		app.cycle.Close()
 	}
+	app.cycle.Close()
 	return
 }
 

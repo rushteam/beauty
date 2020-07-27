@@ -6,23 +6,19 @@ import (
 	"sync"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
-var prefix = "/mojito/service/"
+var prefix = "/mojito/service"
 
 var _ Registry = (*etcdRegistry)(nil)
 
 type etcdRegistry struct {
 	sync.RWMutex
-	client *clientv3.Client
-	leases map[string]clientv3.LeaseID
-	opts   struct {
-		Timeout  time.Duration
-		leaseTTL time.Duration
-	}
-	config clientv3.Config
+	client  *clientv3.Client
+	leases  map[string]clientv3.LeaseID
+	timeout time.Duration
 }
 
 //LoadEtcdRegistry ..
@@ -36,7 +32,8 @@ func LoadEtcdRegistry() (Registry, error) {
 //NewEtcdRegistry ..
 func NewEtcdRegistry(config clientv3.Config) (Registry, error) {
 	e := &etcdRegistry{
-		leases: make(map[string]clientv3.LeaseID),
+		leases:  make(map[string]clientv3.LeaseID),
+		timeout: 5 * time.Second,
 	}
 	client, err := clientv3.New(config)
 	if err != nil {
@@ -45,44 +42,43 @@ func NewEtcdRegistry(config clientv3.Config) (Registry, error) {
 	e.client = client
 	return e, nil
 }
-func (e *etcdRegistry) loadLeaseID(k string) (clientv3.LeaseID, error) {
-	//from struct cache
+func (e *etcdRegistry) loadLeaseID(ctx context.Context, k string, ttl time.Duration) (clientv3.LeaseID, error) {
 	e.RLock()
 	leaseID, ok := e.leases[k]
 	e.RUnlock()
 	if ok {
+		if _, err := e.client.KeepAliveOnce(ctx, leaseID); err != nil {
+			if err == rpctypes.ErrLeaseNotFound {
+				goto grant
+			}
+			return leaseID, err
+		}
 		return leaseID, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
-	defer cancel()
-	//from etcd
-	if _, err := e.client.KeepAliveOnce(context.TODO(), leaseID); err != nil {
-		if err == rpctypes.ErrLeaseNotFound {
-			//new lease
-			rsp, err := e.client.Grant(ctx, int64(e.opts.leaseTTL.Seconds()))
-			if err != nil {
-				return leaseID, err
-			}
-			e.Lock()
-			e.leases[k] = rsp.ID
-			e.Unlock()
-			return rsp.ID, nil
-		}
+grant:
+	rsp, err := e.client.Grant(ctx, int64(ttl.Seconds()))
+	if err != nil {
 		return leaseID, err
 	}
-	return leaseID, nil
+	e.Lock()
+	e.leases[k] = rsp.ID
+	e.Unlock()
+	return rsp.ID, nil
 }
 
-func (e *etcdRegistry) Register(s Service) error {
+func (e *etcdRegistry) Register(s Service, ttl time.Duration) error {
 	key := fmt.Sprintf("%v/%v/%v", prefix, s.String(), s.ID())
-	ctx, cancel := context.WithTimeout(context.Background(), e.opts.Timeout)
+	ctx, cancel := context.WithTimeout(s.Context(), e.timeout)
 	defer cancel()
-	if e.opts.leaseTTL.Seconds() > 0 {
-		leaseID, err := e.loadLeaseID(key)
+	if ttl.Seconds() > 0 {
+		leaseID, err := e.loadLeaseID(ctx, key, ttl)
 		if err != nil {
 			return err
 		}
-		_, err = e.client.Put(ctx, key, s.Encode(), clientv3.WithLease(leaseID))
+		if _, err = e.client.Put(ctx, key, s.Encode(), clientv3.WithLease(leaseID)); err != nil {
+			return err
+		}
+		_, err = e.client.KeepAlive(s.Context(), leaseID)
 		return err
 	}
 	_, err := e.client.Put(ctx, key, s.Encode())

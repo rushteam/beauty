@@ -1,6 +1,7 @@
 package mojito
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -62,6 +63,11 @@ func (o *Options) ID() string {
 //Version ...
 func (o *Options) Version() string {
 	return o.Vers
+}
+
+//Context ...
+func (o *Options) Context() context.Context {
+	return context.TODO()
 }
 
 //Metadata ...

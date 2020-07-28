@@ -7,7 +7,7 @@ import (
 
 //Registry ..
 type Registry interface {
-	Register(s Service, ttl time.Duration) error
+	Register(ctx context.Context, s Service, ttl time.Duration) error
 	Deregister(s Service) error
 }
 

@@ -66,22 +66,22 @@ grant:
 	return rsp.ID, nil
 }
 
-func (e *etcdRegistry) Register(s Service, ttl time.Duration) error {
+func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duration) error {
 	key := fmt.Sprintf("%v/%v/%v", prefix, s.String(), s.ID())
-	ctx, cancel := context.WithTimeout(s.Context(), e.timeout)
+	ctxTimeout, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	if ttl.Seconds() > 0 {
-		leaseID, err := e.loadLeaseID(ctx, key, ttl)
+		leaseID, err := e.loadLeaseID(ctxTimeout, key, ttl)
 		if err != nil {
 			return err
 		}
-		if _, err = e.client.Put(ctx, key, s.Encode(), clientv3.WithLease(leaseID)); err != nil {
+		if _, err = e.client.Put(ctxTimeout, key, s.Encode(), clientv3.WithLease(leaseID)); err != nil {
 			return err
 		}
-		_, err = e.client.KeepAlive(s.Context(), leaseID)
+		_, err = e.client.KeepAlive(ctx, leaseID)
 		return err
 	}
-	_, err := e.client.Put(ctx, key, s.Encode())
+	_, err := e.client.Put(ctxTimeout, key, s.Encode())
 	return err
 }
 

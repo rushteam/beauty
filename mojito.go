@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rushteam/mojito/pkg/lifecycle"
+	"github.com/rushteam/mojito/pkg/log"
 	"github.com/rushteam/mojito/pkg/registry"
 	"github.com/rushteam/mojito/pkg/signals"
 	"go.uber.org/zap"
@@ -58,8 +59,7 @@ func Init(opts ...AppOptions) *App {
 		quit:            make(chan struct{}),
 		cycle:           lifecycle.NewCycle(),
 	}
-	logger, _ := zap.NewDevelopment()
-	app.SetLogger(logger)
+	app.SetLogger(log.DefaultLogger)
 	reg, _ := registry.LoadEtcdRegistry()
 	app.SetRegistry(reg)
 	for _, opt := range opts {
@@ -85,10 +85,17 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
-			if err := app.registry.Register(context.TODO(), srv.Options(), 5*time.Second); err != nil {
-				app.logger.Error("register error", zap.String("service", srv.Options().Name), zap.Error(err))
-			}
 			app.cycle.Run(func() error {
+				//Register service
+				if err := app.registry.Register(context.TODO(), srv.Options(), 5*time.Second); err != nil {
+					app.logger.Error("register error", zap.String("service", srv.Options().Name), zap.Error(err))
+				}
+				//Deregister service
+				defer func() {
+					if err := app.registry.Deregister(context.TODO(), srv.Options()); err != nil {
+						app.logger.Error("deregister error", zap.String("service", srv.Options().Name), zap.Error(err))
+					}
+				}()
 				return srv.Start()
 			})
 			app.logger.Info("start", zap.String("service", srv.Options().Name))
@@ -96,7 +103,10 @@ func (app *App) Run(service ...Service) error {
 	}
 	app.runHooks("after_start")
 	defer app.logger.Sync()
-	<-app.cycle.Wait()
+	err := <-app.cycle.Wait()
+	if err != nil {
+		app.logger.Error("exit error", zap.Error(err))
+	}
 	return nil
 }
 

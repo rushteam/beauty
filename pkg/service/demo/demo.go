@@ -2,7 +2,6 @@ package demo
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/rushteam/mojito"
@@ -23,7 +22,6 @@ type Demo struct {
 
 // Start ..
 func (d *Demo) Start() error {
-	log.Println("demo start")
 	d.closed = make(chan struct{})
 	select {
 	case <-d.closed:

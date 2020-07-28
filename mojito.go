@@ -115,7 +115,7 @@ func (app *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
 	defer cancel()
 	pid := os.Getpid()
-	app.logger.Debug("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
+	app.logger.Info("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
 	for _, srv := range app.service {
 		func(srv Service) {
 			app.cycle.Run(func() error {

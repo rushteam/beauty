@@ -65,11 +65,11 @@ grant:
 	e.Unlock()
 	return rsp.ID, nil
 }
-func serviceKey(s Service) string {
+func keyService(s Service) string {
 	return fmt.Sprintf("%v/%v/%v", prefix, s.String(), s.ID())
 }
 func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duration) error {
-	key := serviceKey(s)
+	key := keyService(s)
 	ctxTimeout, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	if ttl.Seconds() > 0 {
@@ -88,7 +88,7 @@ func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duratio
 }
 
 func (e *etcdRegistry) Deregister(ctx context.Context, s Service) error {
-	key := serviceKey(s)
+	key := keyService(s)
 	e.Lock()
 	leaseID, ok := e.leases[key]
 	if ok {
@@ -98,5 +98,15 @@ func (e *etcdRegistry) Deregister(ctx context.Context, s Service) error {
 	if ok {
 		e.client.Revoke(ctx, leaseID)
 	}
+	return nil
+}
+
+func (e *etcdRegistry) Discover(ctx context.Context, name string) (Service, error) {
+	key := fmt.Sprintf("%v/%v/", prefix, name)
+	rsp, err := e.client.Get(ctx, key, clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
+	fmt.Println(rsp)
 	return nil
 }

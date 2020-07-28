@@ -9,6 +9,7 @@ import (
 type Registry interface {
 	Register(ctx context.Context, s Service, ttl time.Duration) error
 	Deregister(ctx context.Context, s Service) error
+	Discover(ctx context.Context, kind, name string) error
 }
 
 //Service ..
@@ -16,7 +17,6 @@ type Service interface {
 	String() string
 	ID() string
 	Encode() string
-	Context() context.Context
 }
 
 //Service info

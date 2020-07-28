@@ -85,7 +85,7 @@ func (app *App) Run(service ...Service) error {
 	app.runHooks("before_start")
 	for _, srv := range app.service {
 		func(srv Service) {
-			if err := app.registry.Register(srv.Options(), 5*time.Second); err != nil {
+			if err := app.registry.Register(context.TODO(), srv.Options(), 5*time.Second); err != nil {
 				app.logger.Error("register error", zap.String("service", srv.Options().Name), zap.Error(err))
 			}
 			app.cycle.Run(func() error {

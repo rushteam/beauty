@@ -6,6 +6,6 @@ import "go.uber.org/zap"
 var DefaultLogger *zap.Logger
 
 func init() {
-	// DefaultLogger, _ = zap.NewDevelopment()
-	DefaultLogger, _ = zap.NewProduction()
+	DefaultLogger, _ = zap.NewDevelopment()
+	// DefaultLogger, _ = zap.NewProduction()
 }

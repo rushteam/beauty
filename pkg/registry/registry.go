@@ -9,24 +9,25 @@ import (
 type Registry interface {
 	Register(ctx context.Context, s Service, ttl time.Duration) error
 	Deregister(ctx context.Context, s Service) error
-	Discover(ctx context.Context, kind, name string) error
+	Discover(ctx context.Context, service string) error
 }
 
 //Service ..
-type Service interface {
-	String() string
-	ID() string
-	Encode() string
-}
+// type Service interface {
+// 	String() string
+// 	ID() string
+// 	Encode() string
+// }
 
 //Service info
-// type Service struct {
-// 	Name     string            `json:"name"`
-// 	Version  string            `json:"version"`
-// 	Metadata map[string]string `json:"metadata"`
-// 	// Endpoints []*Endpoint       `json:"endpoints"`
-// 	// Nodes     []*Node           `json:"nodes"`
-// }
+type Service struct {
+	Name     string            `json:"name"`
+	Version  string            `json:"version"`
+	Metadata map[string]string `json:"metadata"`
+	// Endpoints []*Endpoint       `json:"endpoints"`
+	// Nodes     []*Node           `json:"nodes"`
+}
+
 // type Service interface {
 // 	String() string
 // 	ID() string

@@ -5,19 +5,24 @@ import (
 	"time"
 
 	"github.com/rushteam/mojito"
+	"github.com/rushteam/mojito/pkg/registry"
 )
 
 // New ..
-func New(opts ...mojito.OptionsFunc) mojito.Service {
+func New() mojito.Service {
 	return &Demo{
-		opts: mojito.NewOptions("demo", opts...),
+		service: registry.Service{
+			Namespace: "defalut",
+			Kind:      "demo",
+			Name:      "demo",
+		},
 	}
 }
 
 // Demo is a demo service
 type Demo struct {
-	opts   *mojito.Options
-	closed chan struct{}
+	service registry.Service
+	closed  chan struct{}
 }
 
 // Start ..
@@ -39,7 +44,7 @@ func (d *Demo) Close(ctx context.Context) error {
 	return nil
 }
 
-//Options ..
-func (d *Demo) Options() *mojito.Options {
-	return d.opts
+//Service ..
+func (d *Demo) Service() registry.Service {
+	return d.service
 }

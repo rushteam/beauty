@@ -12,13 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-//Service ..
-type Service interface {
-	Options() *Options
-	Start() error
-	Close(context.Context) error
-}
-
 //AppOptions ..
 type AppOptions func(app *App)
 
@@ -87,18 +80,18 @@ func (app *App) Run(service ...Service) error {
 		func(srv Service) {
 			app.cycle.Run(func() error {
 				//Register service
-				if err := app.registry.Register(context.TODO(), srv.Options(), 5*time.Second); err != nil {
-					app.logger.Error("register error", zap.String("service", srv.Options().Name), zap.Error(err))
+				if err := app.registry.Register(context.TODO(), srv.Service(), 5*time.Second); err != nil {
+					app.logger.Error("register error", zap.String("service", srv.Service().Name), zap.Error(err))
 				}
 				//Deregister service
 				defer func() {
-					if err := app.registry.Deregister(context.TODO(), srv.Options()); err != nil {
-						app.logger.Error("deregister error", zap.String("service", srv.Options().Name), zap.Error(err))
+					if err := app.registry.Deregister(context.TODO(), srv.Service()); err != nil {
+						app.logger.Error("deregister error", zap.String("service", srv.Service().Name), zap.Error(err))
 					}
 				}()
 				return srv.Start()
 			})
-			app.logger.Info("start", zap.String("service", srv.Options().Name))
+			app.logger.Info("start", zap.String("service", srv.Service().Name))
 		}(srv)
 	}
 	app.runHooks("after_start")

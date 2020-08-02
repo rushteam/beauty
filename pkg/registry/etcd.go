@@ -2,7 +2,6 @@ package registry
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -65,11 +64,9 @@ grant:
 	e.Unlock()
 	return rsp.ID, nil
 }
-func keyService(s Service) string {
-	return fmt.Sprintf("%v/%v/%v", prefix, s.String(), s.ID())
-}
 func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duration) error {
-	key := keyService(s)
+	key := s.String()
+	val := string(s.Marshal())
 	ctxTimeout, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	if ttl.Seconds() > 0 {
@@ -77,18 +74,18 @@ func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duratio
 		if err != nil {
 			return err
 		}
-		if _, err = e.client.Put(ctxTimeout, key, s.Encode(), clientv3.WithLease(leaseID)); err != nil {
+		if _, err = e.client.Put(ctxTimeout, key, val, clientv3.WithLease(leaseID)); err != nil {
 			return err
 		}
 		_, err = e.client.KeepAlive(ctx, leaseID)
 		return err
 	}
-	_, err := e.client.Put(ctxTimeout, key, s.Encode())
+	_, err := e.client.Put(ctxTimeout, key, val)
 	return err
 }
 
 func (e *etcdRegistry) Deregister(ctx context.Context, s Service) error {
-	key := keyService(s)
+	key := s.String()
 	e.Lock()
 	leaseID, ok := e.leases[key]
 	if ok {
@@ -101,12 +98,20 @@ func (e *etcdRegistry) Deregister(ctx context.Context, s Service) error {
 	return nil
 }
 
-func (e *etcdRegistry) Discover(ctx context.Context, name string) (Service, error) {
-	key := fmt.Sprintf("%v/%v/", prefix, name)
+func (e *etcdRegistry) Discover(ctx context.Context, namespace, kind, name string) ([]*Service, error) {
+	var serviceNodes []*Service
+	key := String(namespace, kind, name)
 	rsp, err := e.client.Get(ctx, key, clientv3.WithPrefix())
 	if err != nil {
-		return err
+		return serviceNodes, err
 	}
-	fmt.Println(rsp)
-	return nil
+	for _, kv := range rsp.Kvs {
+		serviceNodes = append(serviceNodes, Unmarshal(kv.Value))
+	}
+	return serviceNodes, nil
+}
+func (e *etcdRegistry) Services(ctx context.Context, namespace string) ([]*Service, error) {
+	var serviceNodes []*Service
+	//todo
+	return serviceNodes, nil
 }

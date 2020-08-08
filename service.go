@@ -12,5 +12,5 @@ import (
 type Service interface {
 	Start() error
 	Close(context.Context) error
-	Service() registry.Service
+	Service() *registry.Service
 }

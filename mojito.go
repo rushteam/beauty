@@ -81,17 +81,17 @@ func (app *App) Run(service ...Service) error {
 			app.cycle.Run(func() error {
 				//Register service
 				if err := app.registry.Register(context.TODO(), srv.Service(), 5*time.Second); err != nil {
-					app.logger.Error("register error", zap.String("service", srv.Service().Name), zap.Error(err))
+					app.logger.Error("register error", zap.String("service", srv.Service().String()), zap.Error(err))
 				}
 				//Deregister service
 				defer func() {
 					if err := app.registry.Deregister(context.TODO(), srv.Service()); err != nil {
-						app.logger.Error("deregister error", zap.String("service", srv.Service().Name), zap.Error(err))
+						app.logger.Error("deregister error", zap.String("service", srv.Service().String()), zap.Error(err))
 					}
 				}()
 				return srv.Start()
 			})
-			app.logger.Info("start", zap.String("service", srv.Service().Name))
+			app.logger.Info("start", zap.String("service", srv.Service().String()))
 		}(srv)
 	}
 	app.runHooks("after_start")

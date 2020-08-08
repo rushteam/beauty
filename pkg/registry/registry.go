@@ -9,8 +9,8 @@ import (
 
 //Registry ..
 type Registry interface {
-	Register(ctx context.Context, s Service, ttl time.Duration) error
-	Deregister(ctx context.Context, s Service) error
+	Register(ctx context.Context, s *Service, ttl time.Duration) error
+	Deregister(ctx context.Context, s *Service) error
 	Discover(ctx context.Context, namespace, kind, name string) ([]*Service, error)
 	Services(ctx context.Context, namespace string) ([]*Service, error)
 }

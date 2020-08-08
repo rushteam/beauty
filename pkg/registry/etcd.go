@@ -64,7 +64,7 @@ grant:
 	e.Unlock()
 	return rsp.ID, nil
 }
-func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duration) error {
+func (e *etcdRegistry) Register(ctx context.Context, s *Service, ttl time.Duration) error {
 	key := s.String()
 	val := string(s.Marshal())
 	ctxTimeout, cancel := context.WithTimeout(ctx, e.timeout)
@@ -84,7 +84,7 @@ func (e *etcdRegistry) Register(ctx context.Context, s Service, ttl time.Duratio
 	return err
 }
 
-func (e *etcdRegistry) Deregister(ctx context.Context, s Service) error {
+func (e *etcdRegistry) Deregister(ctx context.Context, s *Service) error {
 	key := s.String()
 	e.Lock()
 	leaseID, ok := e.leases[key]

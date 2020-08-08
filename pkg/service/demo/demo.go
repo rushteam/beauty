@@ -11,7 +11,7 @@ import (
 // New ..
 func New() mojito.Service {
 	return &Demo{
-		service: registry.Service{
+		service: &registry.Service{
 			Namespace: "defalut",
 			Kind:      "demo",
 			Name:      "demo",
@@ -21,7 +21,7 @@ func New() mojito.Service {
 
 // Demo is a demo service
 type Demo struct {
-	service registry.Service
+	service *registry.Service
 	closed  chan struct{}
 }
 
@@ -45,6 +45,6 @@ func (d *Demo) Close(ctx context.Context) error {
 }
 
 //Service ..
-func (d *Demo) Service() registry.Service {
+func (d *Demo) Service() *registry.Service {
 	return d.service
 }

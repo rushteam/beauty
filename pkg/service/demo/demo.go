@@ -26,7 +26,7 @@ type Demo struct {
 }
 
 // Start ..
-func (d *Demo) Start() error {
+func (d *Demo) Start(ctx context.Context) error {
 	d.closed = make(chan struct{})
 	select {
 	case <-d.closed:
@@ -37,8 +37,8 @@ func (d *Demo) Start() error {
 	}
 }
 
-// Close ..
-func (d *Demo) Close(ctx context.Context) error {
+// Stop ..
+func (d *Demo) Stop(ctx context.Context) error {
 	// time.Sleep(time.Second * 8)
 	close(d.closed)
 	return nil

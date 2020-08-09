@@ -10,7 +10,7 @@ import (
 
 //Service ..
 type Service interface {
-	Start() error
-	Close(context.Context) error
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
 	Service() *registry.Service
 }

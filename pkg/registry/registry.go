@@ -15,12 +15,45 @@ type Registry interface {
 	Services(ctx context.Context, namespace string) ([]*Service, error)
 }
 
-//Service ..
-// type Service interface {
-// 	String() string
-// 	ID() string
-// 	Encode() string
-// }
+//Optipns ..
+type Optipns func(s *Service)
+
+//WithNamespace ..
+func WithNamespace(p string) Optipns {
+	return func(s *Service) {
+		s.Namespace = p
+	}
+}
+
+//WithKind ..
+func WithKind(p string) Optipns {
+	return func(s *Service) {
+		s.Kind = p
+	}
+}
+
+//WithVersion ..
+func WithVersion(p string) Optipns {
+	return func(s *Service) {
+		s.Version = p
+	}
+}
+
+//WithName ..
+func WithName(p string) Optipns {
+	return func(s *Service) {
+		s.Name = p
+	}
+}
+
+//NewService ..
+func NewService(opts ...Optipns) *Service {
+	s := &Service{}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
 
 //Service info
 type Service struct {

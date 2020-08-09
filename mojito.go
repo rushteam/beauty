@@ -89,7 +89,7 @@ func (app *App) Run(service ...Service) error {
 						app.logger.Error("deregister error", zap.String("service", srv.Service().String()), zap.Error(err))
 					}
 				}()
-				return srv.Start()
+				return srv.Start(context.Background())
 			})
 			app.logger.Info("start", zap.String("service", srv.Service().String()))
 		}(srv)
@@ -112,8 +112,9 @@ func (app *App) Shutdown() {
 	for _, srv := range app.service {
 		func(srv Service) {
 			app.cycle.Run(func() error {
-				return srv.Close(ctx)
+				return srv.Stop(ctx)
 			})
+			app.logger.Info("stop", zap.String("service", srv.Service().String()))
 		}(srv)
 	}
 	select {

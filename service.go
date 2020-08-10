@@ -1,9 +1,9 @@
-package mojito
+package beauty
 
 import (
 	"context"
 
-	"github.com/rushteam/mojito/pkg/registry"
+	"github.com/rushteam/beauty/pkg/registry"
 )
 
 // var _ registry.Service = (*Options)(nil)

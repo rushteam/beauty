@@ -1,14 +1,14 @@
-package mojito
+package beauty
 
 import (
 	"context"
 	"os"
 	"time"
 
-	"github.com/rushteam/mojito/pkg/lifecycle"
-	"github.com/rushteam/mojito/pkg/log"
-	"github.com/rushteam/mojito/pkg/registry"
-	"github.com/rushteam/mojito/pkg/signals"
+	"github.com/rushteam/beauty/pkg/lifecycle"
+	"github.com/rushteam/beauty/pkg/log"
+	"github.com/rushteam/beauty/pkg/registry"
+	"github.com/rushteam/beauty/pkg/signals"
 	"go.uber.org/zap"
 )
 

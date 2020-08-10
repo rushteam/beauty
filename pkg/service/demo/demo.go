@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/rushteam/mojito"
-	"github.com/rushteam/mojito/pkg/registry"
+	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/registry"
 )
 
 // New ..
-func New() mojito.Service {
+func New() beauty.Service {
 	return &Demo{
 		service: &registry.Service{
 			Namespace: "defalut",

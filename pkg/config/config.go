@@ -27,8 +27,3 @@ func New(env, name string) (*Config, error) {
 	c := &Config{Viper: v}
 	return c, nil
 }
-
-//Env return env
-func Env() string {
-	return "dev"
-}

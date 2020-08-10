@@ -4,24 +4,24 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rushteam/mojito"
-	"github.com/rushteam/mojito/pkg/service/web"
+	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/service/web"
 )
 
 func main() {
-	app := mojito.Init()
+	app := beauty.Init()
 	err := app.Run(service())
 	if err != nil {
 		log.Fatalln(err)
 	}
 }
-func service() mojito.Service {
+func service() beauty.Service {
 	api, err := web.Build("api")
 	if err != nil {
 		log.Fatalln(err)
 	}
 	api.GET("/", func(c *gin.Context) {
-		c.String(200, "hi mojito")
+		c.String(200, "hi beauty")
 	})
 	return api
 }

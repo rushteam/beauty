@@ -1,2 +1,2 @@
-# mojito
-mojito a micro service
+# beauty
+beauty a micro service

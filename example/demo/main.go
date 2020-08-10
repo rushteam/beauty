@@ -3,12 +3,12 @@ package main
 import (
 	"log"
 
-	"github.com/rushteam/mojito"
-	"github.com/rushteam/mojito/pkg/service/demo"
+	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/service/demo"
 )
 
 func main() {
-	app := mojito.Init()
+	app := beauty.Init()
 	s1 := demo.New()
 	s2 := demo.New()
 	err := app.Run(s1, s2)

@@ -9,7 +9,7 @@ import (
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
-var prefix = "/mojito/service"
+var prefix = "/beauty/service"
 
 var _ Registry = (*etcdRegistry)(nil)
 

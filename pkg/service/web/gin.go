@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rushteam/mojito/pkg/config"
-	"github.com/rushteam/mojito/pkg/log"
-	"github.com/rushteam/mojito/pkg/registry"
+	"github.com/rushteam/beauty/pkg/config"
+	"github.com/rushteam/beauty/pkg/log"
+	"github.com/rushteam/beauty/pkg/registry"
 )
 
 //ServiceKind ..

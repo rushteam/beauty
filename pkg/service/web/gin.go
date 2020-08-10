@@ -23,7 +23,7 @@ func Build(name string) (*Web, error) {
 		},
 		Engine: gin.New(),
 		Mode:   gin.DebugMode,
-		Addr:   ":8080",
+		Addr:   ":http",
 	}
 	if conf, err := config.New(config.Env(), name); err == nil {
 		s.Mode = conf.GetString(ServiceKind + ".mode")

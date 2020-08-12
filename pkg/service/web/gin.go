@@ -21,20 +21,23 @@ func Build(name string) (*Web, error) {
 			Kind: ServiceKind,
 			Name: name,
 		},
-		Engine: gin.New(),
-		Mode:   gin.DebugMode,
-		Addr:   ":http",
+		Mode: gin.DebugMode,
+		Addr: ":http",
 	}
 	if conf, err := config.New(config.Env(), name); err == nil {
 		s.Mode = conf.GetString(ServiceKind + ".mode")
 		s.Addr = conf.GetString(ServiceKind + ".addr")
 	} else {
-		log.Logger.Warn("no config file...")
+		log.Warn("no config file...")
 	}
+	if len(s.Mode) > 0 {
+		gin.SetMode(s.Mode)
+	}
+
+	s.Engine = gin.New()
 	s.Server = &http.Server{
 		Handler: s.Engine,
 	}
-	gin.SetMode(s.Mode)
 	return s, nil
 }
 

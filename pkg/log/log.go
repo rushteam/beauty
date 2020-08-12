@@ -2,22 +2,42 @@ package log
 
 import (
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
-
-//DefaultLogger ..
-var DefaultLogger *zap.Logger
 
 //Logger ..
 var Logger *zap.Logger
 
 func init() {
 	// DefaultLogger, _ = zap.NewProduction()
-	DefaultLogger, _ = zap.NewDevelopment()
-	Logger = DefaultLogger
+	Logger, _ = zap.NewDevelopment()
+}
+
+//Debug ..
+func Debug(msg string, fields ...zap.Field) {
+	Logger.Debug(msg, fields...)
 }
 
 //Info ..
-func Info(msg string, fields ...zapcore.Field) {
-	DefaultLogger.Info(msg, fields...)
+func Info(msg string, fields ...zap.Field) {
+	Logger.Info(msg, fields...)
+}
+
+//Warn ..
+func Warn(msg string, fields ...zap.Field) {
+	Logger.Warn(msg, fields...)
+}
+
+//Error ..
+func Error(msg string, fields ...zap.Field) {
+	Logger.Warn(msg, fields...)
+}
+
+//Panic ..
+func Panic(msg string, fields ...zap.Field) {
+	Logger.Panic(msg, fields...)
+}
+
+//Fatal ..
+func Fatal(msg string, fields ...zap.Field) {
+	Logger.Fatal(msg, fields...)
 }

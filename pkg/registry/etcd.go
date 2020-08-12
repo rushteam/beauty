@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/rushteam/beauty/pkg/config"
+	"github.com/rushteam/beauty/pkg/log"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
@@ -20,10 +22,24 @@ type etcdRegistry struct {
 	timeout time.Duration
 }
 
+//ServiceKind ..
+const ServiceKind = "registry.etcd"
+
+//Name ..
+const Name = "etcd"
+
 //LoadEtcdRegistry ..
 func LoadEtcdRegistry() (Registry, error) {
+	var endpoints []string
+	if conf, err := config.New(config.Env(), Name); err == nil {
+		endpoints = conf.GetStringSlice(ServiceKind + ".endpoints")
+	} else {
+		log.Warn("no config file...")
+		endpoints = []string{"http://127.0.0.1:2379"}
+	}
+
 	config := clientv3.Config{
-		Endpoints: []string{"http://127.0.0.1:2379"},
+		Endpoints: endpoints,
 	}
 	return NewEtcdRegistry(config)
 }

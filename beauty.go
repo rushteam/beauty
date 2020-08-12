@@ -52,7 +52,7 @@ func Init(opts ...AppOptions) *App {
 		quit:            make(chan struct{}),
 		cycle:           lifecycle.NewCycle(),
 	}
-	app.SetLogger(log.DefaultLogger)
+	app.SetLogger(log.Logger)
 	reg, _ := registry.LoadEtcdRegistry()
 	app.SetRegistry(reg)
 	for _, opt := range opts {

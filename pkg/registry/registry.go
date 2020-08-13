@@ -78,14 +78,14 @@ type Node struct {
 	Labels  map[string]string `json:"labels"`
 }
 
-//String ..
-func String(namespace, kind, name string) string {
+//naming ..
+func naming(namespace, kind, name string) string {
 	return fmt.Sprintf("%v/%v/%v/%v/", prefix, namespace, kind, name)
 }
 
 //String ..
 func (s *Service) String() string {
-	return fmt.Sprintf("%v%v", String(s.Namespace, s.Kind, s.Name), s.ID)
+	return fmt.Sprintf("%v%v", naming(s.Namespace, s.Kind, s.Name), s.ID)
 }
 
 //Marshal ...

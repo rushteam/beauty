@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/rushteam/beauty/pkg/config"
 	"github.com/rushteam/beauty/pkg/log"
-	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
 var prefix = "/beauty/service"
@@ -17,9 +17,9 @@ var _ Registry = (*etcdRegistry)(nil)
 
 type etcdRegistry struct {
 	sync.RWMutex
-	client  *clientv3.Client
-	leases  map[string]clientv3.LeaseID
-	timeout time.Duration
+	client   *clientv3.Client
+	timeout  time.Duration
+	sessions map[string]*concurrency.Session
 }
 
 //ServiceKind ..
@@ -47,8 +47,8 @@ func LoadEtcdRegistry() (Registry, error) {
 //NewEtcdRegistry ..
 func NewEtcdRegistry(config clientv3.Config) (Registry, error) {
 	e := &etcdRegistry{
-		leases:  make(map[string]clientv3.LeaseID),
-		timeout: 5 * time.Second,
+		timeout:  5 * time.Second,
+		sessions: make(map[string]*concurrency.Session),
 	}
 	client, err := clientv3.New(config)
 	if err != nil {
@@ -57,28 +57,38 @@ func NewEtcdRegistry(config clientv3.Config) (Registry, error) {
 	e.client = client
 	return e, nil
 }
-func (e *etcdRegistry) loadLeaseID(ctx context.Context, k string, ttl time.Duration) (clientv3.LeaseID, error) {
-	e.RLock()
-	leaseID, ok := e.leases[k]
-	e.RUnlock()
+func (reg *etcdRegistry) getSession(k string, opts ...concurrency.SessionOption) (*concurrency.Session, error) {
+	reg.RLock()
+	sess, ok := reg.sessions[k]
+	reg.RUnlock()
 	if ok {
-		if _, err := e.client.KeepAliveOnce(ctx, leaseID); err != nil {
-			if err == rpctypes.ErrLeaseNotFound {
-				goto grant
-			}
-			return leaseID, err
-		}
-		return leaseID, nil
+		return sess, nil
 	}
-grant:
-	rsp, err := e.client.Grant(ctx, int64(ttl.Seconds()))
+	sess, err := concurrency.NewSession(reg.client)
 	if err != nil {
-		return leaseID, err
+		return sess, err
 	}
-	e.Lock()
-	e.leases[k] = rsp.ID
-	e.Unlock()
-	return rsp.ID, nil
+	reg.Lock()
+	reg.sessions[k] = sess
+	reg.Unlock()
+	return sess, nil
+}
+
+func (reg *etcdRegistry) delSession(k string) error {
+	if ttl := reg.Config.ServiceTTL.Seconds(); ttl > 0 {
+		reg.rmu.RLock()
+		sess, ok := reg.sessions[k]
+		reg.rmu.RUnlock()
+		if ok {
+			reg.rmu.Lock()
+			delete(reg.sessions, k)
+			reg.rmu.Unlock()
+			if err := sess.Close(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 func (e *etcdRegistry) Register(ctx context.Context, s *Service, ttl time.Duration) error {
 	key := s.String()
@@ -116,7 +126,7 @@ func (e *etcdRegistry) Deregister(ctx context.Context, s *Service) error {
 
 func (e *etcdRegistry) Discover(ctx context.Context, namespace, kind, name string) ([]*Service, error) {
 	var serviceNodes []*Service
-	key := String(namespace, kind, name)
+	key := naming(namespace, kind, name)
 	rsp, err := e.client.Get(ctx, key, clientv3.WithPrefix())
 	if err != nil {
 		return serviceNodes, err

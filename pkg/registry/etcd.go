@@ -8,16 +8,16 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/rushteam/beauty/pkg/config"
-	"github.com/rushteam/beauty/pkg/log"
 )
 
 var prefix = "/beauty/service"
 
-var _ Registry = (*etcdRegistry)(nil)
+var _ Registry = (*EtcdRegistry)(nil)
 
-type etcdRegistry struct {
+//EtcdRegistry ..
+type EtcdRegistry struct {
 	sync.RWMutex
-	client   *clientv3.Client
+	Client   *clientv3.Client
 	timeout  time.Duration
 	sessions map[string]*concurrency.Session
 }
@@ -28,115 +28,126 @@ const ServiceKind = "registry.etcd"
 //Name ..
 const Name = "etcd"
 
-//LoadEtcdRegistry ..
-func LoadEtcdRegistry() (Registry, error) {
-	var endpoints []string
+//Build ..
+func Build() (*EtcdRegistry, error) {
+	endpoints := []string{"http://127.0.0.1:2379"}
 	if conf, err := config.New(config.Env(), Name); err == nil {
 		endpoints = conf.GetStringSlice(ServiceKind + ".endpoints")
-	} else {
-		log.Warn("no config file...")
-		endpoints = []string{"http://127.0.0.1:2379"}
 	}
-
 	config := clientv3.Config{
 		Endpoints: endpoints,
-	}
-	return NewEtcdRegistry(config)
-}
-
-//NewEtcdRegistry ..
-func NewEtcdRegistry(config clientv3.Config) (Registry, error) {
-	e := &etcdRegistry{
-		timeout:  5 * time.Second,
-		sessions: make(map[string]*concurrency.Session),
 	}
 	client, err := clientv3.New(config)
 	if err != nil {
 		return nil, err
 	}
-	e.client = client
+	e := &EtcdRegistry{
+		timeout:  5 * time.Second,
+		sessions: make(map[string]*concurrency.Session),
+		Client:   client,
+	}
 	return e, nil
 }
-func (reg *etcdRegistry) getSession(k string, opts ...concurrency.SessionOption) (*concurrency.Session, error) {
-	reg.RLock()
-	sess, ok := reg.sessions[k]
-	reg.RUnlock()
+
+func (e *EtcdRegistry) getSession(k string, opts ...concurrency.SessionOption) (*concurrency.Session, error) {
+	e.RLock()
+	sess, ok := e.sessions[k]
+	e.RUnlock()
 	if ok {
 		return sess, nil
 	}
-	sess, err := concurrency.NewSession(reg.client)
+	sess, err := concurrency.NewSession(e.Client)
 	if err != nil {
 		return sess, err
 	}
-	reg.Lock()
-	reg.sessions[k] = sess
-	reg.Unlock()
+	e.Lock()
+	e.sessions[k] = sess
+	e.Unlock()
 	return sess, nil
 }
 
-func (reg *etcdRegistry) delSession(k string) error {
-	if ttl := reg.Config.ServiceTTL.Seconds(); ttl > 0 {
-		reg.rmu.RLock()
-		sess, ok := reg.sessions[k]
-		reg.rmu.RUnlock()
-		if ok {
-			reg.rmu.Lock()
-			delete(reg.sessions, k)
-			reg.rmu.Unlock()
-			if err := sess.Close(); err != nil {
-				return err
-			}
+func (e *EtcdRegistry) delSession(k string) error {
+	e.RLock()
+	sess, ok := e.sessions[k]
+	e.RUnlock()
+	if ok {
+		e.Lock()
+		delete(e.sessions, k)
+		e.Unlock()
+		if err := sess.Close(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
-func (e *etcdRegistry) Register(ctx context.Context, s *Service, ttl time.Duration) error {
+
+//Register ...
+func (e *EtcdRegistry) Register(ctx context.Context, s *Service, ttl time.Duration) error {
 	key := s.String()
 	val := string(s.Marshal())
 	ctxTimeout, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
-	if ttl.Seconds() > 0 {
-		leaseID, err := e.loadLeaseID(ctxTimeout, key, ttl)
+	var opts []clientv3.OpOption
+	if ttl := ttl.Seconds(); ttl > 0 {
+		sess, err := e.getSession(key, concurrency.WithTTL(int(ttl)))
 		if err != nil {
 			return err
 		}
-		if _, err = e.client.Put(ctxTimeout, key, val, clientv3.WithLease(leaseID)); err != nil {
-			return err
-		}
-		_, err = e.client.KeepAlive(ctx, leaseID)
-		return err
+		opts = append(opts, clientv3.WithLease(sess.Lease()))
 	}
-	_, err := e.client.Put(ctxTimeout, key, val)
+	_, err := e.Client.Put(ctxTimeout, key, val, opts...)
 	return err
 }
 
-func (e *etcdRegistry) Deregister(ctx context.Context, s *Service) error {
+//Deregister ..
+func (e *EtcdRegistry) Deregister(ctx context.Context, s *Service) error {
 	key := s.String()
-	e.Lock()
-	leaseID, ok := e.leases[key]
-	if ok {
-		delete(e.leases, key)
+	if err := e.delSession(key); err != nil {
+		return err
 	}
-	e.Unlock()
-	if ok {
-		e.client.Revoke(ctx, leaseID)
-	}
-	return nil
+	_, err := e.Client.Delete(ctx, key)
+	return err
 }
 
-func (e *etcdRegistry) Discover(ctx context.Context, namespace, kind, name string) ([]*Service, error) {
-	var serviceNodes []*Service
-	key := naming(namespace, kind, name)
-	rsp, err := e.client.Get(ctx, key, clientv3.WithPrefix())
+//Discover ..
+func (e *EtcdRegistry) Discover(ctx context.Context, naming string) (<-chan map[string]*Node, error) {
+	var rspChan = make(chan map[string]*Node, 1)
+	var nodes = make(map[string]*Node, 0)
+	rsp, err := e.Client.Get(ctx, naming, clientv3.WithPrefix())
 	if err != nil {
-		return serviceNodes, err
+		return rspChan, err
 	}
 	for _, kv := range rsp.Kvs {
-		serviceNodes = append(serviceNodes, Unmarshal(kv.Value))
+		node := &Node{}
+		if err := node.Unmarshal(kv.Value); err != nil {
+			nodes[string(kv.Key)] = node
+		}
 	}
-	return serviceNodes, nil
+	go func() {
+		var nodes = make(map[string]*Node, 0)
+		for _, kv := range rsp.Kvs {
+			node := &Node{}
+			if err := node.Unmarshal(kv.Value); err != nil {
+				nodes[string(kv.Key)] = node
+			}
+		}
+		wch := e.Client.Watch(ctx, naming, clientv3.WithPrefix())
+		select {
+		case rsp := <-wch:
+			for _, ev := range rsp.Events {
+				node := &Node{}
+				if err := node.Unmarshal(ev.Kv.Value); err != nil {
+					nodes[string(ev.Kv.Value)] = node
+				}
+			}
+			rspChan <- nodes
+		}
+	}()
+	return rspChan, nil
 }
-func (e *etcdRegistry) Services(ctx context.Context, namespace string) ([]*Service, error) {
+
+//Services ..
+func (e *EtcdRegistry) Services(ctx context.Context, naming string) ([]*Service, error) {
 	var serviceNodes []*Service
 	//todo
 	return serviceNodes, nil

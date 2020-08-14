@@ -11,8 +11,8 @@ import (
 type Registry interface {
 	Register(ctx context.Context, s *Service, ttl time.Duration) error
 	Deregister(ctx context.Context, s *Service) error
-	Discover(ctx context.Context, namespace, kind, name string) ([]*Service, error)
-	Services(ctx context.Context, namespace string) ([]*Service, error)
+	Discover(ctx context.Context, naming string) ([]*Service, error)
+	Services(ctx context.Context, naming string) ([]*Service, error)
 }
 
 //Optipns ..
@@ -61,8 +61,8 @@ type Service struct {
 	Kind      string            `json:"kind"`
 	Name      string            `json:"name"`
 	ID        string            `json:"id"`
-	Version   string            `json:"version"`
-	Address   string            `json:"address"`
+	Version   string            `json:"var"`
+	Address   string            `json:"addr"`
 	Labels    map[string]string `json:"labels"`
 	// *Node
 	// Metadata map[string]string `json:"metadata"`
@@ -73,9 +73,14 @@ type Service struct {
 //Node info
 type Node struct {
 	ID      string            `json:"id"`
-	Version string            `json:"version"`
-	Address string            `json:"address"`
+	Version string            `json:"ver"`
+	Address string            `json:"addr"`
 	Labels  map[string]string `json:"labels"`
+}
+
+//Unmarshal ..
+func (n *Node) Unmarshal(v []byte) error {
+	return json.Unmarshal(v, n)
 }
 
 //naming ..

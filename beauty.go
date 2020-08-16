@@ -12,17 +12,26 @@ import (
 	"go.uber.org/zap"
 )
 
-//AppOptions ..
-type AppOptions func(app *App)
+const (
+	//StageBeforeRun ..
+	StageBeforeRun = iota
+	//StageAfterRun ..
+	StageAfterRun
+)
+
+var initHookStages []int
 
 //HookFunc ..
-type HookFunc func(*App)
+type HookFunc func(app *App)
+
+//AppOptions ..
+type AppOptions func(app *App)
 
 //App ..
 type App struct {
 	ctx      context.Context
 	logger   *zap.Logger
-	hooks    map[string][]HookFunc
+	hooks    map[int][]HookFunc
 	service  []Service
 	registry registry.Registry
 	//shutdownTimeout timeout will be forces stop
@@ -31,11 +40,11 @@ type App struct {
 	cycle           *lifecycle.Cycle
 }
 
-//AddHook add a hook func to stage
-func (app *App) AddHook(stage string, fn HookFunc) {
+//Hook add a hook func to stage
+func (app *App) Hook(stage int, fn HookFunc) {
 	app.hooks[stage] = append(app.hooks[stage], fn)
 }
-func (app *App) runHooks(stage string) {
+func (app *App) runHooks(stage int) {
 	if hooks, ok := app.hooks[stage]; ok {
 		for _, h := range hooks {
 			h(app)
@@ -47,14 +56,12 @@ func (app *App) runHooks(stage string) {
 func Init(opts ...AppOptions) *App {
 	app := &App{
 		ctx:             context.Background(),
-		hooks:           make(map[string][]HookFunc),
+		hooks:           make(map[int][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
 		cycle:           lifecycle.NewCycle(),
 	}
 	app.SetLogger(log.Logger)
-	reg, _ := registry.LoadEtcdRegistry()
-	app.SetRegistry(reg)
 	for _, opt := range opts {
 		opt(app)
 	}
@@ -73,9 +80,11 @@ func (app *App) SetRegistry(r registry.Registry) {
 
 // Run ..
 func (app *App) Run(service ...Service) error {
+	reg, _ := registry.Build()
+	app.SetRegistry(reg)
 	app.service = service
 	app.waitSignals()
-	app.runHooks("before_start")
+	app.runHooks(StageBeforeRun)
 	for _, srv := range app.service {
 		func(srv Service) {
 			app.cycle.Run(func() error {
@@ -94,7 +103,7 @@ func (app *App) Run(service ...Service) error {
 			app.logger.Info("start", zap.String("service", srv.Service().String()))
 		}(srv)
 	}
-	app.runHooks("after_start")
+	app.runHooks(StageAfterRun)
 	defer app.logger.Sync()
 	err := <-app.cycle.Wait()
 	if err != nil {

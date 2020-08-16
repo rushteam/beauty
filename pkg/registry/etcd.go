@@ -7,6 +7,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/rushteam/beauty/pkg/config"
 )
 
@@ -131,16 +132,29 @@ func (e *EtcdRegistry) Discover(ctx context.Context, naming string) (<-chan map[
 				nodes[string(kv.Key)] = node
 			}
 		}
+		rspChan <- nodes
 		wch := e.Client.Watch(ctx, naming, clientv3.WithPrefix())
-		select {
-		case rsp := <-wch:
-			for _, ev := range rsp.Events {
-				node := &Node{}
-				if err := node.Unmarshal(ev.Kv.Value); err != nil {
-					nodes[string(ev.Kv.Value)] = node
+		for {
+			select {
+			case rsp, ok := <-wch:
+				if !ok {
+					return
 				}
+				for _, ev := range rsp.Events {
+					delete(nodes, string(ev.Kv.Value))
+					if ev.Type == mvccpb.PUT {
+						node := &Node{}
+						if err := node.Unmarshal(ev.Kv.Value); err != nil {
+							nodes[string(ev.Kv.Value)] = node
+						}
+					}
+				}
+				rspChan <- nodes
+				//using chan close to return this code be not important
+				// case <-ctx.Done():
+				// 	fmt.Println("close with done")
+				// 	return
 			}
-			rspChan <- nodes
 		}
 	}()
 	return rspChan, nil

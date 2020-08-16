@@ -11,7 +11,8 @@ import (
 type Registry interface {
 	Register(ctx context.Context, s *Service, ttl time.Duration) error
 	Deregister(ctx context.Context, s *Service) error
-	Discover(ctx context.Context, naming string) ([]*Service, error)
+	Discover(ctx context.Context, naming string) (<-chan map[string]*Node, error)
+	// Stop(ctx context.Context, naming string) (<-chan map[string]*Node, error)
 	Services(ctx context.Context, naming string) ([]*Service, error)
 }
 

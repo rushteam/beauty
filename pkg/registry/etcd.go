@@ -113,23 +113,17 @@ func (e *EtcdRegistry) Deregister(ctx context.Context, s *Service) error {
 //Discover ..
 func (e *EtcdRegistry) Discover(ctx context.Context, naming string) (<-chan map[string]*Node, error) {
 	var rspChan = make(chan map[string]*Node, 1)
-	var nodes = make(map[string]*Node, 0)
 	rsp, err := e.Client.Get(ctx, naming, clientv3.WithPrefix())
 	if err != nil {
 		return rspChan, err
-	}
-	for _, kv := range rsp.Kvs {
-		node := &Node{}
-		if err := node.Unmarshal(kv.Value); err != nil {
-			nodes[string(kv.Key)] = node
-		}
 	}
 	go func() {
 		var nodes = make(map[string]*Node, 0)
 		for _, kv := range rsp.Kvs {
 			node := &Node{}
-			if err := node.Unmarshal(kv.Value); err != nil {
-				nodes[string(kv.Key)] = node
+			if err := node.Unmarshal(kv.Value); err == nil {
+				k := string(kv.Key)[len(naming):]
+				nodes[k] = node
 			}
 		}
 		rspChan <- nodes
@@ -144,8 +138,9 @@ func (e *EtcdRegistry) Discover(ctx context.Context, naming string) (<-chan map[
 					delete(nodes, string(ev.Kv.Value))
 					if ev.Type == mvccpb.PUT {
 						node := &Node{}
-						if err := node.Unmarshal(ev.Kv.Value); err != nil {
-							nodes[string(ev.Kv.Value)] = node
+						if err := node.Unmarshal(ev.Kv.Value); err == nil {
+							k := string(ev.Kv.Value)[len(naming):]
+							nodes[k] = node
 						}
 					}
 				}

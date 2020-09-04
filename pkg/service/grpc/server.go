@@ -15,8 +15,8 @@ import (
 const ServiceKind = "grpc"
 
 //Build create a rest service with the name
-func Build(name string) (*Rest, error) {
-	s := &Rest{
+func Build(name string) (*Server, error) {
+	s := &Server{
 		service: &registry.Service{
 			Kind: ServiceKind,
 			Name: name,

@@ -12,55 +12,31 @@ import (
 const EtcdScheme = "etcd"
 
 func init() {
-	resolver.Register(&etcdBuilder{})
+	resolver.Register(&etcdBuilder{scheme: EtcdScheme, prefix: ""})
 }
 
 type etcdBuilder struct {
-	Prefix string
-}
-type etcdTarget struct {
-	Scheme    string
-	Authority string
-	Endpoints []string
-	Prefix    string
-}
-
-//parseTarget ..
-func parseTarget(target resolver.Target) (*etcdTarget, error) {
-	t := &etcdTarget{
-		Scheme:    target.Scheme,
-		Authority: target.Authority,
-	}
-	if target.Endpoint == "" {
-		return t, fmt.Errorf("grpc: naming: etcd config error, scheme://auth:/addr1[,addr2]/key")
-	}
-	seg := strings.SplitN(target.Endpoint, "/", 2)
-	if len(seg) != 2 {
-		return t, fmt.Errorf("grpc: naming: etcd config error, scheme://auth:/addr1[,addr2]/key")
-	}
-	t.Endpoints = strings.Split(seg[0], ",")
-	t.Prefix = seg[1]
-	return t, nil
+	scheme    string
+	prefix    string
+	endpoints []string
 }
 
 //Build ..
 func (b *etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	tar, err := parseTarget(target)
+	if err := b.parseTarget(target); err != nil {
+		return nil, err
+	}
+	reg, err := New(b.endpoints)
 	if err != nil {
 		return nil, err
 	}
-	reg, err := New(tar.Endpoints)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &etcdResolver{
 		cc:     cc,
 		ctx:    ctx,
 		cancel: cancel,
 	}
-	watch, err := reg.Subscriber(ctx, prefix)
+	watch, err := reg.Subscriber(ctx, b.prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +69,21 @@ func (b *etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts
 
 //Scheme ..
 func (b *etcdBuilder) Scheme() string {
-	return EtcdScheme
+	return b.scheme
+}
+
+//parseTarget ..
+func (b *etcdBuilder) parseTarget(target resolver.Target) error {
+	if target.Endpoint == "" {
+		return fmt.Errorf("grpc: naming: etcd config error, scheme://auth:/addr1[,addr2]/key")
+	}
+	seg := strings.SplitN(target.Endpoint, "/", 2)
+	if len(seg) != 2 {
+		return fmt.Errorf("grpc: naming: etcd config error, scheme://auth:/addr1[,addr2]/key")
+	}
+	b.endpoints = strings.Split(seg[0], ",")
+	b.prefix = seg[1]
+	return nil
 }
 
 type etcdResolver struct {

@@ -86,6 +86,22 @@ func (e *EtcdRegistry) delSession(k string) error {
 	return nil
 }
 
+type items map[string][]byte
+
+func (d items) Copy() items {
+	out := make(items, len(d))
+	for i, v := range d {
+		out[i] = v
+	}
+	return out
+}
+func (d items) Put(k string, v []byte) {
+	d[k] = v
+}
+func (d items) Del(k string) {
+	delete(d, k)
+}
+
 //Subscriber ..
 func (e *EtcdRegistry) Subscriber(ctx context.Context, key string) (<-chan map[string][]byte, error) {
 	var rspChan = make(chan map[string][]byte, 1)
@@ -94,12 +110,12 @@ func (e *EtcdRegistry) Subscriber(ctx context.Context, key string) (<-chan map[s
 		return rspChan, err
 	}
 	go func() {
-		var nodes = make(map[string][]byte, 0)
+		var nodes = make(items, 0)
 		for _, kv := range rsp.Kvs {
 			k := string(kv.Key)
-			nodes[k] = kv.Value
+			nodes.Put(k, kv.Value)
 		}
-		rspChan <- nodes
+		rspChan <- nodes.Copy()
 		wch := e.Client.Watch(ctx, key, clientv3.WithPrefix())
 		for {
 			select {
@@ -112,12 +128,12 @@ func (e *EtcdRegistry) Subscriber(ctx context.Context, key string) (<-chan map[s
 					k := string(ev.Kv.Key)
 					switch ev.Type {
 					case clientv3.EventTypePut:
-						nodes[k] = ev.Kv.Value
+						nodes.Put(k, ev.Kv.Value)
 					case clientv3.EventTypeDelete:
-						delete(nodes, k)
+						nodes.Del(k)
 					}
 				}
-				rspChan <- nodes
+				rspChan <- nodes.Copy()
 			}
 		}
 	}()

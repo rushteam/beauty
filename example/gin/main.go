@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/service/web"
+	"github.com/rushteam/beauty/pkg/service/rest"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 	}
 }
 func service() beauty.Service {
-	api, err := web.Build("api")
+	api, err := rest.Build("api")
 	if err != nil {
 		log.Fatalln(err)
 	}

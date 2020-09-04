@@ -9,12 +9,12 @@ require (
 	github.com/gin-gonic/gin v1.6.3
 	github.com/gogo/protobuf v1.3.1 // indirect
 	github.com/google/uuid v1.1.1 // indirect
-	github.com/magiconair/properties v1.8.1
+	github.com/magiconair/properties v1.8.1 // indirect
 	github.com/rushteam/gosql v0.2.0
 	github.com/spf13/viper v1.7.1
 	github.com/stretchr/testify v1.4.0
-	go.etcd.io/etcd v3.3.22+incompatible
 	go.uber.org/zap v1.15.0
-	google.golang.org/grpc v1.25.1 // indirect
+	google.golang.org/grpc v1.31.1
+	google.golang.org/grpc/examples v0.0.0-20200902210233-8630cac324bf // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )

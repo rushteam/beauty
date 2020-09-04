@@ -1,0 +1,12 @@
+
+type getRequest struct {
+    Name string `json:"city"`
+}
+
+@doc(summary: desc in one line)
+@auth jwt
+service (
+    @route /index/:name
+    rest Index(getRequest) returns (getResponse)
+    rpc Index(getRequest) returns (getResponse)
+)

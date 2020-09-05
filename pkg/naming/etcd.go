@@ -11,8 +11,9 @@ import (
 //EtcdScheme ..
 const EtcdScheme = "etcd"
 
-func init() {
-	resolver.Register(&etcdBuilder{scheme: EtcdScheme, prefix: ""})
+//RegisterResolver ..
+func RegisterResolver(prefix string) {
+	resolver.Register(&etcdBuilder{scheme: EtcdScheme, prefix: prefix})
 }
 
 type etcdBuilder struct {

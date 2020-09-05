@@ -1,4 +1,4 @@
-module gitlab.meitu.com/golang/beauty/tools
+module github.com/rushteam/beauty/tools
 
 go 1.14
 

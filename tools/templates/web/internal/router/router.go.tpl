@@ -6,8 +6,8 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"gitlab.meitu.com/golang/beauty"
-	"gitlab.meitu.com/golang/beauty/pkg/service/web"
+	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/service/web"
 	"{{.ModPath}}internal/handler"
 )
 

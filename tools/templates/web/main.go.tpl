@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"gitlab.meitu.com/golang/beauty"
+	"github.com/rushteam/beauty"
 	"{{.ModPath}}router"
 )
 

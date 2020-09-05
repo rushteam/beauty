@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"gitlab.meitu.com/golang/beauty/pkg/config"
-	"gitlab.meitu.com/golang/beauty/pkg/log"
+	"github.com/rushteam/beauty/pkg/config"
+	"github.com/rushteam/beauty/pkg/log"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer/roundrobin"

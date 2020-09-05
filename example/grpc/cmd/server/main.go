@@ -5,8 +5,8 @@ import (
 	"log"
 
 	"github.com/rushteam/beauty"
-	"gitlab.meitu.com/golang/beauty/example/grpc/service/helloworld"
-	"gitlab.meitu.com/golang/beauty/pkg/service/grpc"
+	"github.com/rushteam/beauty/example/grpc/service/helloworld"
+	"github.com/rushteam/beauty/pkg/service/grpc"
 )
 
 func main() {

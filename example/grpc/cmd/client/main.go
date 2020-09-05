@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"gitlab.meitu.com/golang/beauty/example/grpc/service/helloworld"
+	"github.com/rushteam/beauty/example/grpc/service/helloworld"
 	"google.golang.org/grpc"
 )
 

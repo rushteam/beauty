@@ -2,6 +2,7 @@ package beauty
 
 import (
 	"context"
+	"flag"
 	"os"
 	"time"
 
@@ -52,19 +53,20 @@ func (app *App) runHooks(stage int) {
 	}
 }
 
-//Init ..
-func Init(opts ...AppOptions) *App {
+//New ..
+func New(opts ...AppOptions) *App {
 	app := &App{
 		ctx:             context.Background(),
 		hooks:           make(map[int][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
-		cycle:           lifecycle.NewCycle(),
+		cycle:           lifecycle.New(),
 	}
 	app.SetLogger(log.Logger)
 	for _, opt := range opts {
 		opt(app)
 	}
+	flag.Parse()
 	return app
 }
 

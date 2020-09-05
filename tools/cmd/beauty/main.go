@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/urfave/cli"
-	"gitlab.meitu.com/golang/beauty/tools/new"
+	"github.com/rushteam/beauty/tools/new"
 )
 
 //Version ..

@@ -15,8 +15,8 @@ type Cycle struct {
 	waiting uint32
 }
 
-//NewCycle new a cycle life
-func NewCycle() *Cycle {
+//New new a cycle life
+func New() *Cycle {
 	return &Cycle{
 		mu:      &sync.Mutex{},
 		wg:      &sync.WaitGroup{},

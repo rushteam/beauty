@@ -53,7 +53,7 @@ func TestCycleDone(t *testing.T) {
 func TestCycleClose(t *testing.T) {
 	ch := make(chan string, 2)
 	state := "init"
-	c := NewCycle()
+	c := New()
 	c.Run(func() error {
 		time.Sleep(time.Microsecond * 100)
 		return nil

@@ -3,62 +3,48 @@ package grpc
 import (
 	"context"
 	"net"
-	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/rushteam/beauty/pkg/config"
 	"github.com/rushteam/beauty/pkg/log"
-	"github.com/rushteam/beauty/pkg/registry"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 //ServiceKind ..
 const ServiceKind = "grpc"
 
-//Build create a rest service with the name
+//Build create a web service with the name
 func Build(name string) (*Server, error) {
 	s := &Server{
-		service: &registry.Service{
-			Kind: ServiceKind,
-			Name: name,
-		},
-		Mode: gin.DebugMode,
-		Addr: ":grpc",
+		Name:   name,
+		Addr:   ":50000",
+		Server: grpc.NewServer(),
 	}
 	if conf, err := config.New(config.Env(), name); err == nil {
 		s.Mode = conf.GetString(ServiceKind + ".mode")
 		s.Addr = conf.GetString(ServiceKind + ".addr")
 	} else {
-		log.Warn("no config file...")
-	}
-	if len(s.Mode) > 0 {
-		gin.SetMode(s.Mode)
-	}
-
-	s.Engine = gin.New()
-	s.Server = &http.Server{
-		Handler: s.Engine,
+		log.Warn("no config file...", zap.String("kind", ServiceKind), zap.String("name", name))
 	}
 	return s, nil
 }
 
 //Server ..
 type Server struct {
-	*gin.Engine
-	Server  *http.Server
-	listen  *net.Listener
-	service *registry.Service
-	Mode    string
-	Addr    string
+	Name   string
+	Mode   string
+	Addr   string
+	Server *grpc.Server
 }
 
 //Start ..
 func (s *Server) Start(ctx context.Context) error {
-	// log.Logger.Info("start with", ServiceKind, s)
 	ln, err := net.Listen("tcp", s.Addr)
 	if err != nil {
 		return err
 	}
-	if err := s.Server.Serve(ln); err != http.ErrServerClosed {
+	s.Addr = ln.Addr().String() //确保随机端口时候 s.Addr 值的正确性
+	if err := s.Server.Serve(ln); err != nil {
 		return err
 	}
 	return nil
@@ -66,10 +52,25 @@ func (s *Server) Start(ctx context.Context) error {
 
 //Stop ..
 func (s *Server) Stop(ctx context.Context) error {
-	return s.Server.Shutdown(ctx)
+	closed := make(chan struct{})
+	go func() {
+		s.Server.GracefulStop()
+		close(closed)
+	}()
+	select {
+	case <-ctx.Done():
+		//超时强制结束
+		if ctx.Err() != nil {
+			s.Server.Stop()
+		}
+		return nil
+	case <-closed:
+		//正常结束
+		return nil
+	}
 }
 
-//Service ..
-func (s *Server) Service() *registry.Service {
-	return s.service
+//String ..
+func (s *Server) String() string {
+	return ServiceKind + "." + s.Name
 }

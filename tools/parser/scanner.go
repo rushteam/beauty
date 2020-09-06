@@ -2,9 +2,8 @@ package parser
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
-	"io"
+	"text/scanner"
 )
 
 //GoWhitespace ..
@@ -26,7 +25,7 @@ var tokenString = map[rune]string{
 
 //TokenString ..
 func TokenString(tok rune) string {
-	// scanner.Comment
+	scanner.Comment
 	if s, found := tokenString[tok]; found {
 		return s
 	}
@@ -41,6 +40,7 @@ type Scanner struct {
 	column     int // character count
 }
 
+/*
 // NewScanner returns a new instance of Scanner.
 func NewScanner(src io.Reader) *Scanner {
 	return &Scanner{
@@ -64,10 +64,11 @@ func (s *Scanner) Scan() rune {
 
 	// determine token value
 	tok := ch
+	fmt.Println(tok)
 	switch ch {
 	case '@':
-		tokText := s.scanAt(ch)
-		fmt.Println(tokText)
+		text := s.scanAt(ch)
+		fmt.Println(text)
 	// case isDecimal(ch):
 	// 	tok, ch = s.scanNumber(ch, false)
 	default:
@@ -77,7 +78,8 @@ func (s *Scanner) Scan() rune {
 		case '/':
 			ch = s.Peek()
 			if ch == '/' || ch == '*' {
-				ch = s.scanComment(ch)
+				text := s.scanComment(ch)
+				fmt.Println(text)
 				tok = Comment
 			}
 		default:
@@ -143,3 +145,4 @@ func (s *Scanner) scanComment(ch rune) rune {
 	}
 	return ch
 }
+*/

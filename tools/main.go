@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strings"
-
 	"github.com/rushteam/beauty/tools/parser"
 )
 
@@ -16,9 +14,9 @@ func main() {
 	// )
 	// `
 	content := `
-//@auth jwt
+@auth jwt
 `
-	s := parser.NewScanner(strings.NewReader(content))
+	// s := parser.NewScanner(strings.NewReader(content))
 	parser.BeautyParse(parser.NewLexer(s))
 	// fi := bufio.NewReader(os.NewFile(0, "stdin"))
 	// for {

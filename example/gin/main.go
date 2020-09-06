@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	app := beauty.Init()
+	app := beauty.New()
 	err := app.Run(service())
 	if err != nil {
 		log.Fatalln(err)

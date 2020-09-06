@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	app := beauty.Init()
+	app := beauty.New()
 	s1 := demo.New()
 	s2 := demo.New()
 	err := app.Run(s1, s2)

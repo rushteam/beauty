@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 )
@@ -65,7 +66,8 @@ func (s *Scanner) Scan() rune {
 	tok := ch
 	switch ch {
 	case '@':
-		ch = s.scanAt(ch)
+		tokText := s.scanAt(ch)
+		fmt.Println(tokText)
 	// case isDecimal(ch):
 	// 	tok, ch = s.scanNumber(ch, false)
 	default:
@@ -102,8 +104,16 @@ func (s *Scanner) unread() {
 	_ = s.r.UnreadRune()
 }
 
-func (s *Scanner) scanAt(ch rune) rune {
-	return ch
+func (s *Scanner) scanAt(ch rune) string {
+	var buf bytes.Buffer
+	for {
+		ch = s.Peek()
+		if s.Whitespace&(1<<uint(ch)) == 0 {
+			break
+		}
+		buf.WriteRune(ch)
+	}
+	return buf.String()
 }
 
 func (s *Scanner) scanComment(ch rune) rune {

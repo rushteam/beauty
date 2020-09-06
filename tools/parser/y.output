@@ -2,7 +2,7 @@
 state 0
 	$accept: .at $end 
 
-	at_key  shift 2
+	at_auth  shift 2
 	.  error
 
 	at  goto 1
@@ -15,21 +15,20 @@ state 1
 
 
 state 2
-	at:  at_key.    (1)
-	at:  at_key.val 
+	at:  at_auth.val 
 
 	val  shift 3
-	.  reduce 1 (src line 27)
+	.  error
 
 
 state 3
-	at:  at_key val.    (2)
+	at:  at_auth val.    (1)
 
-	.  reduce 2 (src line 30)
+	.  reduce 1 (src line 27)
 
 
-8 terminals, 2 nonterminals
-3 grammar rules, 4/8000 states
+9 terminals, 2 nonterminals
+2 grammar rules, 4/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
 51 working sets used
 memory: parser 0/120000
@@ -39,4 +38,4 @@ memory: parser 0/120000
 0 entries saved by goto default
 Optimizer space used: output 3/120000
 3 table entries, 0 zero
-maximum spread: 8, maximum offset: 8
+maximum spread: 9, maximum offset: 9

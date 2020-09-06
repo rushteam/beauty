@@ -21,16 +21,12 @@ import (
 
 // same for terminals
 // SERVICE RPC
-%token ILLEGAL EOF Comment
-%token <val> at_key val
+%token ILLEGAL EOF At Comment
+%token <val> at_auth val
 %%
-at: at_key {
+at: at_auth val {
 	fmt.Println($1)
-	$$ = $1
-} | at_key val {
-	fmt.Println($1,$2)
-	$$ = $1
+	$$ = $2
 }
-
 %%
 /*  start  of  programs  */

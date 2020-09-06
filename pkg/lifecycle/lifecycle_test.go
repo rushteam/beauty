@@ -24,7 +24,7 @@ import (
 func TestCycleDone(t *testing.T) {
 	ch := make(chan string, 2)
 	state := "init"
-	c := NewCycle()
+	c := New()
 	c.Run(func() error {
 		time.Sleep(time.Microsecond * 100)
 		return nil
@@ -79,7 +79,7 @@ func TestCycleClose(t *testing.T) {
 func TestCycleDoneAndClose(t *testing.T) {
 	ch := make(chan string, 2)
 	state := "init"
-	c := NewCycle()
+	c := New()
 	c.Run(func() error {
 		time.Sleep(time.Microsecond * 100)
 		return nil
@@ -96,7 +96,7 @@ func TestCycleDoneAndClose(t *testing.T) {
 	}
 }
 func TestCycleWithError(t *testing.T) {
-	c := NewCycle()
+	c := New()
 	c.Run(func() error {
 		return fmt.Errorf("run error")
 	})

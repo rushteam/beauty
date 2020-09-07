@@ -32,30 +32,30 @@ state 3
 state 4
 	comment:  Comment.    (4)
 
-	.  reduce 4 (src line 52)
+	.  reduce 4 (src line 51)
 
 
 state 5
-	at:  '@'.at_opt at_val 
+	at:  '@'.Val Val 
 
-	at_opt  shift 6
+	Val  shift 6
 	.  error
 
 
 state 6
-	at:  '@' at_opt.at_val 
+	at:  '@' Val.Val 
 
-	at_val  shift 7
+	Val  shift 7
 	.  error
 
 
 state 7
-	at:  '@' at_opt at_val.    (3)
+	at:  '@' Val Val.    (3)
 
-	.  reduce 3 (src line 43)
+	.  reduce 3 (src line 42)
 
 
-9 terminals, 4 nonterminals
+8 terminals, 4 nonterminals
 5 grammar rules, 8/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
 53 working sets used
@@ -66,4 +66,4 @@ memory: parser 2/120000
 0 entries saved by goto default
 Optimizer space used: output 7/120000
 7 table entries, 0 zero
-maximum spread: 9, maximum offset: 8
+maximum spread: 8, maximum offset: 7

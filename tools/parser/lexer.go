@@ -19,7 +19,7 @@ type Lexer struct {
 func (l *Lexer) Lex(lval *BeautySymType) int {
 	tok := l.s.Scan()
 	// fmt.Println("tok", string(tok))
-	tok = at_opt
+	tok = 0
 	lval.val = "@auth jwt"
 	// var buf bytes.Buffer
 	// for {

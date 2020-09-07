@@ -32,15 +32,14 @@ type AtTok struct {
 // same for terminals
 // SERVICE RPC
 %token ILLEGAL EOF
-%token <val> Comment at_opt at_val '@'
+%token <val> Comment Val '@'
 
 %%
-program: comment {$$ = $1} 
-| at {
-	$$ = $1
-}
+program: comment 
+| at 
+{}
 ;
-at: '@' at_opt at_val {
+at: '@' Val Val {
 	fmt.Println($1)
 	val := make(map[string]string,0)
 	val[$2] = $3

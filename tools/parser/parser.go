@@ -31,8 +31,7 @@ type BeautySymType struct {
 const ILLEGAL = 57346
 const EOF = 57347
 const Comment = 57348
-const at_opt = 57349
-const at_val = 57350
+const Val = 57349
 
 var BeautyToknames = [...]string{
 	"$end",
@@ -41,8 +40,7 @@ var BeautyToknames = [...]string{
 	"ILLEGAL",
 	"EOF",
 	"Comment",
-	"at_opt",
-	"at_val",
+	"Val",
 	"'@'",
 }
 
@@ -52,7 +50,7 @@ const BeautyEofCode = 1
 const BeautyErrCode = 2
 const BeautyInitialStackSize = 16
 
-//line parser.go.y:57
+//line parser.go.y:56
 
 /*  start  of  programs  */
 //line yacctab:1
@@ -67,15 +65,15 @@ const BeautyPrivate = 57344
 const BeautyLast = 7
 
 var BeautyAct = [...]int{
-	4, 7, 6, 5, 3, 2, 1,
+	4, 3, 5, 7, 6, 2, 1,
 }
 
 var BeautyPact = [...]int{
-	-6, -1000, -1000, -1000, -1000, -5, -7, -1000,
+	-6, -1000, -1000, -1000, -1000, -3, -4, -1000,
 }
 
 var BeautyPgo = [...]int{
-	0, 6, 5, 4,
+	0, 6, 5, 1,
 }
 
 var BeautyR1 = [...]int{
@@ -87,7 +85,7 @@ var BeautyR2 = [...]int{
 }
 
 var BeautyChk = [...]int{
-	-1000, -1, -2, -3, 6, 9, 7, 8,
+	-1000, -1, -2, -3, 6, 8, 7, 7,
 }
 
 var BeautyDef = [...]int{
@@ -101,11 +99,11 @@ var BeautyTok1 = [...]int{
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 3, 9,
+	3, 3, 3, 3, 8,
 }
 
 var BeautyTok2 = [...]int{
-	2, 3, 4, 5, 6, 7, 8,
+	2, 3, 4, 5, 6, 7,
 }
 
 var BeautyTok3 = [...]int{
@@ -449,21 +447,14 @@ Beautydefault:
 	// dummy call; replaced with literal code
 	switch Beautynt {
 
-	case 1:
-		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:38
-		{
-			BeautyVAL.val = BeautyDollar[1].val
-		}
 	case 2:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:39
+//line parser.go.y:40
 		{
-			BeautyVAL.val = BeautyDollar[1].at_tok
 		}
 	case 3:
 		BeautyDollar = BeautyS[Beautypt-3 : Beautypt+1]
-//line parser.go.y:43
+//line parser.go.y:42
 		{
 			fmt.Println(BeautyDollar[1].val)
 			val := make(map[string]string, 0)
@@ -475,7 +466,7 @@ Beautydefault:
 		}
 	case 4:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:52
+//line parser.go.y:51
 		{
 			BeautyVAL.val = BeautyDollar[1].val
 		}

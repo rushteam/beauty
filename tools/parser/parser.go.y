@@ -17,16 +17,21 @@ import (
 // any non-terminal which returns a value needs a type, which is
 // really a field name in the above union struct
 // %type <val> expr number
-%type <val> at
+%type <val> at comment
 
 // same for terminals
 // SERVICE RPC
-%token ILLEGAL EOF At Comment
-%token <val> at_auth val
+%token ILLEGAL EOF At
+%token <val> at_auth at_val
+%token <val> string
 %%
-at: at_auth val {
+at: at_auth at_val {
 	fmt.Println($1)
 	$$ = $2
 }
+comment: string{
+	$$ = $1
+}
+
 %%
 /*  start  of  programs  */

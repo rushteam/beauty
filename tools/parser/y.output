@@ -15,27 +15,28 @@ state 1
 
 
 state 2
-	at:  at_auth.val 
+	at:  at_auth.at_val 
 
-	val  shift 3
+	at_val  shift 3
 	.  error
 
 
 state 3
-	at:  at_auth val.    (1)
+	at:  at_auth at_val.    (1)
 
-	.  reduce 1 (src line 27)
+	.  reduce 1 (src line 28)
 
+Rule not reduced: comment:  string 
 
-9 terminals, 2 nonterminals
-2 grammar rules, 4/8000 states
+9 terminals, 3 nonterminals
+3 grammar rules, 4/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
-51 working sets used
+52 working sets used
 memory: parser 0/120000
 0 extra closures
 2 shift entries, 1 exceptions
-1 goto entries
-0 entries saved by goto default
+2 goto entries
+-1 entries saved by goto default
 Optimizer space used: output 3/120000
 3 table entries, 0 zero
-maximum spread: 9, maximum offset: 9
+maximum spread: 8, maximum offset: 8

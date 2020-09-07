@@ -22,9 +22,9 @@ type BeautySymType struct {
 const ILLEGAL = 57346
 const EOF = 57347
 const At = 57348
-const Comment = 57349
-const at_auth = 57350
-const val = 57351
+const at_auth = 57349
+const at_val = 57350
+const string = 57351
 
 var BeautyToknames = [...]string{
 	"$end",
@@ -33,9 +33,9 @@ var BeautyToknames = [...]string{
 	"ILLEGAL",
 	"EOF",
 	"At",
-	"Comment",
 	"at_auth",
-	"val",
+	"at_val",
+	"string",
 }
 
 var BeautyStatenames = [...]string{}
@@ -44,7 +44,7 @@ const BeautyEofCode = 1
 const BeautyErrCode = 2
 const BeautyInitialStackSize = 16
 
-//line parser.go.y:31
+//line parser.go.y:36
 
 /*  start  of  programs  */
 //line yacctab:1
@@ -63,23 +63,23 @@ var BeautyAct = [...]int{
 }
 
 var BeautyPact = [...]int{
-	-7, -1000, -9, -1000,
+	-6, -1000, -8, -1000,
 }
 
 var BeautyPgo = [...]int{
-	0, 2,
+	0, 2, 2,
 }
 
 var BeautyR1 = [...]int{
-	0, 1,
+	0, 1, 2,
 }
 
 var BeautyR2 = [...]int{
-	0, 2,
+	0, 2, 1,
 }
 
 var BeautyChk = [...]int{
-	-1000, -1, 8, 9,
+	-1000, -1, 7, 8,
 }
 
 var BeautyDef = [...]int{
@@ -437,10 +437,16 @@ Beautydefault:
 
 	case 1:
 		BeautyDollar = BeautyS[Beautypt-2 : Beautypt+1]
-//line parser.go.y:27
+//line parser.go.y:28
 		{
 			fmt.Println(BeautyDollar[1].val)
 			BeautyVAL.val = BeautyDollar[2].val
+		}
+	case 2:
+		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
+//line parser.go.y:32
+		{
+			BeautyVAL.val = BeautyDollar[1].val
 		}
 	}
 	goto Beautystack /* stack new state and value */

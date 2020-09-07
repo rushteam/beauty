@@ -413,6 +413,9 @@ func (s *Scanner) Scan() rune {
 	// case s.isIdentRune(ch, 0):
 	// 	tok = Ident
 	// 	ch = s.scanIdentifier()
+	case s.isIdentRune(ch, 0):
+		tok = Val
+		ch = s.scanIdentifier()
 	default:
 		switch ch {
 		case EOF:

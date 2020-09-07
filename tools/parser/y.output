@@ -20,13 +20,13 @@ state 1
 state 2
 	program:  comment.    (1)
 
-	.  reduce 1 (src line 38)
+	.  reduce 1 (src line 39)
 
 
 state 3
 	program:  at.    (2)
 
-	.  reduce 2 (src line 39)
+	.  reduce 2 (src line 40)
 
 
 state 4
@@ -52,10 +52,10 @@ state 6
 state 7
 	at:  '@' Val Val.    (3)
 
-	.  reduce 3 (src line 42)
+	.  reduce 3 (src line 43)
 
 
-8 terminals, 4 nonterminals
+7 terminals, 4 nonterminals
 5 grammar rules, 8/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
 53 working sets used
@@ -66,4 +66,4 @@ memory: parser 2/120000
 0 entries saved by goto default
 Optimizer space used: output 7/120000
 7 table entries, 0 zero
-maximum spread: 8, maximum offset: 7
+maximum spread: 7, maximum offset: 6

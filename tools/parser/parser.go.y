@@ -3,11 +3,12 @@
 package parser
 
 import (
-	"fmt"
+	// "fmt"
 )
 //@auth jwt
 //@rest url
 //@doc (key:val)
+const EOF =0
 type AtTok struct {
 	Opt string
 	Val map[string]string
@@ -31,7 +32,7 @@ type AtTok struct {
 %start program
 // same for terminals
 // SERVICE RPC
-%token ILLEGAL EOF
+%token ILLEGAL
 %token <val> Comment Val '@'
 
 %%
@@ -40,7 +41,6 @@ program: comment
 {}
 ;
 at: '@' Val Val {
-	fmt.Println($1)
 	val := make(map[string]string,0)
 	val[$2] = $3
 	$$ = AtTok{

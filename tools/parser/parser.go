@@ -9,18 +9,20 @@ import __yyfmt__ "fmt"
 //line parser.go.y:3
 
 import (
-	"fmt"
+// "fmt"
 )
 
 //@auth jwt
 //@rest url
 //@doc (key:val)
+const EOF = 0
+
 type AtTok struct {
 	Opt string
 	Val map[string]string
 }
 
-//line parser.go.y:19
+//line parser.go.y:20
 type BeautySymType struct {
 	yys int
 	// empty struct{}
@@ -29,16 +31,14 @@ type BeautySymType struct {
 }
 
 const ILLEGAL = 57346
-const EOF = 57347
-const Comment = 57348
-const Val = 57349
+const Comment = 57347
+const Val = 57348
 
 var BeautyToknames = [...]string{
 	"$end",
 	"error",
 	"$unk",
 	"ILLEGAL",
-	"EOF",
 	"Comment",
 	"Val",
 	"'@'",
@@ -69,7 +69,7 @@ var BeautyAct = [...]int{
 }
 
 var BeautyPact = [...]int{
-	-6, -1000, -1000, -1000, -1000, -3, -4, -1000,
+	-5, -1000, -1000, -1000, -1000, -2, -3, -1000,
 }
 
 var BeautyPgo = [...]int{
@@ -85,7 +85,7 @@ var BeautyR2 = [...]int{
 }
 
 var BeautyChk = [...]int{
-	-1000, -1, -2, -3, 6, 8, 7, 7,
+	-1000, -1, -2, -3, 5, 7, 6, 6,
 }
 
 var BeautyDef = [...]int{
@@ -99,11 +99,11 @@ var BeautyTok1 = [...]int{
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 3, 8,
+	3, 3, 3, 3, 7,
 }
 
 var BeautyTok2 = [...]int{
-	2, 3, 4, 5, 6, 7,
+	2, 3, 4, 5, 6,
 }
 
 var BeautyTok3 = [...]int{
@@ -449,14 +449,13 @@ Beautydefault:
 
 	case 2:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:40
+//line parser.go.y:41
 		{
 		}
 	case 3:
 		BeautyDollar = BeautyS[Beautypt-3 : Beautypt+1]
-//line parser.go.y:42
+//line parser.go.y:43
 		{
-			fmt.Println(BeautyDollar[1].val)
 			val := make(map[string]string, 0)
 			val[BeautyDollar[2].val] = BeautyDollar[3].val
 			BeautyVAL.at_tok = AtTok{

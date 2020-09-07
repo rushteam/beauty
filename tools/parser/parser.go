@@ -12,19 +12,27 @@ import (
 	"fmt"
 )
 
-//line parser.go.y:12
+//@auth jwt
+//@rest url
+//@doc (key:val)
+type AtTok struct {
+	Opt string
+	Val map[string]string
+}
+
+//line parser.go.y:19
 type BeautySymType struct {
 	yys int
 	// empty struct{}
-	val string
+	val    string
+	at_tok AtTok
 }
 
 const ILLEGAL = 57346
 const EOF = 57347
-const At = 57348
-const at_auth = 57349
+const Comment = 57348
+const at_opt = 57349
 const at_val = 57350
-const string = 57351
 
 var BeautyToknames = [...]string{
 	"$end",
@@ -32,10 +40,10 @@ var BeautyToknames = [...]string{
 	"$unk",
 	"ILLEGAL",
 	"EOF",
-	"At",
-	"at_auth",
+	"Comment",
+	"at_opt",
 	"at_val",
-	"string",
+	"'@'",
 }
 
 var BeautyStatenames = [...]string{}
@@ -44,7 +52,7 @@ const BeautyEofCode = 1
 const BeautyErrCode = 2
 const BeautyInitialStackSize = 16
 
-//line parser.go.y:36
+//line parser.go.y:57
 
 /*  start  of  programs  */
 //line yacctab:1
@@ -56,42 +64,48 @@ var BeautyExca = [...]int{
 
 const BeautyPrivate = 57344
 
-const BeautyLast = 3
+const BeautyLast = 7
 
 var BeautyAct = [...]int{
-	3, 2, 1,
+	4, 7, 6, 5, 3, 2, 1,
 }
 
 var BeautyPact = [...]int{
-	-6, -1000, -8, -1000,
+	-6, -1000, -1000, -1000, -1000, -5, -7, -1000,
 }
 
 var BeautyPgo = [...]int{
-	0, 2, 2,
+	0, 6, 5, 4,
 }
 
 var BeautyR1 = [...]int{
-	0, 1, 2,
+	0, 1, 1, 3, 2,
 }
 
 var BeautyR2 = [...]int{
-	0, 2, 1,
+	0, 1, 1, 3, 1,
 }
 
 var BeautyChk = [...]int{
-	-1000, -1, 7, 8,
+	-1000, -1, -2, -3, 6, 9, 7, 8,
 }
 
 var BeautyDef = [...]int{
-	0, -2, 0, 1,
+	0, -2, 1, 2, 4, 0, 0, 3,
 }
 
 var BeautyTok1 = [...]int{
-	1,
+	1, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 9,
 }
 
 var BeautyTok2 = [...]int{
-	2, 3, 4, 5, 6, 7, 8, 9,
+	2, 3, 4, 5, 6, 7, 8,
 }
 
 var BeautyTok3 = [...]int{
@@ -436,15 +450,32 @@ Beautydefault:
 	switch Beautynt {
 
 	case 1:
-		BeautyDollar = BeautyS[Beautypt-2 : Beautypt+1]
-//line parser.go.y:28
+		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
+//line parser.go.y:38
 		{
-			fmt.Println(BeautyDollar[1].val)
-			BeautyVAL.val = BeautyDollar[2].val
+			BeautyVAL.val = BeautyDollar[1].val
 		}
 	case 2:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:32
+//line parser.go.y:39
+		{
+			BeautyVAL.val = BeautyDollar[1].at_tok
+		}
+	case 3:
+		BeautyDollar = BeautyS[Beautypt-3 : Beautypt+1]
+//line parser.go.y:43
+		{
+			fmt.Println(BeautyDollar[1].val)
+			val := make(map[string]string, 0)
+			val[BeautyDollar[2].val] = BeautyDollar[3].val
+			BeautyVAL.at_tok = AtTok{
+				Opt: BeautyDollar[2].val,
+				Val: val,
+			}
+		}
+	case 4:
+		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
+//line parser.go.y:52
 		{
 			BeautyVAL.val = BeautyDollar[1].val
 		}

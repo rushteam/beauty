@@ -1,42 +1,69 @@
 
 state 0
-	$accept: .at $end 
+	$accept: .program $end 
 
-	at_auth  shift 2
+	Comment  shift 4
+	'@'  shift 5
 	.  error
 
-	at  goto 1
+	program  goto 1
+	comment  goto 2
+	at  goto 3
 
 state 1
-	$accept:  at.$end 
+	$accept:  program.$end 
 
 	$end  accept
 	.  error
 
 
 state 2
-	at:  at_auth.at_val 
+	program:  comment.    (1)
 
-	at_val  shift 3
-	.  error
+	.  reduce 1 (src line 38)
 
 
 state 3
-	at:  at_auth at_val.    (1)
+	program:  at.    (2)
 
-	.  reduce 1 (src line 28)
+	.  reduce 2 (src line 39)
 
-Rule not reduced: comment:  string 
 
-9 terminals, 3 nonterminals
-3 grammar rules, 4/8000 states
+state 4
+	comment:  Comment.    (4)
+
+	.  reduce 4 (src line 52)
+
+
+state 5
+	at:  '@'.at_opt at_val 
+
+	at_opt  shift 6
+	.  error
+
+
+state 6
+	at:  '@' at_opt.at_val 
+
+	at_val  shift 7
+	.  error
+
+
+state 7
+	at:  '@' at_opt at_val.    (3)
+
+	.  reduce 3 (src line 43)
+
+
+9 terminals, 4 nonterminals
+5 grammar rules, 8/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
-52 working sets used
-memory: parser 0/120000
+53 working sets used
+memory: parser 2/120000
 0 extra closures
-2 shift entries, 1 exceptions
-2 goto entries
--1 entries saved by goto default
-Optimizer space used: output 3/120000
-3 table entries, 0 zero
-maximum spread: 8, maximum offset: 8
+4 shift entries, 1 exceptions
+3 goto entries
+0 entries saved by goto default
+Optimizer space used: output 7/120000
+7 table entries, 0 zero
+maximum spread: 9, maximum offset: 8

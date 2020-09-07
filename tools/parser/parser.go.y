@@ -5,6 +5,13 @@ package parser
 import (
 	"fmt"
 )
+//@auth jwt
+//@rest url
+//@doc (key:val)
+type AtTok struct {
+	Opt string
+	Val map[string]string
+}
 %}
 
 // fields inside this union end up as the fields in a structure known
@@ -12,26 +19,40 @@ import (
 %union{
 	// empty struct{}
 	val string
+	at_tok AtTok
 }
 
 // any non-terminal which returns a value needs a type, which is
 // really a field name in the above union struct
 // %type <val> expr number
-%type <val> at comment
+%type <val> program comment
+%type <at_tok> at
 
+%start program
 // same for terminals
 // SERVICE RPC
-%token ILLEGAL EOF At
-%token <val> at_auth at_val
-%token <val> string
+%token ILLEGAL EOF
+%token <val> Comment at_opt at_val '@'
+
 %%
-at: at_auth at_val {
-	fmt.Println($1)
-	$$ = $2
-}
-comment: string{
+program: comment {$$ = $1} 
+| at {
 	$$ = $1
 }
+;
+at: '@' at_opt at_val {
+	fmt.Println($1)
+	val := make(map[string]string,0)
+	val[$2] = $3
+	$$ = AtTok{
+		Opt: $2,
+		Val: val,
+	}
+};
+comment: Comment {
+	$$ = $1
+};
+
 
 %%
 /*  start  of  programs  */

@@ -3,18 +3,19 @@
 package parser
 
 import (
-	"fmt"
+	// "fmt"
 )
+
+const EOF =0
+
 //@auth jwt
 //@rest url
 //@doc (key:val)
-const EOF =0
 type AtTok struct {
 	Opt string
 	Val map[string]string
 }
 %}
-
 // fields inside this union end up as the fields in a structure known
 // as ${PREFIX}SymType, of which a reference is passed to the lexer.
 %union{
@@ -36,11 +37,9 @@ type AtTok struct {
 %token <val> Comment Val '@'
 
 %%
-program: comment 
-| at
-{
-	fmt.Println($1)
-}
+program: {}
+| program comment 
+| program at {}
 ;
 at: '@' Val Val {
 	val := make(map[string]string,0)

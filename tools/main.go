@@ -17,7 +17,9 @@ func main() {
 	// `
 	content := `
 @auth jwt
+//test
 @auth jwt
+
 `
 	// s := parser.NewScanner(strings.NewReader(content))
 	s := &parser.Scanner{}

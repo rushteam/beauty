@@ -9,20 +9,20 @@ import __yyfmt__ "fmt"
 //line parser.go.y:3
 
 import (
-	"fmt"
+// "fmt"
 )
+
+const EOF = 0
 
 //@auth jwt
 //@rest url
 //@doc (key:val)
-const EOF = 0
-
 type AtTok struct {
 	Opt string
 	Val map[string]string
 }
 
-//line parser.go.y:20
+//line parser.go.y:21
 type BeautySymType struct {
 	yys int
 	// empty struct{}
@@ -50,7 +50,7 @@ const BeautyEofCode = 1
 const BeautyErrCode = 2
 const BeautyInitialStackSize = 16
 
-//line parser.go.y:58
+//line parser.go.y:57
 
 /*  start  of  programs  */
 //line yacctab:1
@@ -69,7 +69,7 @@ var BeautyAct = [...]int{
 }
 
 var BeautyPact = [...]int{
-	-5, -1000, -1000, -1000, -1000, -2, -3, -1000,
+	-1000, -5, -1000, -1000, -1000, -2, -3, -1000,
 }
 
 var BeautyPgo = [...]int{
@@ -77,11 +77,11 @@ var BeautyPgo = [...]int{
 }
 
 var BeautyR1 = [...]int{
-	0, 1, 1, 3, 2,
+	0, 1, 1, 1, 3, 2,
 }
 
 var BeautyR2 = [...]int{
-	0, 1, 1, 3, 1,
+	0, 0, 2, 2, 3, 1,
 }
 
 var BeautyChk = [...]int{
@@ -89,7 +89,7 @@ var BeautyChk = [...]int{
 }
 
 var BeautyDef = [...]int{
-	0, -2, 1, 2, 4, 0, 0, 3,
+	1, -2, 2, 3, 5, 0, 0, 4,
 }
 
 var BeautyTok1 = [...]int{
@@ -447,15 +447,19 @@ Beautydefault:
 	// dummy call; replaced with literal code
 	switch Beautynt {
 
-	case 2:
-		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:41
+	case 1:
+		BeautyDollar = BeautyS[Beautypt-0 : Beautypt+1]
+//line parser.go.y:40
 		{
-			fmt.Println(BeautyDollar[1].at_tok)
 		}
 	case 3:
+		BeautyDollar = BeautyS[Beautypt-2 : Beautypt+1]
+//line parser.go.y:42
+		{
+		}
+	case 4:
 		BeautyDollar = BeautyS[Beautypt-3 : Beautypt+1]
-//line parser.go.y:45
+//line parser.go.y:44
 		{
 			val := make(map[string]string, 0)
 			val["_"] = BeautyDollar[3].val
@@ -464,9 +468,9 @@ Beautydefault:
 				Val: val,
 			}
 		}
-	case 4:
+	case 5:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:53
+//line parser.go.y:52
 		{
 			BeautyVAL.val = BeautyDollar[1].val
 		}

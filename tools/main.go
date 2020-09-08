@@ -25,6 +25,7 @@ func main() {
 	s := &parser.Scanner{}
 	s.Init(strings.NewReader(content))
 	parser.BeautyParse(parser.NewLexer(s))
+
 	// fi := bufio.NewReader(os.NewFile(0, "stdin"))
 	// for {
 	// 	var eqn string

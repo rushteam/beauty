@@ -104,7 +104,6 @@ type Scanner struct {
 // and Whitespace is set to GoWhitespace.
 func (s *Scanner) Init(src io.Reader) *Scanner {
 	s.src = src
-
 	// initialize source buffer
 	// (the first call to next() will fill it by calling src.Read)
 	s.srcBuf[0] = utf8.RuneSelf // sentinel

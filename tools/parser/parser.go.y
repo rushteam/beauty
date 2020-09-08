@@ -3,7 +3,7 @@
 package parser
 
 import (
-	// "fmt"
+	"fmt"
 )
 //@auth jwt
 //@rest url
@@ -37,12 +37,14 @@ type AtTok struct {
 
 %%
 program: comment 
-| at 
-{}
+| at
+{
+	fmt.Println($1)
+}
 ;
 at: '@' Val Val {
 	val := make(map[string]string,0)
-	val[$2] = $3
+	val["_"] = $3
 	$$ = AtTok{
 		Opt: $2,
 		Val: val,

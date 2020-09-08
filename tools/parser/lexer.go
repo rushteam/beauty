@@ -55,5 +55,5 @@ func (l *Lexer) Lex(lval *BeautySymType) int {
 }
 
 func (l *Lexer) Error(msg string) {
-	fmt.Printf("syntax error: %s (line: %d)\n", msg, l.s.line)
+	fmt.Printf("lexer: %s %s\n", msg, l.s.Pos())
 }

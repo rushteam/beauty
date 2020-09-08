@@ -9,7 +9,7 @@ import __yyfmt__ "fmt"
 //line parser.go.y:3
 
 import (
-// "fmt"
+	"fmt"
 )
 
 //@auth jwt
@@ -50,7 +50,7 @@ const BeautyEofCode = 1
 const BeautyErrCode = 2
 const BeautyInitialStackSize = 16
 
-//line parser.go.y:56
+//line parser.go.y:58
 
 /*  start  of  programs  */
 //line yacctab:1
@@ -451,13 +451,14 @@ Beautydefault:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
 //line parser.go.y:41
 		{
+			fmt.Println(BeautyDollar[1].at_tok)
 		}
 	case 3:
 		BeautyDollar = BeautyS[Beautypt-3 : Beautypt+1]
-//line parser.go.y:43
+//line parser.go.y:45
 		{
 			val := make(map[string]string, 0)
-			val[BeautyDollar[2].val] = BeautyDollar[3].val
+			val["_"] = BeautyDollar[3].val
 			BeautyVAL.at_tok = AtTok{
 				Opt: BeautyDollar[2].val,
 				Val: val,
@@ -465,7 +466,7 @@ Beautydefault:
 		}
 	case 4:
 		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
-//line parser.go.y:51
+//line parser.go.y:53
 		{
 			BeautyVAL.val = BeautyDollar[1].val
 		}

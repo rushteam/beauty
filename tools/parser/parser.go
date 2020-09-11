@@ -3,54 +3,63 @@
 //line parser.go.y:2
 
 package parser
-
 import __yyfmt__ "fmt"
-
 //line parser.go.y:3
-
+		
 import (
-// "fmt"
+	"./ast"
 )
 
-const EOF = 0
+const EOF =0
 
 //@auth jwt
 //@rest url
 //@doc (key:val)
-type AtTok struct {
-	Opt string
-	Val map[string]string
-}
 
-//line parser.go.y:21
-type BeautySymType struct {
+//line parser.go.y:17
+type BeautySymType struct{
 	yys int
 	// empty struct{}
-	val    string
-	at_tok AtTok
+	val string
+	at ast.At
+	service ast.Service
+	rpc_slice []ast.RPC
+	rpc ast.RPC
 }
 
 const ILLEGAL = 57346
-const Comment = 57347
-const Val = 57348
+const Service = 57347
+const Rpc = 57348
+const Returns = 57349
+const Comment = 57350
+const Val = 57351
+const Method = 57352
 
 var BeautyToknames = [...]string{
 	"$end",
 	"error",
 	"$unk",
 	"ILLEGAL",
+	"Service",
+	"Rpc",
+	"Returns",
 	"Comment",
 	"Val",
+	"Method",
+	"'('",
+	"')'",
 	"'@'",
+	"'|'",
 }
 
-var BeautyStatenames = [...]string{}
+var BeautyStatenames = [...]string{
+}
 
 const BeautyEofCode = 1
 const BeautyErrCode = 2
 const BeautyInitialStackSize = 16
 
-//line parser.go.y:57
+//line parser.go.y:80
 
 /*  start  of  programs  */
 //line yacctab:1
@@ -62,34 +71,42 @@ var BeautyExca = [...]int{
 
 const BeautyPrivate = 57344
 
-const BeautyLast = 7
+const BeautyLast = 23
 
 var BeautyAct = [...]int{
-	4, 3, 5, 7, 6, 2, 1,
+	7, 23, 19, 5, 15, 21, 22, 17, 6, 11,
+	18, 16, 10, 9, 8, 20, 14, 12, 13, 4,
+	3, 2, 1,
 }
 
 var BeautyPact = [...]int{
-	-1000, -5, -1000, -1000, -1000, -2, -3, -1000,
+	-1000, -5, -1000, -1000, -1000, -1000, 5, 4, 3, -2,
+	-1000, 10, -8, -1000, 2, -1000, -4, 1, -10, 8,
+	-6, -3, -11, -1000,
 }
 
 var BeautyPgo = [...]int{
-	0, 6, 5, 1,
+	0, 22, 21, 20, 19, 18, 17,
 }
 
 var BeautyR1 = [...]int{
-	0, 1, 1, 1, 3, 2,
+	0, 1, 1, 1, 1, 3, 2, 4, 6, 5,
 }
 
 var BeautyR2 = [...]int{
-	0, 0, 2, 2, 3, 1,
+	0, 0, 2, 2, 2, 3, 1, 5, 1, 9,
 }
 
 var BeautyChk = [...]int{
-	-1000, -1, -2, -3, 5, 7, 6, 6,
+	-1000, -1, -2, -3, -4, 8, 13, 5, 9, 9,
+	9, 11, -6, -5, 6, 12, 9, 11, 9, 12,
+	7, 11, 9, 12,
 }
 
 var BeautyDef = [...]int{
-	1, -2, 2, 3, 5, 0, 0, 4,
+	1, -2, 2, 3, 4, 6, 0, 0, 0, 0,
+	5, 0, 0, 8, 0, 7, 0, 0, 0, 0,
+	0, 0, 0, 9,
 }
 
 var BeautyTok1 = [...]int{
@@ -97,13 +114,19 @@ var BeautyTok1 = [...]int{
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	11, 12, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 13, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 3, 7,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 14,
 }
 
 var BeautyTok2 = [...]int{
-	2, 3, 4, 5, 6,
+	2, 3, 4, 5, 6, 7, 8, 9, 10,
 }
 
 var BeautyTok3 = [...]int{
@@ -114,7 +137,8 @@ var BeautyErrorMessages = [...]struct {
 	state int
 	token int
 	msg   string
-}{}
+}{
+}
 
 //line yaccpar:1
 
@@ -448,32 +472,55 @@ Beautydefault:
 	switch Beautynt {
 
 	case 1:
-		BeautyDollar = BeautyS[Beautypt-0 : Beautypt+1]
-//line parser.go.y:40
-		{
-		}
+		BeautyDollar = BeautyS[Beautypt-0:Beautypt+1]
+//line parser.go.y:50
+		{}
 	case 3:
-		BeautyDollar = BeautyS[Beautypt-2 : Beautypt+1]
-//line parser.go.y:42
-		{
-		}
-	case 4:
-		BeautyDollar = BeautyS[Beautypt-3 : Beautypt+1]
-//line parser.go.y:44
-		{
-			val := make(map[string]string, 0)
-			val["_"] = BeautyDollar[3].val
-			BeautyVAL.at_tok = AtTok{
-				Opt: BeautyDollar[2].val,
-				Val: val,
-			}
-		}
-	case 5:
-		BeautyDollar = BeautyS[Beautypt-1 : Beautypt+1]
+		BeautyDollar = BeautyS[Beautypt-2:Beautypt+1]
 //line parser.go.y:52
+		{}
+	case 4:
+		BeautyDollar = BeautyS[Beautypt-2:Beautypt+1]
+//line parser.go.y:53
+		{}
+	case 5:
+		BeautyDollar = BeautyS[Beautypt-3:Beautypt+1]
+//line parser.go.y:55
 		{
-			BeautyVAL.val = BeautyDollar[1].val
+		val := make(map[string]string,0)
+		val["_"] = BeautyDollar[3].val
+		BeautyVAL.at = AtTok{
+			Opt: BeautyDollar[2].val,
+			Val: val,
 		}
+	}
+	case 6:
+		BeautyDollar = BeautyS[Beautypt-1:Beautypt+1]
+//line parser.go.y:63
+		{
+		BeautyVAL.val = BeautyDollar[1].val
+	}
+	case 7:
+		BeautyDollar = BeautyS[Beautypt-5:Beautypt+1]
+//line parser.go.y:66
+		{
+		BeautyVAL.service = ast.Service{
+	
+		}
+	}
+	case 8:
+		BeautyDollar = BeautyS[Beautypt-1:Beautypt+1]
+//line parser.go.y:71
+		{
+		BeautyVAL.rpc_slice = []Rpc
+		BeautyVAL.rpc_slice = append(BeautyVAL.rpc_slice,BeautyDollar[1].rpc)
+	}
+	case 9:
+		BeautyDollar = BeautyS[Beautypt-9:Beautypt+1]
+//line parser.go.y:75
+		{
+		BeautyVAL.rpc = ast.RPC{}
+	}
 	}
 	goto Beautystack /* stack new state and value */
 }

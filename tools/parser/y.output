@@ -3,7 +3,7 @@ state 0
 	$accept: .program $end 
 	program: .    (1)
 
-	.  reduce 1 (src line 40)
+	.  reduce 1 (src line 50)
 
 	program  goto 1
 
@@ -11,62 +11,175 @@ state 1
 	$accept:  program.$end 
 	program:  program.comment 
 	program:  program.at 
+	program:  program.service 
 
 	$end  accept
-	Comment  shift 4
-	'@'  shift 5
+	Service  shift 7
+	Comment  shift 5
+	'@'  shift 6
 	.  error
 
 	comment  goto 2
 	at  goto 3
+	service  goto 4
 
 state 2
 	program:  program comment.    (2)
 
-	.  reduce 2 (src line 41)
+	.  reduce 2 (src line 51)
 
 
 state 3
 	program:  program at.    (3)
 
-	.  reduce 3 (src line 42)
+	.  reduce 3 (src line 52)
 
 
 state 4
-	comment:  Comment.    (5)
+	program:  program service.    (4)
 
-	.  reduce 5 (src line 52)
+	.  reduce 4 (src line 53)
 
 
 state 5
-	at:  '@'.Val Val 
+	comment:  Comment.    (6)
 
-	Val  shift 6
-	.  error
+	.  reduce 6 (src line 63)
 
 
 state 6
-	at:  '@' Val.Val 
+	at:  '@'.Val Val 
 
-	Val  shift 7
+	Val  shift 8
 	.  error
 
 
 state 7
-	at:  '@' Val Val.    (4)
+	service:  Service.Val '(' rpc_list ')' 
 
-	.  reduce 4 (src line 44)
+	Val  shift 9
+	.  error
 
 
-7 terminals, 4 nonterminals
-6 grammar rules, 8/8000 states
+state 8
+	at:  '@' Val.Val 
+
+	Val  shift 10
+	.  error
+
+
+state 9
+	service:  Service Val.'(' rpc_list ')' 
+
+	'('  shift 11
+	.  error
+
+
+state 10
+	at:  '@' Val Val.    (5)
+
+	.  reduce 5 (src line 55)
+
+
+state 11
+	service:  Service Val '('.rpc_list ')' 
+
+	Rpc  shift 14
+	.  error
+
+	rpc  goto 13
+	rpc_list  goto 12
+
+state 12
+	service:  Service Val '(' rpc_list.')' 
+
+	')'  shift 15
+	.  error
+
+
+state 13
+	rpc_list:  rpc.    (8)
+
+	.  reduce 8 (src line 71)
+
+
+state 14
+	rpc:  Rpc.Val '(' Val ')' Returns '(' Val ')' 
+
+	Val  shift 16
+	.  error
+
+
+state 15
+	service:  Service Val '(' rpc_list ')'.    (7)
+
+	.  reduce 7 (src line 66)
+
+
+state 16
+	rpc:  Rpc Val.'(' Val ')' Returns '(' Val ')' 
+
+	'('  shift 17
+	.  error
+
+
+state 17
+	rpc:  Rpc Val '('.Val ')' Returns '(' Val ')' 
+
+	Val  shift 18
+	.  error
+
+
+state 18
+	rpc:  Rpc Val '(' Val.')' Returns '(' Val ')' 
+
+	')'  shift 19
+	.  error
+
+
+state 19
+	rpc:  Rpc Val '(' Val ')'.Returns '(' Val ')' 
+
+	Returns  shift 20
+	.  error
+
+
+state 20
+	rpc:  Rpc Val '(' Val ')' Returns.'(' Val ')' 
+
+	'('  shift 21
+	.  error
+
+
+state 21
+	rpc:  Rpc Val '(' Val ')' Returns '('.Val ')' 
+
+	Val  shift 22
+	.  error
+
+
+state 22
+	rpc:  Rpc Val '(' Val ')' Returns '(' Val.')' 
+
+	')'  shift 23
+	.  error
+
+
+state 23
+	rpc:  Rpc Val '(' Val ')' Returns '(' Val ')'.    (9)
+
+	.  reduce 9 (src line 75)
+
+
+14 terminals, 7 nonterminals
+10 grammar rules, 24/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
-53 working sets used
-memory: parser 2/120000
+56 working sets used
+memory: parser 5/120000
 0 extra closures
-4 shift entries, 1 exceptions
-3 goto entries
+17 shift entries, 1 exceptions
+6 goto entries
 0 entries saved by goto default
-Optimizer space used: output 7/120000
-7 table entries, 0 zero
-maximum spread: 7, maximum offset: 6
+Optimizer space used: output 23/120000
+23 table entries, 0 zero
+maximum spread: 13, maximum offset: 12

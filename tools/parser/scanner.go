@@ -64,9 +64,9 @@ type Scanner struct {
 	// One character look-ahead
 	ch rune // character before current srcPos
 
-	// Error is called for each error encountered. If no Error
+	// ErrorFunc is called for each error encountered. If no Error
 	// function is set, the error is reported to os.Stderr.
-	Error func(s *Scanner, msg string)
+	ErrorFunc func(s *Scanner, msg string)
 
 	// ErrorCount is incremented by one for each error encountered.
 	ErrorCount int
@@ -125,7 +125,7 @@ func (s *Scanner) Init(src io.Reader) *Scanner {
 	s.ch = -2 // no char read yet, not EOF
 
 	// initialize public fields
-	s.Error = nil
+	s.ErrorFunc = nil
 	s.ErrorCount = 0
 	s.Whitespace = GoWhitespace
 	s.Line = 0 // invalidate token position
@@ -250,8 +250,8 @@ func (s *Scanner) Peek() rune {
 func (s *Scanner) error(msg string) {
 	s.tokEnd = s.srcPos - s.lastCharLen // make sure token text is terminated
 	s.ErrorCount++
-	if s.Error != nil {
-		s.Error(s, msg)
+	if s.ErrorFunc != nil {
+		s.ErrorFunc(s, msg)
 		return
 	}
 	pos := s.Position
@@ -370,6 +370,16 @@ func (s *Scanner) scanComment(ch rune) rune {
 	return ch
 }
 
+func (s *Scanner) scanAt(ch rune) rune {
+	for {
+		ch = s.next()
+		if !unicode.IsLetter(ch) {
+			break
+		}
+	}
+	return ch
+}
+
 // Scan reads the next token or Unicode character from source and returns it.
 // It only recognizes tokens t for which the respective Mode bit (1<<-t) is set.
 // It returns EOF at the end of the source. It reports scanner errors (read and
@@ -377,7 +387,6 @@ func (s *Scanner) scanComment(ch rune) rune {
 // message to os.Stderr.
 func (s *Scanner) Scan() rune {
 	ch := s.Peek()
-
 	// reset token text position
 	s.tokPos = -1
 	s.Line = 0
@@ -405,38 +414,41 @@ func (s *Scanner) Scan() rune {
 		s.Line = s.line - 1
 		s.Column = s.lastLineLen
 	}
+	// const Service = 57347
+	// const Rpc = 57348
+	// const Returns = 57349
+	// const Comment = 57350
+	// const Val = 57351
+	// const Method = 57352
 
 	// determine token value
 	tok := ch
 	switch {
-	// case s.isIdentRune(ch, 0):
-	// 	tok = Ident
-	// 	ch = s.scanIdentifier()
 	case s.isIdentRune(ch, 0):
-		tok = Val
 		ch = s.scanIdentifier()
+		tok = Ident
 	default:
 		switch ch {
 		case EOF:
 			break
-		// case '"':
-		// 	s.scanString('"')
-		// 	tok = String
-		// 	ch = s.next()
+		case '"':
+			s.scanString('"')
+			tok = Val
+			ch = s.next()
 		case '/':
 			ch = s.next()
 			if ch == '/' || ch == '*' {
 				ch = s.scanComment(ch)
 				tok = Comment
 			}
+		case '@':
+			ch = s.scanAt(ch)
 		default:
 			ch = s.next()
 		}
 	}
-
 	// end of token text
 	s.tokEnd = s.srcPos - s.lastCharLen
-
 	s.ch = ch
 	return tok
 }

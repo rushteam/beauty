@@ -2,32 +2,60 @@ package parser
 
 import (
 	"fmt"
+	"io"
+	"strings"
 )
 
-//NewLexer ..
-func NewLexer(s *Scanner) *Lexer {
-	// scanner.TokenString(12)
-	return &Lexer{s: s}
-}
-
-//Lexer ..
-type Lexer struct {
-	s *Scanner
+//NewScanner ..
+func NewScanner(src io.Reader) BeautyLexer {
+	s := &Scanner{}
+	s.Init(src)
+	s.ErrorFunc = func(s *Scanner, msg string) {
+		fmt.Printf("scanner: %s %s\n", msg, s.Pos())
+	}
+	return s
 }
 
 //Lex ..
-func (l *Lexer) Lex(lval *BeautySymType) int {
-	tok := l.s.Scan()
+func (s *Scanner) Error(msg string) {
+	if s.ErrorFunc != nil {
+		s.ErrorFunc(s, msg)
+	}
+}
+
+//Lex ..
+func (s *Scanner) Lex(lval *BeautySymType) int {
+	tok := s.Scan()
+	val := s.TokenText()
 	switch tok {
 	case EOF:
 		return EOF
 	case ILLEGAL:
 		return ILLEGAL
-
+	case Ident:
+		t := strings.ToLower(val)
+		switch t {
+		case "service":
+			tok = Service
+		case "rpc":
+			tok = Rpc
+		case "returns":
+			tok = Returns
+			// case "(":
+			// 	tok = '('
+			// case ")":
+			// 	tok = ')'
+			// case "@":
+			// 	tok = ')'
+		}
+	case '@':
+		switch strings.ToLower(s.TokenText()) {
+		case "@route":
+			tok = Route
+		}
 	}
-	tokVal := l.s.TokenText()
-	fmt.Println("token:", tok, tokVal)
-	lval.val = tokVal
+	fmt.Println("token:", tok, val)
+	lval.token = val
 	// var buf bytes.Buffer
 	// for {
 	// l.s.Scan()
@@ -52,8 +80,4 @@ func (l *Lexer) Lex(lval *BeautySymType) int {
 	// }
 	// }
 	return int(tok)
-}
-
-func (l *Lexer) Error(msg string) {
-	fmt.Printf("lexer: %s %s\n", msg, l.s.Pos())
 }

@@ -15,16 +15,17 @@ func main() {
 	//     rpc Index(getRequest) returns (getResponse)
 	// )
 	// `
-	content := `
-@auth jwt
-//test
-@auth jwt
+	// @auth jwt
+	// @auth jwt
 
+	content := `
+service helloworld (
+	@route GET|POST "/index/:id"
+    rpc Index(getRequest) returns (getResponse)
+    rpc Helloworld(getRequest) returns (getResponse)
+)
 `
-	// s := parser.NewScanner(strings.NewReader(content))
-	s := &parser.Scanner{}
-	s.Init(strings.NewReader(content))
-	parser.BeautyParse(parser.NewLexer(s))
+	parser.BeautyParse(parser.NewScanner(strings.NewReader(content)))
 
 	// fi := bufio.NewReader(os.NewFile(0, "stdin"))
 	// for {

@@ -11,3 +11,6 @@ type Service struct{}
 
 //RPC ..
 type RPC struct{}
+
+//Route ..
+type Route struct{}

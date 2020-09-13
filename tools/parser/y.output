@@ -64,7 +64,7 @@ state 6
 state 7
 	rpc_list:  rpc.    (5)
 
-	.  reduce 5 (src line 83)
+	.  reduce 5 (src line 90)
 
 
 state 8
@@ -87,11 +87,11 @@ state 9
 state 10
 	route_list:  route.    (9)
 
-	.  reduce 9 (src line 93)
+	.  reduce 9 (src line 110)
 
 
 state 11
-	route:  Route.methods Val 
+	route:  Route.methods String 
 
 	Ident  shift 18
 	.  error
@@ -101,13 +101,13 @@ state 11
 state 12
 	service:  Service Ident '(' rpc_list ')'.    (3)
 
-	.  reduce 3 (src line 76)
+	.  reduce 3 (src line 82)
 
 
 state 13
 	rpc_list:  rpc_list rpc.    (4)
 
-	.  reduce 4 (src line 81)
+	.  reduce 4 (src line 88)
 
 
 state 14
@@ -120,7 +120,7 @@ state 14
 state 15
 	route_list:  route_list route.    (8)
 
-	.  reduce 8 (src line 91)
+	.  reduce 8 (src line 108)
 
 
 state 16
@@ -131,10 +131,10 @@ state 16
 
 
 state 17
-	route:  Route methods.Val 
+	route:  Route methods.String 
 	methods:  methods.'|' Ident 
 
-	Val  shift 21
+	String  shift 21
 	'|'  shift 22
 	.  error
 
@@ -142,7 +142,7 @@ state 17
 state 18
 	methods:  Ident.    (12)
 
-	.  reduce 12 (src line 101)
+	.  reduce 12 (src line 121)
 
 
 state 19
@@ -160,9 +160,9 @@ state 20
 
 
 state 21
-	route:  Route methods Val.    (10)
+	route:  Route methods String.    (10)
 
-	.  reduce 10 (src line 96)
+	.  reduce 10 (src line 113)
 
 
 state 22
@@ -189,7 +189,7 @@ state 24
 state 25
 	methods:  methods '|' Ident.    (11)
 
-	.  reduce 11 (src line 99)
+	.  reduce 11 (src line 119)
 
 
 state 26
@@ -258,13 +258,13 @@ state 34
 state 35
 	rpc:  Rpc Ident '(' Ident ')' Returns '(' Ident ')'.    (7)
 
-	.  reduce 7 (src line 88)
+	.  reduce 7 (src line 100)
 
 
 state 36
 	rpc:  route_list Rpc Ident '(' Ident ')' Returns '(' Ident ')'.    (6)
 
-	.  reduce 6 (src line 86)
+	.  reduce 6 (src line 93)
 
 
 14 terminals, 8 nonterminals

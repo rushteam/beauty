@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/rushteam/beauty/tools/parser"
@@ -33,7 +34,8 @@ service helloworld (
     rpc Helloworld(getRequest) returns (getResponse)
 )
 `
-	parser.BeautyParse(parser.NewScanner(strings.NewReader(content)))
+	stmts := parser.Parser(strings.NewReader(content), "")
+	fmt.Printf("%+v", stmts[0])
 
 	// fi := bufio.NewReader(os.NewFile(0, "stdin"))
 	// for {

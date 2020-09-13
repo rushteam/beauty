@@ -1,491 +1,107 @@
 package parser
 
 import (
-	"bytes"
 	"fmt"
 	"io"
-	"os"
-	"strings"
 	"text/scanner"
-	"unicode"
-	"unicode/utf8"
+
+	"github.com/rushteam/beauty/tools/parser/ast"
 )
 
-// A source position is represented by a Position value.
-// A position is valid if Line > 0.
-type Position struct {
-	Filename string // filename, if any
-	Offset   int    // byte offset, starting at 0
-	Line     int    // line number, starting at 1
-	Column   int    // column number, starting at 1 (character count per line)
+//Parser ..
+func Parser(src io.Reader, filename string) []ast.Stmt {
+	s := newScanner(src, filename)
+	yyParse(s)
+	return s.Stmts
 }
 
-// IsValid reports whether the position is valid.
-func (pos *Position) IsValid() bool { return pos.Line > 0 }
-
-func (pos Position) String() string {
-	s := pos.Filename
-	if s == "" {
-		s = "<input>"
+//newScanner ..
+func newScanner(src io.Reader, filename string) *Scanner {
+	p := scanner.Position{Filename: filename}
+	s := &Scanner{
+		s: &scanner.Scanner{Position: p},
 	}
-	if pos.IsValid() {
-		s += fmt.Sprintf(":%d:%d", pos.Line, pos.Column)
+	s.s.Init(src)
+	s.s.Error = func(ss *scanner.Scanner, msg string) {
+		s.Error(msg)
 	}
 	return s
 }
 
-//bom file header
-const bom = 0xFEFF // byte order mark, only permitted as very first character
-//GoWhitespace ..
-const GoWhitespace uint64 = 1<<'\t' | 1<<'\n' | 1<<'\r' | 1<<' '
-const bufLen = 1024 // at least utf8.UTFMax
-
-// A Scanner implements reading of Unicode characters and tokens from an io.Reader.
+// Scanner ..
 type Scanner struct {
-	// Input
-	src io.Reader
-
-	// Source buffer
-	srcBuf [bufLen + 1]byte // +1 for sentinel for common case of s.next()
-	srcPos int              // reading position (srcBuf index)
-	srcEnd int              // source end (srcBuf index)
-
-	// Source position
-	srcBufOffset int // byte offset of srcBuf[0] in source
-	line         int // line count
-	column       int // character count
-	lastLineLen  int // length of last line in characters (for correct column reporting)
-	lastCharLen  int // length of last character in bytes
-
-	// Token text buffer
-	// Typically, token text is stored completely in srcBuf, but in general
-	// the token text's head may be buffered in tokBuf while the token text's
-	// tail is stored in srcBuf.
-	tokBuf bytes.Buffer // token text head that is not in srcBuf anymore
-	tokPos int          // token text tail position (srcBuf index); valid if >= 0
-	tokEnd int          // token text tail end (srcBuf index)
-
-	// One character look-ahead
-	ch rune // character before current srcPos
-
-	ErrorFunc  func(s *Scanner, msg string)
-	ErrorCount int
-
-	Mode uint
-
-	Whitespace uint64
-
-	IsIdentRune func(ch rune, i int) bool
-	Position
+	s     *scanner.Scanner
+	Stmts []ast.Stmt
 }
 
-// Init initializes a Scanner with a new source and returns s.
-// Error is set to nil, ErrorCount is set to 0, Mode is set to GoTokens,
-// and Whitespace is set to GoWhitespace.
-func (s *Scanner) Init(src io.Reader) *Scanner {
-	s.src = src
-	// initialize source buffer
-	// (the first call to next() will fill it by calling src.Read)
-	s.srcBuf[0] = utf8.RuneSelf // sentinel
-	s.srcPos = 0
-	s.srcEnd = 0
-
-	// initialize source position
-	s.srcBufOffset = 0
-	s.line = 1
-	s.column = 0
-	s.lastLineLen = 0
-	s.lastCharLen = 0
-
-	// initialize token text buffer
-	// (required for first call to next()).
-	s.tokPos = -1
-
-	// initialize one character look-ahead
-	s.ch = -2 // no char read yet, not EOF
-
-	// initialize public fields
-	s.ErrorFunc = nil
-	s.ErrorCount = 0
-	s.Whitespace = GoWhitespace
-	s.Line = 0 // invalidate token position
-
-	if s.ch == bom {
-		s.next() // ignore BOM at file beginning
-	}
-	return s
+//Lex ..
+func (s *Scanner) Error(msg string) {
+	fmt.Printf("scanner: %s %s\n", msg, s.s.Pos())
 }
 
-// next reads and returns the next Unicode character. It is designed such
-// that only a minimal amount of work needs to be done in the common ASCII
-// case (one test to check for both ASCII and end-of-buffer, and one test
-// to check for newlines).
-func (s *Scanner) next() rune {
-	ch, width := rune(s.srcBuf[s.srcPos]), 1
-
-	if ch >= utf8.RuneSelf {
-		// uncommon case: not ASCII or not enough bytes
-		for s.srcPos+utf8.UTFMax > s.srcEnd && !utf8.FullRune(s.srcBuf[s.srcPos:s.srcEnd]) {
-			// not enough bytes: read some more, but first
-			// save away token text if any
-			if s.tokPos >= 0 {
-				s.tokBuf.Write(s.srcBuf[s.tokPos:s.srcPos])
-				s.tokPos = 0
-				// s.tokEnd is set by Scan()
-			}
-			// move unread bytes to beginning of buffer
-			copy(s.srcBuf[0:], s.srcBuf[s.srcPos:s.srcEnd])
-			s.srcBufOffset += s.srcPos
-			// read more bytes
-			// (an io.Reader must return io.EOF when it reaches
-			// the end of what it is reading - simply returning
-			// n == 0 will make this loop retry forever; but the
-			// error is in the reader implementation in that case)
-			i := s.srcEnd - s.srcPos
-			n, err := s.src.Read(s.srcBuf[i:bufLen])
-			s.srcPos = 0
-			s.srcEnd = i + n
-			s.srcBuf[s.srcEnd] = utf8.RuneSelf // sentinel
-			if err != nil {
-				if err != io.EOF {
-					s.error(err.Error())
-				}
-				if s.srcEnd == 0 {
-					if s.lastCharLen > 0 {
-						// previous character was not EOF
-						s.column++
-					}
-					s.lastCharLen = 0
-					return EOF
-				}
-				// If err == EOF, we won't be getting more
-				// bytes; break to avoid infinite loop. If
-				// err is something else, we don't know if
-				// we can get more bytes; thus also break.
-				break
-			}
-		}
-		// at least one byte
-		ch = rune(s.srcBuf[s.srcPos])
-		if ch >= utf8.RuneSelf {
-			// uncommon case: not ASCII
-			ch, width = utf8.DecodeRune(s.srcBuf[s.srcPos:s.srcEnd])
-			if ch == utf8.RuneError && width == 1 {
-				// advance for correct error position
-				s.srcPos += width
-				s.lastCharLen = width
-				s.column++
-				s.error("invalid UTF-8 encoding")
-				return ch
-			}
-		}
-	}
-
-	// advance
-	s.srcPos += width
-	s.lastCharLen = width
-	s.column++
-
-	// special situations
-	switch ch {
-	case 0:
-		// for compatibility with other tools
-		s.error("invalid character NUL")
-	case '\n':
-		s.line++
-		s.lastLineLen = s.column
-		s.column = 0
-	}
-
-	return ch
-}
-
-// Next reads and returns the next Unicode character.
-// It returns EOF at the end of the source. It reports
-// a read error by calling s.Error, if not nil; otherwise
-// it prints an error message to os.Stderr. Next does not
-// update the Scanner's Position field; use Pos() to
-// get the current position.
-func (s *Scanner) Next() rune {
-	s.tokPos = -1 // don't collect token text
-	s.Line = 0    // invalidate token position
-	ch := s.Peek()
-	if ch != EOF {
-		s.ch = s.next()
-	}
-	return ch
-}
-
-// Peek returns the next Unicode character in the source without advancing
-// the scanner. It returns EOF if the scanner's position is at the last
-// character of the source.
-func (s *Scanner) Peek() rune {
-	if s.ch == -2 {
-		// this code is only run for the very first character
-		s.ch = s.next()
-		if s.ch == '\uFEFF' {
-			s.ch = s.next() // ignore BOM
-		}
-	}
-	return s.ch
-}
-
-func (s *Scanner) error(msg string) {
-	s.tokEnd = s.srcPos - s.lastCharLen // make sure token text is terminated
-	s.ErrorCount++
-	if s.ErrorFunc != nil {
-		s.ErrorFunc(s, msg)
-		return
-	}
-	pos := s.Position
-	if !pos.IsValid() {
-		pos = s.Pos()
-	}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", pos, msg)
-}
-
-func (s *Scanner) errorf(format string, args ...interface{}) {
-	s.error(fmt.Sprintf(format, args...))
-}
-
-func (s *Scanner) isIdentRune(ch rune, i int) bool {
-	if s.IsIdentRune != nil {
-		return s.IsIdentRune(ch, i)
-	}
-	return ch == '_' || unicode.IsLetter(ch) || unicode.IsDigit(ch) && i > 0
-}
-func (s *Scanner) scanIdentifier() rune {
-	// we know the zero'th rune is OK; start scanning at the next one
-	ch := s.next()
-	for i := 1; s.isIdentRune(ch, i); i++ {
-		ch = s.next()
-	}
-	return ch
-}
-
-func lower(ch rune) rune     { return ('a' - 'A') | ch } // returns lower-case ch iff ch is ASCII letter
-func isDecimal(ch rune) bool { return '0' <= ch && ch <= '9' }
-func isHex(ch rune) bool     { return '0' <= ch && ch <= '9' || 'a' <= lower(ch) && lower(ch) <= 'f' }
-
-func digitVal(ch rune) int {
-	switch {
-	case '0' <= ch && ch <= '9':
-		return int(ch - '0')
-	case 'a' <= lower(ch) && lower(ch) <= 'f':
-		return int(lower(ch) - 'a' + 10)
-	}
-	return 16 // larger than any legal digit val
-}
-
-func (s *Scanner) scanDigits(ch rune, base, n int) rune {
-	for n > 0 && digitVal(ch) < base {
-		ch = s.next()
-		n--
-	}
-	if n > 0 {
-		s.error("invalid char escape")
-	}
-	return ch
-}
-
-func (s *Scanner) scanEscape(quote rune) rune {
-	ch := s.next() // read character after '/'
-	switch ch {
-	case 'a', 'b', 'f', 'n', 'r', 't', 'v', '\\', quote:
-		// nothing to do
-		ch = s.next()
-	case '0', '1', '2', '3', '4', '5', '6', '7':
-		ch = s.scanDigits(ch, 8, 3)
-	case 'x':
-		ch = s.scanDigits(s.next(), 16, 2)
-	case 'u':
-		ch = s.scanDigits(s.next(), 16, 4)
-	case 'U':
-		ch = s.scanDigits(s.next(), 16, 8)
-	default:
-		s.error("invalid char escape")
-	}
-	return ch
-}
-
-func (s *Scanner) scanString(quote rune) (n int) {
-	ch := s.next() // read character after quote
-	for ch != quote {
-		if ch == '\n' || ch < 0 {
-			s.error("literal not terminated")
-			return
-		}
-		if ch == '\\' {
-			ch = s.scanEscape(quote)
-		} else {
-			ch = s.next()
-		}
-		n++
-	}
-	return
-}
-
-func (s *Scanner) scanComment(ch rune) rune {
-	// ch == '/' || ch == '*'
-	if ch == '/' {
-		// line comment
-		ch = s.next() // read character after "//"
-		for ch != '\n' && ch >= 0 {
-			ch = s.next()
-		}
-		return ch
-	}
-
-	// general comment
-	ch = s.next() // read character after "/*"
-	for {
-		if ch < 0 {
-			s.error("comment not terminated")
-			break
-		}
-		ch0 := ch
-		ch = s.next()
-		if ch0 == '*' && ch == '/' {
-			ch = s.next()
-			break
-		}
-	}
-	return ch
-}
-
-func (s *Scanner) scanAt(ch rune) rune {
-	for {
-		ch = s.next()
-		if !unicode.IsLetter(ch) {
-			break
-		}
-	}
-	return ch
-}
-
-var identTokens = map[string]rune{
+var identTokens = map[string]int{
 	"service": Service,
 	"rpc":     Rpc,
 	"returns": Returns,
+	"route":   Route,
 }
 
-//Scan ..
-func (s *Scanner) Scan() (rune, string) {
-	ch := s.Peek()
-	// reset token text position
-	s.tokPos = -1
-	s.Line = 0
-
-	// skip white space
-	for s.Whitespace&(1<<uint(ch)) != 0 {
-		ch = s.next()
-	}
-
-	// start collecting token text
-	s.tokBuf.Reset()
-	s.tokPos = s.srcPos - s.lastCharLen
-
-	// set token position
-	// (this is a slightly optimized version of the code in Pos())
-	s.Offset = s.srcBufOffset + s.tokPos
-	if s.column > 0 {
-		// common case: last character was not a '\n'
-		s.Line = s.line
-		s.Column = s.column
-	} else {
-		// last character was a '\n'
-		// (we cannot be at the beginning of the source
-		// since we have called next() at least once)
-		s.Line = s.line - 1
-		s.Column = s.lastLineLen
-	}
-	// determine token value
-	scanner.Scanner
-parseTok:
-	tok := ch
-	switch {
-	case s.isIdentRune(ch, 0):
-		ch = s.scanIdentifier()
-		tok = Ident
-		val := strings.ToLower(s.TokenText())
-		if t, ok := identTokens[val]; ok {
-			tok = t
-		}
-	default:
-		switch ch {
-		case EOF:
+//Lex ..
+func (s *Scanner) Lex(lval *yySymType) int {
+	var tok int
+	var val, v string
+	var stateFn state = s.rootState
+	for {
+		if stateFn == nil {
 			break
-		case '"':
-			s.scanString('"')
-			tok = Val
-			ch = s.next()
-		case '/':
-			ch = s.next()
-			if ch == '/' || ch == '*' {
-				ch = s.scanComment(ch)
-				tok = Comment
-			}
-			//skip comment
-			ch = s.next()
-			goto parseTok
-		case '@':
-			ch = s.scanAt(ch)
-		default:
-			ch = s.next()
 		}
+		tok, v, stateFn = stateFn()
+		val = val + v
 	}
-	// end of token text
-	s.tokEnd = s.srcPos - s.lastCharLen
-	s.ch = ch
-	return tok, s.TokenText()
+	// fmt.Println("token:", tok, val)
+	lval.token = val
+	// Ident
+	// Int
+	// Float
+	// Char
+	// String
+	// RawString
+	// Comment
+	//ILLEGAL
+	return int(tok)
 }
 
-// Pos returns the position of the character immediately after
-// the character or token returned by the last call to Next or Scan.
-// Use the Scanner's Position field for the start position of the most
-// recently scanned token.
-func (s *Scanner) Pos() (pos Position) {
-	pos.Filename = s.Filename
-	pos.Offset = s.srcBufOffset + s.srcPos - s.lastCharLen
-	switch {
-	case s.column > 0:
-		// common case: last character was not a '\n'
-		pos.Line = s.line
-		pos.Column = s.column
-	case s.lastLineLen > 0:
-		// last character was a '\n'
-		pos.Line = s.line - 1
-		pos.Column = s.lastLineLen
+type state func() (int, string, state)
+
+func (s *Scanner) rootState() (int, string, state) {
+	tok, val := s.s.Scan(), s.s.TokenText()
+	switch tok {
+	case scanner.EOF:
+		return EOF, val, nil
+	case scanner.Ident:
+		if t, ok := identTokens[val]; ok {
+			return t, val, nil
+		}
+		return Ident, val, nil
+	case scanner.String:
+		return String, val, nil
+	case '@':
+		return String, val, s.atState
+	}
+	return int(tok), val, nil
+}
+func (s *Scanner) atState() (int, string, state) {
+	var atTokens = map[string]int{
+		"route": Route,
+	}
+	tok, val := s.s.Scan(), s.s.TokenText()
+	switch tok {
+	case scanner.EOF:
+		return EOF, val, nil
 	default:
-		// at the beginning of the source
-		pos.Line = 1
-		pos.Column = 1
+		if t, ok := atTokens[val]; ok {
+			return t, val, nil
+		}
+		return ILLEGAL, val, nil
 	}
-	return
-}
-
-// TokenText returns the string corresponding to the most recently scanned token.
-// Valid after calling Scan and in calls of Scanner.Error.
-func (s *Scanner) TokenText() string {
-	if s.tokPos < 0 {
-		// no token text
-		return ""
-	}
-
-	if s.tokEnd < s.tokPos {
-		// if EOF was reached, s.tokEnd is set to -1 (s.srcPos == 0)
-		s.tokEnd = s.tokPos
-	}
-	// s.tokEnd >= s.tokPos
-
-	if s.tokBuf.Len() == 0 {
-		// common case: the entire token text is still in srcBuf
-		return string(s.srcBuf[s.tokPos:s.tokEnd])
-	}
-
-	// part of the token text was saved in tokBuf: save the rest in
-	// tokBuf as well and return its content
-	s.tokBuf.Write(s.srcBuf[s.tokPos:s.tokEnd])
-	s.tokPos = s.tokEnd // ensure idempotency of TokenText() call
-	return s.tokBuf.String()
 }

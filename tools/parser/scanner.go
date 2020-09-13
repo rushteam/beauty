@@ -9,10 +9,12 @@ import (
 )
 
 //Parser ..
-func Parser(src io.Reader, filename string) []ast.Stmt {
+func Parser(src io.Reader, filename string) ([]*ast.Stmt, error) {
 	s := newScanner(src, filename)
-	yyParse(s)
-	return s.Stmts
+	if yyParse(s) != 0 {
+		return nil, s.Err
+	}
+	return s.Stmts, nil
 }
 
 //newScanner ..
@@ -31,12 +33,13 @@ func newScanner(src io.Reader, filename string) *Scanner {
 // Scanner ..
 type Scanner struct {
 	s     *scanner.Scanner
-	Stmts []ast.Stmt
+	Stmts []*ast.Stmt
+	Err   error
 }
 
 //Lex ..
 func (s *Scanner) Error(msg string) {
-	fmt.Printf("scanner: %s %s\n", msg, s.s.Pos())
+	s.Err = fmt.Errorf("scanner: %v %v\n", msg, s.s.Pos())
 }
 
 var identTokens = map[string]int{

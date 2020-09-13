@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/rushteam/beauty/tools/parser"
+	"github.com/rushteam/beauty/tools/parser/ast"
 )
 
 func main() {
@@ -26,7 +28,6 @@ func main() {
 	// 		tok = Route
 	// 	}
 	// }
-
 	content := `
 service helloworld (
 	@route GET|POST "/index/:id"
@@ -34,8 +35,21 @@ service helloworld (
     rpc Helloworld(getRequest) returns (getResponse)
 )
 `
-	stmts := parser.Parser(strings.NewReader(content), "")
-	fmt.Printf("%+v", stmts[0])
+	stmts, err := parser.Parser(strings.NewReader(content), "")
+	if err != nil {
+		fmt.Println(err)
+	}
+	v, _ := json.Marshal(stmts)
+	fmt.Println(string(v))
+	// fmt.Printf("%+v", stmts[0])
+	ast.Inspect(stmts, func(node ast.Node) bool {
+		fmt.Printf("node: %+v \n", node)
+		// switch n := node.(type) {
+		// case *ast.Service:
+		// 	fmt.Println(n.Name)
+		// }
+		return true
+	})
 
 	// fi := bufio.NewReader(os.NewFile(0, "stdin"))
 	// for {

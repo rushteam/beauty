@@ -26,11 +26,11 @@ type yySymType struct {
 	str   string
 	// at_list []ast.At
 	// at ast.At
-	service    ast.Service
-	rpc_list   []ast.RPC
-	rpc        ast.RPC
-	route      ast.Route
-	route_list []ast.Route
+	service    *ast.Service
+	rpc_list   []*ast.RPC
+	rpc        *ast.RPC
+	route      *ast.Route
+	route_list []*ast.Route
 	methods    []string
 }
 
@@ -58,6 +58,7 @@ var yyToknames = [...]string{
 	"'('",
 	"')'",
 	"'|'",
+	"'.'",
 }
 
 var yyStatenames = [...]string{}
@@ -66,7 +67,7 @@ const yyEofCode = 1
 const yyErrCode = 2
 const yyInitialStackSize = 16
 
-//line parser.go.y:124
+//line parser.go.y:138
 
 /*  start  of  programs  */
 /*
@@ -85,48 +86,56 @@ var yyExca = [...]int{
 
 const yyPrivate = 57344
 
-const yyLast = 39
+const yyLast = 57
 
 var yyAct = [...]int{
-	21, 36, 9, 22, 11, 35, 28, 27, 3, 12,
-	32, 31, 23, 20, 5, 34, 33, 26, 25, 24,
-	19, 18, 16, 4, 14, 9, 11, 11, 10, 30,
-	29, 7, 17, 8, 6, 2, 1, 15, 13,
+	25, 21, 22, 24, 20, 23, 9, 54, 11, 53,
+	50, 48, 41, 12, 39, 34, 32, 49, 47, 42,
+	40, 33, 31, 5, 52, 51, 46, 44, 37, 35,
+	30, 29, 28, 27, 26, 19, 18, 16, 4, 14,
+	9, 11, 11, 10, 45, 43, 38, 36, 7, 3,
+	17, 8, 15, 6, 2, 13, 1,
 }
 
 var yyPact = [...]int{
-	3, -1000, -1000, 13, 2, 19, -4, -1000, 18, 12,
-	-1000, 11, -1000, -1000, 10, -1000, 1, -11, -1000, 0,
-	9, -1000, 8, 7, -6, -1000, -7, 23, 22, -1,
-	-2, 6, 5, -8, -12, -1000, -1000,
+	44, -1000, -1000, 28, 11, 34, 0, -1000, 33, 27,
+	-1000, 26, -1000, -1000, 25, -1000, -11, -9, -1000, -12,
+	24, 23, -1000, 22, 21, 20, 10, 3, -1000, 9,
+	2, 19, 40, 18, 39, 1, 8, -1, 7, 38,
+	17, 37, 16, 6, -2, 5, -3, 15, -1000, 14,
+	-1000, -4, -6, -1000, -1000,
 }
 
 var yyPgo = [...]int{
-	0, 36, 35, 31, 34, 28, 33, 32,
+	0, 56, 54, 48, 53, 43, 51, 50,
 }
 
 var yyR1 = [...]int{
-	0, 1, 1, 2, 4, 4, 3, 3, 6, 6,
-	5, 7, 7,
+	0, 1, 1, 2, 4, 4, 3, 3, 3, 3,
+	6, 6, 5, 7, 7,
 }
 
 var yyR2 = [...]int{
-	0, 0, 1, 5, 2, 1, 10, 9, 2, 1,
-	3, 3, 1,
+	0, 0, 1, 5, 2, 1, 12, 10, 11, 9,
+	2, 1, 3, 3, 1,
 }
 
 var yyChk = [...]int{
 	-1000, -1, -2, 5, 10, 12, -4, -3, -6, 6,
 	-5, 8, 13, -3, 6, -5, 10, -7, 10, 10,
-	12, 11, 14, 12, 10, 10, 10, 13, 13, 7,
-	7, 12, 12, 10, 10, 13, 13,
+	15, 12, 11, 14, 15, 12, 10, 10, 10, 10,
+	10, 12, 13, 12, 13, 10, 7, 10, 7, 13,
+	12, 13, 12, 7, 10, 7, 10, 12, 13, 12,
+	13, 10, 10, 13, 13,
 }
 
 var yyDef = [...]int{
 	1, -2, 2, 0, 0, 0, 0, 5, 0, 0,
-	9, 0, 3, 4, 0, 8, 0, 0, 12, 0,
-	0, 10, 0, 0, 0, 11, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 7, 6,
+	11, 0, 3, 4, 0, 10, 0, 0, 14, 0,
+	0, 0, 12, 0, 0, 0, 0, 0, 13, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 9, 0,
+	7, 0, 0, 8, 6,
 }
 
 var yyTok1 = [...]int{
@@ -134,7 +143,7 @@ var yyTok1 = [...]int{
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	12, 13, 3, 3, 3, 3, 3, 3, 3, 3,
+	12, 13, 3, 3, 3, 3, 15, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -500,7 +509,7 @@ yydefault:
 //line parser.go.y:59
 		{
 			if l, ok := yylex.(*Scanner); ok {
-				stmt := ast.Stmt{}
+				stmt := &ast.Stmt{}
 				stmt.Services = append(stmt.Services, yyDollar[1].service)
 				l.Stmts = append(l.Stmts, stmt)
 			}
@@ -509,7 +518,7 @@ yydefault:
 		yyDollar = yyS[yypt-5 : yypt+1]
 //line parser.go.y:82
 		{
-			yyVAL.service = ast.Service{
+			yyVAL.service = &ast.Service{
 				Name: yyDollar[2].token,
 				Rpcs: yyDollar[4].rpc_list,
 			}
@@ -527,57 +536,79 @@ yydefault:
 			yyVAL.rpc_list = append(yyVAL.rpc_list, yyDollar[1].rpc)
 		}
 	case 6:
-		yyDollar = yyS[yypt-10 : yypt+1]
+		yyDollar = yyS[yypt-12 : yypt+1]
 //line parser.go.y:93
 		{
-			yyVAL.rpc = ast.RPC{
+			yyVAL.rpc = &ast.RPC{
+				Routes:   yyDollar[1].route_list,
+				Handler:  yyDollar[3].token + yyDollar[5].token,
+				Request:  yyDollar[7].token,
+				Response: yyDollar[11].token,
+			}
+		}
+	case 7:
+		yyDollar = yyS[yypt-10 : yypt+1]
+//line parser.go.y:100
+		{
+			yyVAL.rpc = &ast.RPC{
 				Routes:   yyDollar[1].route_list,
 				Handler:  yyDollar[3].token,
 				Request:  yyDollar[5].token,
 				Response: yyDollar[9].token,
 			}
 		}
-	case 7:
-		yyDollar = yyS[yypt-9 : yypt+1]
-//line parser.go.y:100
+	case 8:
+		yyDollar = yyS[yypt-11 : yypt+1]
+//line parser.go.y:107
 		{
-			yyVAL.rpc = ast.RPC{
-				Routes:   []ast.Route{},
+			yyVAL.rpc = &ast.RPC{
+				Routes:   []*ast.Route{},
+				Handler:  yyDollar[2].token + yyDollar[4].token,
+				Request:  yyDollar[6].token,
+				Response: yyDollar[10].token,
+			}
+		}
+	case 9:
+		yyDollar = yyS[yypt-9 : yypt+1]
+//line parser.go.y:114
+		{
+			yyVAL.rpc = &ast.RPC{
+				Routes:   []*ast.Route{},
 				Handler:  yyDollar[2].token,
 				Request:  yyDollar[4].token,
 				Response: yyDollar[8].token,
 			}
 		}
-	case 8:
+	case 10:
 		yyDollar = yyS[yypt-2 : yypt+1]
-//line parser.go.y:108
+//line parser.go.y:122
 		{
 			yyVAL.route_list = append(yyDollar[1].route_list, yyDollar[2].route)
 		}
-	case 9:
+	case 11:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.go.y:110
+//line parser.go.y:124
 		{
 			yyVAL.route_list = append(yyVAL.route_list, yyDollar[1].route)
 		}
-	case 10:
+	case 12:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.go.y:113
+//line parser.go.y:127
 		{
-			yyVAL.route = ast.Route{
+			yyVAL.route = &ast.Route{
 				Methods: yyDollar[2].methods,
 				URI:     yyDollar[3].token,
 			}
 		}
-	case 11:
+	case 13:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.go.y:119
+//line parser.go.y:133
 		{
 			yyVAL.methods = append(yyDollar[1].methods, yyDollar[3].token)
 		}
-	case 12:
+	case 14:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.go.y:121
+//line parser.go.y:135
 		{
 			yyVAL.methods = append(yyVAL.methods, yyDollar[1].token)
 		}

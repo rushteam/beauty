@@ -1,19 +1,30 @@
 package ast
 
+//Node ..
+type Node interface {
+	// Walk(visit Visit) error
+	// walkSub()
+}
+
+// ast.Walk(v, f)
+
 //Stmt ..
 type Stmt struct {
-	Services []Service
+	Node
+	Services []*Service
 }
 
 //Service ..
 type Service struct {
+	Node
 	Name string
-	Rpcs []RPC
+	Rpcs []*RPC
 }
 
 //RPC ..
 type RPC struct {
-	Routes   []Route
+	Node
+	Routes   []*Route
 	Handler  string
 	Request  string
 	Response string
@@ -21,12 +32,14 @@ type RPC struct {
 
 //Route ..
 type Route struct {
+	Node
 	Methods []string
 	URI     string
 }
 
 //At ..
-type At struct {
-	Opt string
-	Val map[string]string
-}
+// type At struct {
+// 	Node
+// 	Opt string
+// 	Val map[string]string
+// }

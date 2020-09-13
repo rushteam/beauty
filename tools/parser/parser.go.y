@@ -20,11 +20,11 @@ const EOF =0
 	str string
 	// at_list []ast.At
 	// at ast.At
-	service ast.Service
-	rpc_list []ast.RPC
-	rpc ast.RPC
-	route ast.Route
-	route_list []ast.Route
+	service *ast.Service
+	rpc_list []*ast.RPC
+	rpc *ast.RPC
+	route *ast.Route
+	route_list []*ast.Route
 	methods []string
 }
 
@@ -48,7 +48,7 @@ const EOF =0
 %token ILLEGAL
 %token Service Rpc Returns Route
 %token <token> Comment Ident String
-%token '(' ')' '|'
+%token '(' ')' '|' '.'
 
 %%
 program: {}
@@ -58,7 +58,7 @@ program: {}
 // | at_list service {}
 | service {
 	if l, ok := yylex.(*Scanner); ok {
-		stmt := ast.Stmt{}
+		stmt := &ast.Stmt{}
 		stmt.Services = append(stmt.Services,$1)
 		l.Stmts = append(l.Stmts,stmt)
 	}
@@ -80,7 +80,7 @@ program: {}
 // };
 
 service: Service Ident '(' rpc_list ')' {
-	$$ = ast.Service{
+	$$ = &ast.Service{
 		Name: $2,
 		Rpcs: $4,
 	}
@@ -90,16 +90,30 @@ rpc_list: rpc_list rpc {
 } | rpc {
 	$$ = append($$,$1)
 };
-rpc: route_list Rpc Ident '(' Ident ')' Returns '(' Ident ')' {
-	$$ = ast.RPC{
+rpc: route_list Rpc Ident '.' Ident '(' Ident ')' Returns '(' Ident ')' {
+	$$ = &ast.RPC{
+		Routes: $1,
+		Handler: $3 + $5,
+		Request: $7,
+		Response: $11,
+	}
+} | route_list Rpc Ident '(' Ident ')' Returns '(' Ident ')' {
+	$$ = &ast.RPC{
 		Routes: $1,
 		Handler: $3,
 		Request: $5,
 		Response: $9,
 	}
+} | Rpc Ident '.' Ident '(' Ident ')' Returns '(' Ident ')' {
+	$$ = &ast.RPC{
+		Routes: []*ast.Route{},
+		Handler: $2 + $4,
+		Request: $6,
+		Response: $10,
+	}
 } | Rpc Ident '(' Ident ')' Returns '(' Ident ')' {
-	$$ = ast.RPC{
-		Routes: []ast.Route{},
+	$$ = &ast.RPC{
+		Routes: []*ast.Route{},
 		Handler: $2,
 		Request: $4,
 		Response: $8,
@@ -111,7 +125,7 @@ route_list: route_list route {
 	$$ = append($$,$1)
 };
 route: Route methods String {
-	$$ = ast.Route{
+	$$ = &ast.Route{
 		Methods: $2,
 		URI: $3,
 	}

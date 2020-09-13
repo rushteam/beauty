@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"text/scanner"
 	"unicode"
 	"unicode/utf8"
 )
@@ -32,6 +34,8 @@ func (pos Position) String() string {
 	return s
 }
 
+//bom file header
+const bom = 0xFEFF // byte order mark, only permitted as very first character
 //GoWhitespace ..
 const GoWhitespace uint64 = 1<<'\t' | 1<<'\n' | 1<<'\r' | 1<<' '
 const bufLen = 1024 // at least utf8.UTFMax
@@ -64,38 +68,14 @@ type Scanner struct {
 	// One character look-ahead
 	ch rune // character before current srcPos
 
-	// ErrorFunc is called for each error encountered. If no Error
-	// function is set, the error is reported to os.Stderr.
-	ErrorFunc func(s *Scanner, msg string)
-
-	// ErrorCount is incremented by one for each error encountered.
+	ErrorFunc  func(s *Scanner, msg string)
 	ErrorCount int
 
-	// The Mode field controls which tokens are recognized. For instance,
-	// to recognize Ints, set the ScanInts bit in Mode. The field may be
-	// changed at any time.
 	Mode uint
 
-	// The Whitespace field controls which characters are recognized
-	// as white space. To recognize a character ch <= ' ' as white space,
-	// set the ch'th bit in Whitespace (the Scanner's behavior is undefined
-	// for values ch > ' '). The field may be changed at any time.
 	Whitespace uint64
 
-	// IsIdentRune is a predicate controlling the characters accepted
-	// as the ith rune in an identifier. The set of valid characters
-	// must not intersect with the set of white space characters.
-	// If no IsIdentRune function is set, regular Go identifiers are
-	// accepted instead. The field may be changed at any time.
 	IsIdentRune func(ch rune, i int) bool
-
-	// Start position of most recently scanned token; set by Scan.
-	// Calling Init or Next invalidates the position (Line == 0).
-	// The Filename field is always left untouched by the Scanner.
-	// If an error is reported (via Error) and Position is invalid,
-	// the scanner is not inside a token. Call Pos to obtain an error
-	// position in that case, or to obtain the position immediately
-	// after the most recently scanned token.
 	Position
 }
 
@@ -130,6 +110,9 @@ func (s *Scanner) Init(src io.Reader) *Scanner {
 	s.Whitespace = GoWhitespace
 	s.Line = 0 // invalidate token position
 
+	if s.ch == bom {
+		s.next() // ignore BOM at file beginning
+	}
 	return s
 }
 
@@ -380,12 +363,14 @@ func (s *Scanner) scanAt(ch rune) rune {
 	return ch
 }
 
-// Scan reads the next token or Unicode character from source and returns it.
-// It only recognizes tokens t for which the respective Mode bit (1<<-t) is set.
-// It returns EOF at the end of the source. It reports scanner errors (read and
-// token errors) by calling s.Error, if not nil; otherwise it prints an error
-// message to os.Stderr.
-func (s *Scanner) Scan() rune {
+var identTokens = map[string]rune{
+	"service": Service,
+	"rpc":     Rpc,
+	"returns": Returns,
+}
+
+//Scan ..
+func (s *Scanner) Scan() (rune, string) {
 	ch := s.Peek()
 	// reset token text position
 	s.tokPos = -1
@@ -414,19 +399,18 @@ func (s *Scanner) Scan() rune {
 		s.Line = s.line - 1
 		s.Column = s.lastLineLen
 	}
-	// const Service = 57347
-	// const Rpc = 57348
-	// const Returns = 57349
-	// const Comment = 57350
-	// const Val = 57351
-	// const Method = 57352
-
 	// determine token value
+	scanner.Scanner
+parseTok:
 	tok := ch
 	switch {
 	case s.isIdentRune(ch, 0):
 		ch = s.scanIdentifier()
 		tok = Ident
+		val := strings.ToLower(s.TokenText())
+		if t, ok := identTokens[val]; ok {
+			tok = t
+		}
 	default:
 		switch ch {
 		case EOF:
@@ -441,6 +425,9 @@ func (s *Scanner) Scan() rune {
 				ch = s.scanComment(ch)
 				tok = Comment
 			}
+			//skip comment
+			ch = s.next()
+			goto parseTok
 		case '@':
 			ch = s.scanAt(ch)
 		default:
@@ -450,7 +437,7 @@ func (s *Scanner) Scan() rune {
 	// end of token text
 	s.tokEnd = s.srcPos - s.lastCharLen
 	s.ch = ch
-	return tok
+	return tok, s.TokenText()
 }
 
 // Pos returns the position of the character immediately after

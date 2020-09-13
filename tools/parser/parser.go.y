@@ -31,7 +31,7 @@ const EOF =0
 // any non-terminal which returns a value needs a type, which is
 // really a field name in the above union struct
 // %type <val> expr number
-%type <token> program comment
+%type <token> program
 // %type <at> at
 // %type <at_list> at_list
 %type <service> service
@@ -57,11 +57,6 @@ program: {}
 // | comment at_list service {}
 // | at_list service {}
 | service {}
-| comment service{}
-| comment service comment{}
-// | program comment
-// | program at | at {}
-// | program service {}
 ;
 // at_list: at_list at {
 // 	$$ = append($1,$2)
@@ -77,9 +72,7 @@ program: {}
 // 		Val: val,
 // 	}
 // };
-comment: Comment {
-	$$ = $1
-};
+
 service: Service Ident '(' rpc_list ')' {
 	$$ = ast.Service{
 
@@ -99,14 +92,21 @@ route_list: route_list route {
 	$$ = append($1,$2)
 } | route {
 	$$ = append($$,$1)
-}
+};
 route: Route methods Val {
 	$$ = ast.Route{}
-}
+};
 methods: methods '|' Ident {
 	$$ = append($1,$3)
 } | Ident {
 	$$ = append($$,$1)
-}
+};
 %%
 /*  start  of  programs  */
+/*
+service helloworld (
+	@route GET|POST "/index/:id"
+    rpc Index(getRequest) returns (getResponse)
+    rpc Helloworld(getRequest) returns (getResponse)
+)
+*/

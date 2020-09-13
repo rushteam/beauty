@@ -3,12 +3,10 @@ state 0
 	$accept: .program $end 
 	program: .    (1)
 
-	Service  shift 4
-	Comment  shift 5
+	Service  shift 3
 	.  reduce 1 (src line 54)
 
 	program  goto 1
-	comment  goto 3
 	service  goto 2
 
 state 1
@@ -25,289 +23,259 @@ state 2
 
 
 state 3
-	program:  comment.service 
-	program:  comment.service comment 
-
-	Service  shift 4
-	.  error
-
-	service  goto 6
-
-state 4
 	service:  Service.Ident '(' rpc_list ')' 
 
-	Ident  shift 7
+	Ident  shift 4
+	.  error
+
+
+state 4
+	service:  Service Ident.'(' rpc_list ')' 
+
+	'('  shift 5
 	.  error
 
 
 state 5
-	comment:  Comment.    (5)
-
-	.  reduce 5 (src line 80)
-
-
-state 6
-	program:  comment service.    (3)
-	program:  comment service.comment 
-
-	Comment  shift 5
-	.  reduce 3 (src line 60)
-
-	comment  goto 8
-
-state 7
-	service:  Service Ident.'(' rpc_list ')' 
-
-	'('  shift 9
-	.  error
-
-
-state 8
-	program:  comment service comment.    (4)
-
-	.  reduce 4 (src line 61)
-
-
-state 9
 	service:  Service Ident '('.rpc_list ')' 
 
-	Rpc  shift 13
-	Route  shift 15
+	Rpc  shift 9
+	Route  shift 11
 	.  error
 
-	rpc  goto 11
-	rpc_list  goto 10
-	route  goto 14
-	route_list  goto 12
+	rpc  goto 7
+	rpc_list  goto 6
+	route  goto 10
+	route_list  goto 8
 
-state 10
+state 6
 	service:  Service Ident '(' rpc_list.')' 
 	rpc_list:  rpc_list.rpc 
 
-	Rpc  shift 13
-	Route  shift 15
-	')'  shift 16
+	Rpc  shift 9
+	Route  shift 11
+	')'  shift 12
 	.  error
 
-	rpc  goto 17
-	route  goto 14
-	route_list  goto 12
+	rpc  goto 13
+	route  goto 10
+	route_list  goto 8
 
-state 11
-	rpc_list:  rpc.    (8)
+state 7
+	rpc_list:  rpc.    (5)
 
-	.  reduce 8 (src line 90)
+	.  reduce 5 (src line 83)
 
 
-state 12
+state 8
 	rpc:  route_list.Rpc Ident '(' Ident ')' Returns '(' Ident ')' 
 	route_list:  route_list.route 
 
-	Rpc  shift 18
-	Route  shift 15
+	Rpc  shift 14
+	Route  shift 11
 	.  error
 
-	route  goto 19
+	route  goto 15
 
-state 13
+state 9
 	rpc:  Rpc.Ident '(' Ident ')' Returns '(' Ident ')' 
 
-	Ident  shift 20
+	Ident  shift 16
 	.  error
 
 
-state 14
-	route_list:  route.    (12)
-
-	.  reduce 12 (src line 100)
-
-
-state 15
-	route:  Route.methods Val 
-
-	Ident  shift 22
-	.  error
-
-	methods  goto 21
-
-state 16
-	service:  Service Ident '(' rpc_list ')'.    (6)
-
-	.  reduce 6 (src line 83)
-
-
-state 17
-	rpc_list:  rpc_list rpc.    (7)
-
-	.  reduce 7 (src line 88)
-
-
-state 18
-	rpc:  route_list Rpc.Ident '(' Ident ')' Returns '(' Ident ')' 
-
-	Ident  shift 23
-	.  error
-
-
-state 19
-	route_list:  route_list route.    (11)
-
-	.  reduce 11 (src line 98)
-
-
-state 20
-	rpc:  Rpc Ident.'(' Ident ')' Returns '(' Ident ')' 
-
-	'('  shift 24
-	.  error
-
-
-state 21
-	route:  Route methods.Val 
-	methods:  methods.'|' Ident 
-
-	Val  shift 25
-	'|'  shift 26
-	.  error
-
-
-state 22
-	methods:  Ident.    (15)
-
-	.  reduce 15 (src line 108)
-
-
-state 23
-	rpc:  route_list Rpc Ident.'(' Ident ')' Returns '(' Ident ')' 
-
-	'('  shift 27
-	.  error
-
-
-state 24
-	rpc:  Rpc Ident '('.Ident ')' Returns '(' Ident ')' 
-
-	Ident  shift 28
-	.  error
-
-
-state 25
-	route:  Route methods Val.    (13)
-
-	.  reduce 13 (src line 103)
-
-
-state 26
-	methods:  methods '|'.Ident 
-
-	Ident  shift 29
-	.  error
-
-
-state 27
-	rpc:  route_list Rpc Ident '('.Ident ')' Returns '(' Ident ')' 
-
-	Ident  shift 30
-	.  error
-
-
-state 28
-	rpc:  Rpc Ident '(' Ident.')' Returns '(' Ident ')' 
-
-	')'  shift 31
-	.  error
-
-
-state 29
-	methods:  methods '|' Ident.    (14)
-
-	.  reduce 14 (src line 106)
-
-
-state 30
-	rpc:  route_list Rpc Ident '(' Ident.')' Returns '(' Ident ')' 
-
-	')'  shift 32
-	.  error
-
-
-state 31
-	rpc:  Rpc Ident '(' Ident ')'.Returns '(' Ident ')' 
-
-	Returns  shift 33
-	.  error
-
-
-state 32
-	rpc:  route_list Rpc Ident '(' Ident ')'.Returns '(' Ident ')' 
-
-	Returns  shift 34
-	.  error
-
-
-state 33
-	rpc:  Rpc Ident '(' Ident ')' Returns.'(' Ident ')' 
-
-	'('  shift 35
-	.  error
-
-
-state 34
-	rpc:  route_list Rpc Ident '(' Ident ')' Returns.'(' Ident ')' 
-
-	'('  shift 36
-	.  error
-
-
-state 35
-	rpc:  Rpc Ident '(' Ident ')' Returns '('.Ident ')' 
-
-	Ident  shift 37
-	.  error
-
-
-state 36
-	rpc:  route_list Rpc Ident '(' Ident ')' Returns '('.Ident ')' 
-
-	Ident  shift 38
-	.  error
-
-
-state 37
-	rpc:  Rpc Ident '(' Ident ')' Returns '(' Ident.')' 
-
-	')'  shift 39
-	.  error
-
-
-state 38
-	rpc:  route_list Rpc Ident '(' Ident ')' Returns '(' Ident.')' 
-
-	')'  shift 40
-	.  error
-
-
-state 39
-	rpc:  Rpc Ident '(' Ident ')' Returns '(' Ident ')'.    (10)
-
-	.  reduce 10 (src line 95)
-
-
-state 40
-	rpc:  route_list Rpc Ident '(' Ident ')' Returns '(' Ident ')'.    (9)
+state 10
+	route_list:  route.    (9)
 
 	.  reduce 9 (src line 93)
 
 
-14 terminals, 9 nonterminals
-16 grammar rules, 41/8000 states
+state 11
+	route:  Route.methods Val 
+
+	Ident  shift 18
+	.  error
+
+	methods  goto 17
+
+state 12
+	service:  Service Ident '(' rpc_list ')'.    (3)
+
+	.  reduce 3 (src line 76)
+
+
+state 13
+	rpc_list:  rpc_list rpc.    (4)
+
+	.  reduce 4 (src line 81)
+
+
+state 14
+	rpc:  route_list Rpc.Ident '(' Ident ')' Returns '(' Ident ')' 
+
+	Ident  shift 19
+	.  error
+
+
+state 15
+	route_list:  route_list route.    (8)
+
+	.  reduce 8 (src line 91)
+
+
+state 16
+	rpc:  Rpc Ident.'(' Ident ')' Returns '(' Ident ')' 
+
+	'('  shift 20
+	.  error
+
+
+state 17
+	route:  Route methods.Val 
+	methods:  methods.'|' Ident 
+
+	Val  shift 21
+	'|'  shift 22
+	.  error
+
+
+state 18
+	methods:  Ident.    (12)
+
+	.  reduce 12 (src line 101)
+
+
+state 19
+	rpc:  route_list Rpc Ident.'(' Ident ')' Returns '(' Ident ')' 
+
+	'('  shift 23
+	.  error
+
+
+state 20
+	rpc:  Rpc Ident '('.Ident ')' Returns '(' Ident ')' 
+
+	Ident  shift 24
+	.  error
+
+
+state 21
+	route:  Route methods Val.    (10)
+
+	.  reduce 10 (src line 96)
+
+
+state 22
+	methods:  methods '|'.Ident 
+
+	Ident  shift 25
+	.  error
+
+
+state 23
+	rpc:  route_list Rpc Ident '('.Ident ')' Returns '(' Ident ')' 
+
+	Ident  shift 26
+	.  error
+
+
+state 24
+	rpc:  Rpc Ident '(' Ident.')' Returns '(' Ident ')' 
+
+	')'  shift 27
+	.  error
+
+
+state 25
+	methods:  methods '|' Ident.    (11)
+
+	.  reduce 11 (src line 99)
+
+
+state 26
+	rpc:  route_list Rpc Ident '(' Ident.')' Returns '(' Ident ')' 
+
+	')'  shift 28
+	.  error
+
+
+state 27
+	rpc:  Rpc Ident '(' Ident ')'.Returns '(' Ident ')' 
+
+	Returns  shift 29
+	.  error
+
+
+state 28
+	rpc:  route_list Rpc Ident '(' Ident ')'.Returns '(' Ident ')' 
+
+	Returns  shift 30
+	.  error
+
+
+state 29
+	rpc:  Rpc Ident '(' Ident ')' Returns.'(' Ident ')' 
+
+	'('  shift 31
+	.  error
+
+
+state 30
+	rpc:  route_list Rpc Ident '(' Ident ')' Returns.'(' Ident ')' 
+
+	'('  shift 32
+	.  error
+
+
+state 31
+	rpc:  Rpc Ident '(' Ident ')' Returns '('.Ident ')' 
+
+	Ident  shift 33
+	.  error
+
+
+state 32
+	rpc:  route_list Rpc Ident '(' Ident ')' Returns '('.Ident ')' 
+
+	Ident  shift 34
+	.  error
+
+
+state 33
+	rpc:  Rpc Ident '(' Ident ')' Returns '(' Ident.')' 
+
+	')'  shift 35
+	.  error
+
+
+state 34
+	rpc:  route_list Rpc Ident '(' Ident ')' Returns '(' Ident.')' 
+
+	')'  shift 36
+	.  error
+
+
+state 35
+	rpc:  Rpc Ident '(' Ident ')' Returns '(' Ident ')'.    (7)
+
+	.  reduce 7 (src line 88)
+
+
+state 36
+	rpc:  route_list Rpc Ident '(' Ident ')' Returns '(' Ident ')'.    (6)
+
+	.  reduce 6 (src line 86)
+
+
+14 terminals, 8 nonterminals
+13 grammar rules, 37/8000 states
 0 shift/reduce, 0 reduce/reduce conflicts reported
-58 working sets used
-memory: parser 13/120000
-1 extra closures
-33 shift entries, 1 exceptions
-12 goto entries
+57 working sets used
+memory: parser 10/120000
+0 extra closures
+30 shift entries, 1 exceptions
+9 goto entries
 2 entries saved by goto default
-Optimizer space used: output 45/120000
-45 table entries, 0 zero
+Optimizer space used: output 39/120000
+39 table entries, 0 zero
 maximum spread: 14, maximum offset: 13

@@ -17,6 +17,14 @@ func main() {
 	// `
 	// @auth jwt
 	// @auth jwt
+	// case Ident:
+	// 	t :=
+	// case '@':
+	// 	switch strings.ToLower(s.TokenText()) {
+	// 	case "@route":
+	// 		tok = Route
+	// 	}
+	// }
 
 	content := `
 service helloworld (

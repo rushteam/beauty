@@ -5,8 +5,12 @@ type getRequest struct {
 
 @doc(summary: desc in one line)
 @auth jwt
-service (
-    @route /index/:name
-    rest Index(getRequest) returns (getResponse)
+
+service ()
+service Helloworld (
+    @auth jwt ""
+    @route GET|POST /index/:id
     rpc Index(getRequest) returns (getResponse)
+    rpc Helloworld(getRequest) returns (getResponse)
 )
+    

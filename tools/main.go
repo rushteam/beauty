@@ -31,7 +31,7 @@ func main() {
 	content := `
 service helloworld (
 	@route GET|POST "/index/:id"
-    rpc Index(getRequest) returns (getResponse)
+    rpc abc.Index(getRequest) returns (getResponse)
     rpc Helloworld(getRequest) returns (getResponse)
 )
 `

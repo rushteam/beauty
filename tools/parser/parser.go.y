@@ -93,7 +93,7 @@ rpc_list: rpc_list rpc {
 rpc: route_list Rpc Ident '.' Ident '(' Ident ')' Returns '(' Ident ')' {
 	$$ = &ast.RPC{
 		Routes: $1,
-		Handler: $3 + $5,
+		Handler: $3 + "." + $5,
 		Request: $7,
 		Response: $11,
 	}
@@ -107,7 +107,7 @@ rpc: route_list Rpc Ident '.' Ident '(' Ident ')' Returns '(' Ident ')' {
 } | Rpc Ident '.' Ident '(' Ident ')' Returns '(' Ident ')' {
 	$$ = &ast.RPC{
 		Routes: []*ast.Route{},
-		Handler: $2 + $4,
+		Handler: $2 + "." + $4,
 		Request: $6,
 		Response: $10,
 	}

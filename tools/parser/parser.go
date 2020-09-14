@@ -541,7 +541,7 @@ yydefault:
 		{
 			yyVAL.rpc = &ast.RPC{
 				Routes:   yyDollar[1].route_list,
-				Handler:  yyDollar[3].token + yyDollar[5].token,
+				Handler:  yyDollar[3].token + "." + yyDollar[5].token,
 				Request:  yyDollar[7].token,
 				Response: yyDollar[11].token,
 			}
@@ -563,7 +563,7 @@ yydefault:
 		{
 			yyVAL.rpc = &ast.RPC{
 				Routes:   []*ast.Route{},
-				Handler:  yyDollar[2].token + yyDollar[4].token,
+				Handler:  yyDollar[2].token + "." + yyDollar[4].token,
 				Request:  yyDollar[6].token,
 				Response: yyDollar[10].token,
 			}

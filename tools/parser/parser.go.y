@@ -1,5 +1,4 @@
 %{
-
 package parser
 
 import (
@@ -7,10 +6,7 @@ import (
 )
 
 const EOF =0
-
-//@auth jwt
-//@rest url
-//@doc (key:val)
+//goyacc -o parser.go parser.go.y
 %}
 // fields inside this union end up as the fields in a structure known
 // as ${PREFIX}SymType, of which a reference is passed to the lexer.

@@ -36,4 +36,14 @@ service helloworld (
 	})
 	t.Log(gen)
 	t.Fail()
+	// v, _ := json.Marshal(stmts)
+	// fmt.Println(string(v))
+	// ast.Inspect(stmts, func(node ast.Node) bool {
+	// 	fmt.Printf("node: %+v \n", node)
+	// 	// switch n := node.(type) {
+	// 	// case *ast.Service:
+	// 	// 	fmt.Println(n.Name)
+	// 	// }
+	// 	return true
+	// })
 }

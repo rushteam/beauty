@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/registry"
+	// "github.com/rushteam/beauty/pkg/registry"
 )
 
 // New ..
@@ -21,8 +21,8 @@ func New() beauty.Service {
 
 // Demo is a demo service
 type Demo struct {
-	service *registry.Service
-	closed  chan struct{}
+	// service *registry.Service
+	closed chan struct{}
 }
 
 // Start ..
@@ -45,6 +45,6 @@ func (d *Demo) Stop(ctx context.Context) error {
 }
 
 //Service ..
-func (d *Demo) Service() *registry.Service {
-	return d.service
-}
+// func (d *Demo) Service() *registry.Service {
+// 	return d.service
+// }

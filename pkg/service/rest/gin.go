@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rushteam/beauty/pkg/config"
 	"github.com/rushteam/beauty/pkg/log"
-	"github.com/rushteam/beauty/pkg/registry"
 )
 
 //ServiceKind ..
@@ -17,10 +16,10 @@ const ServiceKind = "rest.gin"
 //New new a rest service with the name
 func New(name string) (*Rest, error) {
 	s := &Rest{
-		service: &registry.Service{
-			Kind: ServiceKind,
-			Name: name,
-		},
+		// service: &registry.Service{
+		// 	Kind: ServiceKind,
+		// 	Name: name,
+		// },
 		Mode: gin.DebugMode,
 		Addr: ":http",
 	}
@@ -45,11 +44,11 @@ func New(name string) (*Rest, error) {
 //Rest ..
 type Rest struct {
 	*gin.Engine
-	Server  *http.Server
-	listen  *net.Listener
-	service *registry.Service
-	Mode    string
-	Addr    string
+	Server *http.Server
+	listen *net.Listener
+	// service *registry.Service
+	Mode string
+	Addr string
 }
 
 //Start ..
@@ -71,6 +70,6 @@ func (s *Rest) Stop(ctx context.Context) error {
 }
 
 //Service ..
-func (s *Rest) Service() *registry.Service {
-	return s.service
-}
+// func (s *Rest) Service() *registry.Service {
+// 	return s.service
+// }

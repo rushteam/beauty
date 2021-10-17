@@ -10,7 +10,6 @@ require (
 	github.com/gogo/protobuf v1.3.1 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/magiconair/properties v1.8.1 // indirect
-	github.com/rushteam/gosql v0.2.0
 	github.com/spf13/viper v1.7.1
 	github.com/stretchr/testify v1.4.0
 	go.uber.org/zap v1.16.0

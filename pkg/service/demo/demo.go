@@ -11,11 +11,11 @@ import (
 // New ..
 func New() beauty.Service {
 	return &Demo{
-		service: &registry.Service{
-			Namespace: "defalut",
-			Kind:      "demo",
-			Name:      "demo",
-		},
+		// service: &registry.Service{
+		// 	Namespace: "defalut",
+		// 	Kind:      "demo",
+		// 	Name:      "demo",
+		// },
 	}
 }
 

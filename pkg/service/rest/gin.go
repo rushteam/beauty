@@ -36,6 +36,7 @@ func New(name string) (*Rest, error) {
 
 	s.Engine = gin.New()
 	s.Server = &http.Server{
+
 		Handler: s.Engine,
 	}
 	return s, nil
@@ -61,7 +62,7 @@ func (s *Rest) Start(ctx context.Context) error {
 	if err := s.Server.Serve(ln); err != http.ErrServerClosed {
 		return err
 	}
-	return nil
+	return err
 }
 
 //Stop ..

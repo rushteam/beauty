@@ -2,50 +2,62 @@ package beauty
 
 import (
 	"context"
-	"flag"
 	"os"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/lifecycle"
 	"github.com/rushteam/beauty/pkg/log"
-	"github.com/rushteam/beauty/pkg/registry"
 	"github.com/rushteam/beauty/pkg/signals"
 	"go.uber.org/zap"
 )
 
+type HookEvent int
+
 const (
-	//StageBeforeRun ..
-	StageBeforeRun = iota
-	//StageAfterRun ..
-	StageAfterRun
+	//EventBeforeRun ..
+	EventBeforeRun HookEvent = iota
+	//EventAfterRun ..
+	EventAfterRun
 )
 
-var initHookStages []int
+var initHookStages []HookEvent
 
 //HookFunc ..
 type HookFunc func(app *App)
 
-//AppOptions ..
-type AppOptions func(app *App)
+//AppOption ..
+type AppOption func(app *App)
+
+// var _ registry.Service = (*Options)(nil)
+
+//Service ..
+type Service interface {
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+	String() string
+	// Service() *registry.Service
+}
 
 //App ..
 type App struct {
-	ctx      context.Context
-	logger   *zap.Logger
-	hooks    map[int][]HookFunc
-	service  []Service
-	registry registry.Registry
-	//shutdownTimeout timeout will be forces stop
+	ctx    context.Context
+	logger *zap.Logger
+	hooks  map[HookEvent][]HookFunc
+
+	services []Service
+
+	// registry registry.Registry
 	shutdownTimeout time.Duration
 	quit            chan struct{}
-	cycle           *lifecycle.Cycle
+
+	cycle *lifecycle.Cycle
 }
 
 //Hook add a hook func to stage
-func (app *App) Hook(stage int, fn HookFunc) {
+func (app *App) Hook(stage HookEvent, fn HookFunc) {
 	app.hooks[stage] = append(app.hooks[stage], fn)
 }
-func (app *App) runHooks(stage int) {
+func (app *App) runHooks(stage HookEvent) {
 	if hooks, ok := app.hooks[stage]; ok {
 		for _, h := range hooks {
 			h(app)
@@ -54,19 +66,19 @@ func (app *App) runHooks(stage int) {
 }
 
 //New ..
-func New(opts ...AppOptions) *App {
+func New(opts ...AppOption) *App {
 	app := &App{
 		ctx:             context.Background(),
-		hooks:           make(map[int][]HookFunc),
+		hooks:           make(map[HookEvent][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 		quit:            make(chan struct{}),
 		cycle:           lifecycle.New(),
+		// services:        []Service{&waitSignal{}},
 	}
 	app.SetLogger(log.Logger)
 	for _, opt := range opts {
 		opt(app)
 	}
-	flag.Parse()
 	return app
 }
 
@@ -76,36 +88,37 @@ func (app *App) SetLogger(l *zap.Logger) {
 }
 
 //SetRegistry ...
-func (app *App) SetRegistry(r registry.Registry) {
-	app.registry = r
-}
+// func (app *App) SetRegistry(r registry.Registry) {
+// 	app.registry = r
+// }
 
 // Run ..
-func (app *App) Run(service ...Service) error {
-	reg, _ := registry.Build()
-	app.SetRegistry(reg)
-	app.service = service
-	app.waitSignals()
-	app.runHooks(StageBeforeRun)
-	for _, srv := range app.service {
+func (app *App) Run(services ...Service) error {
+	// reg, _ := registry.Build()
+	// app.SetRegistry(reg)
+	app.services = append(app.services, &waitSignal{})
+	app.services = append(app.services, services...)
+	// app.waitSignals()
+	app.runHooks(EventBeforeRun)
+	for _, srv := range app.services {
 		func(srv Service) {
 			app.cycle.Run(func() error {
 				//Register service
-				if err := app.registry.Register(context.TODO(), srv.Service(), 5*time.Second); err != nil {
-					app.logger.Error("register error", zap.String("service", srv.Service().String()), zap.Error(err))
-				}
+				// if err := app.registry.Register(context.TODO(), srv.Service(), 5*time.Second); err != nil {
+				// 	app.logger.Error("register error", zap.String("service", srv.Service().String()), zap.Error(err))
+				// }
 				//Deregister service
-				defer func() {
-					if err := app.registry.Deregister(context.TODO(), srv.Service()); err != nil {
-						app.logger.Error("deregister error", zap.String("service", srv.Service().String()), zap.Error(err))
-					}
-				}()
-				return srv.Start(context.Background())
+				// defer func() {
+				// 	if err := app.registry.Deregister(context.TODO(), srv.Service()); err != nil {
+				// 		app.logger.Error("deregister error", zap.String("service", srv.Service().String()), zap.Error(err))
+				// 	}
+				// }()
+				return srv.Start(app.ctx)
 			})
-			app.logger.Info("start", zap.String("service", srv.Service().String()))
+			app.logger.Info("service start", zap.String("name", srv.String()))
 		}(srv)
 	}
-	app.runHooks(StageAfterRun)
+	app.runHooks(EventAfterRun)
 	defer app.logger.Sync()
 	err := <-app.cycle.Wait()
 	if err != nil {
@@ -118,14 +131,13 @@ func (app *App) Run(service ...Service) error {
 func (app *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
 	defer cancel()
-	pid := os.Getpid()
-	app.logger.Info("shutdown", zap.Int("pid", pid), zap.String("timeout", app.shutdownTimeout.String()))
-	for _, srv := range app.service {
+	app.logger.Info("shutdown", zap.Int("pid", os.Getpid()), zap.String("timeout", app.shutdownTimeout.String()))
+	for _, srv := range app.services {
 		func(srv Service) {
 			app.cycle.Run(func() error {
 				return srv.Stop(ctx)
 			})
-			app.logger.Info("stop", zap.String("service", srv.Service().String()))
+			app.logger.Info("service stop", zap.String("name", srv.String()))
 		}(srv)
 	}
 	select {
@@ -140,10 +152,23 @@ func (app *App) Shutdown() {
 	return
 }
 
-// waitSignals wait signal
-func (app *App) waitSignals() {
-	app.logger.Info("init listen signal")
+//waitSignal
+type waitSignal struct{}
+
+// Start ..
+func (w *waitSignal) Start(ctx context.Context) error {
+	stop := make(chan struct{})
 	signals.Shutdown(func() {
-		app.Shutdown()
+		close(stop)
 	})
+	<-stop
+	return nil
 }
+
+// Stop ..
+func (w *waitSignal) Stop(ctx context.Context) error {
+	return nil
+}
+
+// String ..
+func (w *waitSignal) String() string { return "signal" }

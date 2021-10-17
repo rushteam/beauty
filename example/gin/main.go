@@ -16,7 +16,7 @@ func main() {
 	}
 }
 func service() beauty.Service {
-	api, err := rest.Build("api")
+	api, err := rest.New("api")
 	if err != nil {
 		log.Fatalln(err)
 	}

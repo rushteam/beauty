@@ -7,7 +7,7 @@ import (
 
 //Cycle ..
 type Cycle struct {
-	mu      *sync.Mutex
+	// mu      *sync.Mutex
 	wg      *sync.WaitGroup
 	done    chan struct{}
 	quit    chan error
@@ -18,7 +18,7 @@ type Cycle struct {
 //New new a cycle life
 func New() *Cycle {
 	return &Cycle{
-		mu:      &sync.Mutex{},
+		// mu:      &sync.Mutex{},
 		wg:      &sync.WaitGroup{},
 		done:    make(chan struct{}),
 		quit:    make(chan error),
@@ -29,9 +29,9 @@ func New() *Cycle {
 
 //Run a new goroutine
 func (c *Cycle) Run(fn func() error) {
-	c.mu.Lock()
+	// c.mu.Lock()
+	// defer c.mu.Unlock()
 	//todo add check options panic before waiting
-	defer c.mu.Unlock()
 	c.wg.Add(1)
 	go func(c *Cycle) {
 		defer c.wg.Done()
@@ -44,8 +44,8 @@ func (c *Cycle) Run(fn func() error) {
 //Done block and return a chan error
 func (c *Cycle) Done() <-chan struct{} {
 	if atomic.CompareAndSwapUint32(&c.waiting, 0, 1) {
-		c.mu.Lock()
-		defer c.mu.Unlock()
+		// c.mu.Lock()
+		// defer c.mu.Unlock()
 		go func() {
 			c.wg.Wait()
 			close(c.done)
@@ -54,16 +54,10 @@ func (c *Cycle) Done() <-chan struct{} {
 	return c.done
 }
 
-//DoneAndClose ..
-func (c *Cycle) DoneAndClose() {
-	<-c.Done()
-	c.Close()
-}
-
 //Close ..
 func (c *Cycle) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// c.mu.Lock()
+	// defer c.mu.Unlock()
 	if atomic.CompareAndSwapUint32(&c.closing, 0, 1) {
 		close(c.quit)
 	}

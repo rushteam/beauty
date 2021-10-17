@@ -76,25 +76,6 @@ func TestCycleClose(t *testing.T) {
 	<-ch
 }
 
-func TestCycleDoneAndClose(t *testing.T) {
-	ch := make(chan string, 2)
-	state := "init"
-	c := New()
-	c.Run(func() error {
-		time.Sleep(time.Microsecond * 100)
-		return nil
-	})
-	go func() {
-		c.DoneAndClose()
-		ch <- "close"
-	}()
-	<-c.Wait()
-	want := "close"
-	state = <-ch
-	if state != want {
-		t.Errorf("TestCycleClose error want: %v, ret: %v\r\n", want, state)
-	}
-}
 func TestCycleWithError(t *testing.T) {
 	c := New()
 	c.Run(func() error {

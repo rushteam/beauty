@@ -69,7 +69,7 @@ func (s *Rest) Stop(ctx context.Context) error {
 	return s.Server.Shutdown(ctx)
 }
 
-//Service ..
-// func (s *Rest) Service() *registry.Service {
-// 	return s.service
-// }
+// String ..
+func (s *Rest) String() string {
+	return "web"
+}

@@ -20,8 +20,6 @@ const (
 	EventAfterRun
 )
 
-var initHookStages []HookEvent
-
 //HookFunc ..
 type HookFunc func(app *App)
 
@@ -48,7 +46,6 @@ type App struct {
 
 	// registry registry.Registry
 	shutdownTimeout time.Duration
-	quit            chan struct{}
 
 	cycle *lifecycle.Cycle
 }
@@ -69,22 +66,23 @@ func (app *App) runHooks(stage HookEvent) {
 func New(opts ...AppOption) *App {
 	app := &App{
 		ctx:             context.Background(),
+		cycle:           lifecycle.New(),
 		hooks:           make(map[HookEvent][]HookFunc),
 		shutdownTimeout: time.Second * 2,
-		quit:            make(chan struct{}),
-		cycle:           lifecycle.New(),
-		// services:        []Service{&waitSignal{}},
 	}
 	app.SetLogger(log.Logger)
 	for _, opt := range opts {
 		opt(app)
 	}
+
 	return app
 }
 
 //SetLogger ...
 func (app *App) SetLogger(l *zap.Logger) {
-	app.logger = l
+	if app.logger == nil {
+		app.logger = l
+	}
 }
 
 //SetRegistry ...
@@ -96,9 +94,8 @@ func (app *App) SetLogger(l *zap.Logger) {
 func (app *App) Run(services ...Service) error {
 	// reg, _ := registry.Build()
 	// app.SetRegistry(reg)
-	app.services = append(app.services, &waitSignal{})
+	app.waitSignals()
 	app.services = append(app.services, services...)
-	// app.waitSignals()
 	app.runHooks(EventBeforeRun)
 	for _, srv := range app.services {
 		func(srv Service) {
@@ -146,29 +143,21 @@ func (app *App) Shutdown() {
 		//正常结束
 	case <-ctx.Done():
 		//超时
-		app.logger.Info("timeout shutdown")
+		app.logger.Warn("timeout shutdown")
 	}
 	app.cycle.Close()
-	return
 }
 
-//waitSignal
-type waitSignal struct{}
-
-// Start ..
-func (w *waitSignal) Start(ctx context.Context) error {
-	stop := make(chan struct{})
+func (app *App) waitSignals() {
+	// go func() {
+	// 	stop := make(chan struct{})
+	// 	signals.Shutdown(func() {
+	// 		close(stop)
+	// 	})
+	// 	<-stop
+	// 	app.Shutdown()
+	// }()
 	signals.Shutdown(func() {
-		close(stop)
+		app.Shutdown()
 	})
-	<-stop
-	return nil
 }
-
-// Stop ..
-func (w *waitSignal) Stop(ctx context.Context) error {
-	return nil
-}
-
-// String ..
-func (w *waitSignal) String() string { return "signal" }

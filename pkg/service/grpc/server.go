@@ -13,8 +13,8 @@ import (
 //ServiceKind ..
 const ServiceKind = "grpc"
 
-//Build create a web service with the name
-func Build(name string) (*Server, error) {
+//New create a web service with the name
+func New(name string) (*Server, error) {
 	s := &Server{
 		Name:   name,
 		Addr:   ":50000",

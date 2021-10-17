@@ -14,8 +14,8 @@ import (
 //ServiceKind ..
 const ServiceKind = "rest.gin"
 
-//Build create a rest service with the name
-func Build(name string) (*Rest, error) {
+//New new a rest service with the name
+func New(name string) (*Rest, error) {
 	s := &Rest{
 		service: &registry.Service{
 			Kind: ServiceKind,

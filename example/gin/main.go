@@ -5,18 +5,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/service/rest"
+	"github.com/rushteam/beauty/pkg/service/web"
 )
 
 func main() {
 	app := beauty.New()
-	err := app.Run(service())
+	err := app.Run(webserver())
 	if err != nil {
 		log.Fatalln(err)
 	}
 }
-func service() beauty.Service {
-	api, err := rest.New("api")
+func webserver() beauty.Service {
+	api, err := web.New("api")
 	if err != nil {
 		log.Fatalln(err)
 	}

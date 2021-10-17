@@ -1,4 +1,4 @@
-package rest
+package web
 
 import (
 	"context"
@@ -11,15 +11,11 @@ import (
 )
 
 //ServiceKind ..
-const ServiceKind = "rest.gin"
+const ServiceKind = "web.gin"
 
 //New new a rest service with the name
 func New(name string) (*Rest, error) {
 	s := &Rest{
-		// service: &registry.Service{
-		// 	Kind: ServiceKind,
-		// 	Name: name,
-		// },
 		Mode: gin.DebugMode,
 		Addr: ":http",
 	}
@@ -35,7 +31,6 @@ func New(name string) (*Rest, error) {
 
 	s.Engine = gin.New()
 	s.Server = &http.Server{
-
 		Handler: s.Engine,
 	}
 	return s, nil
@@ -45,15 +40,12 @@ func New(name string) (*Rest, error) {
 type Rest struct {
 	*gin.Engine
 	Server *http.Server
-	listen *net.Listener
-	// service *registry.Service
-	Mode string
-	Addr string
+	Mode   string
+	Addr   string
 }
 
 //Start ..
 func (s *Rest) Start(ctx context.Context) error {
-	// log.Logger.Info("start with", ServiceKind, s)
 	ln, err := net.Listen("tcp", s.Addr)
 	if err != nil {
 		return err

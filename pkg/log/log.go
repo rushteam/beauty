@@ -8,7 +8,7 @@ import (
 var Logger *zap.Logger
 
 func init() {
-	// DefaultLogger, _ = zap.NewProduction()
+	// Logger, _ = zap.NewProduction()
 	Logger, _ = zap.NewDevelopment()
 }
 

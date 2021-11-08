@@ -15,10 +15,11 @@ func main() {
 		log.Fatalln(err)
 	}
 }
+
 func webserver() beauty.Service {
 	api, err := web.New("api")
 	if err != nil {
-		log.Fatalln(err)
+		panic(err)
 	}
 	api.GET("/", func(c *gin.Context) {
 		c.String(200, "hi beauty")

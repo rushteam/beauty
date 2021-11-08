@@ -4,49 +4,50 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rushteam/beauty/pkg/config"
-	"github.com/rushteam/beauty/pkg/log"
 )
 
 //ServiceKind ..
-const ServiceKind = "web.gin"
+const ServiceKind = "webserver"
 
-//New new a rest service with the name
-func New(name string) (*Rest, error) {
-	s := &Rest{
-		Mode: gin.DebugMode,
-		Addr: ":http",
-	}
-	if conf, err := config.New(config.Env(), name); err == nil {
-		s.Mode = conf.GetString(ServiceKind + ".mode")
-		s.Addr = conf.GetString(ServiceKind + ".addr")
-	} else {
-		log.Warn("no config file...")
+//New new a WebServer with the name
+func New(name string) (*WebServer, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	x := gin.New()
+	x.Use(recoverMiddleware())
+	s := &WebServer{
+		name:   name,
+		ctx:    ctx,
+		cancel: cancel,
+		Mode:   gin.DebugMode,
+		Engine: x,
+		Server: &http.Server{
+			Handler: x,
+			// Addr:    ":http",
+		},
 	}
 	if len(s.Mode) > 0 {
 		gin.SetMode(s.Mode)
 	}
-
-	s.Engine = gin.New()
-	s.Server = &http.Server{
-		Handler: s.Engine,
-	}
 	return s, nil
 }
 
-//Rest ..
-type Rest struct {
+//WebServer ..
+type WebServer struct {
+	name   string
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	*gin.Engine
-	Server *http.Server
-	Mode   string
-	Addr   string
+	*http.Server
+	Mode string
 }
 
 //Start ..
-func (s *Rest) Start(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.Addr)
+func (s *WebServer) Start(ctx context.Context) error {
+	ln, err := net.Listen("tcp", s.Server.Addr)
 	if err != nil {
 		return err
 	}
@@ -57,11 +58,11 @@ func (s *Rest) Start(ctx context.Context) error {
 }
 
 //Stop ..
-func (s *Rest) Stop(ctx context.Context) error {
+func (s *WebServer) Stop(ctx context.Context) error {
 	return s.Server.Shutdown(ctx)
 }
 
 // String ..
-func (s *Rest) String() string {
-	return "web"
+func (s *WebServer) String() string {
+	return filepath.Join(ServiceKind, s.name)
 }

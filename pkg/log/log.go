@@ -5,12 +5,8 @@ import (
 )
 
 //Logger ..
-var Logger *zap.Logger
-
-func init() {
-	// Logger, _ = zap.NewProduction()
-	Logger, _ = zap.NewDevelopment()
-}
+// var Logger, _ = zap.NewProduction()
+var Logger, _ = zap.NewDevelopment()
 
 //Debug ..
 func Debug(msg string, fields ...zap.Field) {

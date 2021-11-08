@@ -37,3 +37,8 @@ func Panic(msg string, fields ...zap.Field) {
 func Fatal(msg string, fields ...zap.Field) {
 	Logger.Fatal(msg, fields...)
 }
+
+//Sync ..
+func Sync() error {
+	return Logger.Sync()
+}

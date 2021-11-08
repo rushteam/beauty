@@ -85,31 +85,14 @@ func (app *App) SetLogger(l *zap.Logger) {
 	}
 }
 
-//SetRegistry ...
-// func (app *App) SetRegistry(r registry.Registry) {
-// 	app.registry = r
-// }
-
 // Run ..
 func (app *App) Run(services ...Service) error {
-	// reg, _ := registry.Build()
-	// app.SetRegistry(reg)
 	app.waitSignals()
 	app.services = append(app.services, services...)
 	app.runHooks(EventBeforeRun)
 	for _, srv := range app.services {
 		func(srv Service) {
 			app.cycle.Run(func() error {
-				//Register service
-				// if err := app.registry.Register(context.TODO(), srv.Service(), 5*time.Second); err != nil {
-				// 	app.logger.Error("register error", zap.String("service", srv.Service().String()), zap.Error(err))
-				// }
-				//Deregister service
-				// defer func() {
-				// 	if err := app.registry.Deregister(context.TODO(), srv.Service()); err != nil {
-				// 		app.logger.Error("deregister error", zap.String("service", srv.Service().String()), zap.Error(err))
-				// 	}
-				// }()
 				return srv.Start(app.ctx)
 			})
 			app.logger.Info("service start", zap.String("name", srv.String()))
@@ -149,14 +132,6 @@ func (app *App) Shutdown() {
 }
 
 func (app *App) waitSignals() {
-	// go func() {
-	// 	stop := make(chan struct{})
-	// 	signals.Shutdown(func() {
-	// 		close(stop)
-	// 	})
-	// 	<-stop
-	// 	app.Shutdown()
-	// }()
 	signals.Shutdown(func() {
 		app.Shutdown()
 	})

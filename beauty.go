@@ -26,6 +26,12 @@ type HookFunc func(app *App)
 //AppOption ..
 type AppOption func(app *App)
 
+func WithServer(s Service) AppOption {
+	return func(app *App) {
+		app.services = append(app.services, s)
+	}
+}
+
 // var _ registry.Service = (*Options)(nil)
 
 //Service ..
@@ -65,24 +71,15 @@ func (app *App) runHooks(stage HookEvent) {
 //New ..
 func New(opts ...AppOption) *App {
 	app := &App{
-		ctx:             context.Background(),
 		cycle:           lifecycle.New(),
 		hooks:           make(map[HookEvent][]HookFunc),
 		shutdownTimeout: time.Second * 2,
 	}
-	app.SetLogger(log.Logger)
 	for _, opt := range opts {
 		opt(app)
 	}
 
 	return app
-}
-
-//SetLogger ...
-func (app *App) SetLogger(l *zap.Logger) {
-	if app.logger == nil {
-		app.logger = l
-	}
 }
 
 // Run ..
@@ -93,40 +90,47 @@ func (app *App) Run(services ...Service) error {
 	for _, srv := range app.services {
 		func(srv Service) {
 			app.cycle.Run(func() error {
-				return srv.Start(app.ctx)
+				return srv.Start(app.Context())
 			})
-			app.logger.Info("service start", zap.String("name", srv.String()))
+			log.Info("service start", zap.String("name", srv.String()))
 		}(srv)
 	}
 	app.runHooks(EventAfterRun)
-	defer app.logger.Sync()
+	defer log.Sync()
 	err := <-app.cycle.Wait()
 	if err != nil {
-		app.logger.Error("exit error", zap.Error(err))
+		log.Error("exit error", zap.Error(err))
 	}
 	return nil
 }
 
+func (app *App) Context() context.Context {
+	if app.ctx == nil {
+		app.ctx = context.Background()
+	}
+	return app.ctx
+}
+
 // Shutdown ...
 func (app *App) Shutdown() {
-	ctx, cancel := context.WithTimeout(app.ctx, app.shutdownTimeout)
+	ctx, cancel := context.WithTimeout(app.Context(), app.shutdownTimeout)
 	defer cancel()
-	app.logger.Info("shutdown", zap.Int("pid", os.Getpid()), zap.String("timeout", app.shutdownTimeout.String()))
+	log.Info("shutdown", zap.Int("pid", os.Getpid()), zap.String("timeout", app.shutdownTimeout.String()))
 	for _, srv := range app.services {
 		func(srv Service) {
 			app.cycle.Run(func() error {
 				return srv.Stop(ctx)
 			})
-			app.logger.Info("service stop", zap.String("name", srv.String()))
+			log.Info("service stop", zap.String("name", srv.String()))
 		}(srv)
 	}
 	select {
 	case <-app.cycle.Done():
-		app.logger.Info("grace shutdown")
+		log.Info("grace shutdown")
 		//正常结束
 	case <-ctx.Done():
 		//超时
-		app.logger.Warn("timeout shutdown")
+		log.Warn("timeout shutdown")
 	}
 	app.cycle.Close()
 }

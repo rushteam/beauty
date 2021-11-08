@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -12,21 +13,44 @@ import (
 //ServiceKind ..
 const ServiceKind = "webserver"
 
+const DebugMode = gin.DebugMode
+const ReleaseMode = gin.ReleaseMode
+const TestMode = gin.TestMode
+
+type Option func(s *WebServer)
+type Router func(s *WebServer)
+
+func WithMode(mode string) Option {
+	return func(s *WebServer) {
+		s.Mode = mode
+	}
+}
+func WithAddr(addr string) Option {
+	return func(s *WebServer) {
+		s.Server.Addr = addr
+	}
+}
+
+func WithRouter(router Router) Option {
+	return func(s *WebServer) {
+		router(s)
+	}
+}
+
 //New new a WebServer with the name
-func New(name string) (*WebServer, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+func New(name string, opts ...Option) (*WebServer, error) {
 	x := gin.New()
 	x.Use(recoverMiddleware())
 	s := &WebServer{
 		name:   name,
-		ctx:    ctx,
-		cancel: cancel,
-		Mode:   gin.DebugMode,
+		Mode:   DebugMode,
 		Engine: x,
 		Server: &http.Server{
 			Handler: x,
-			// Addr:    ":http",
 		},
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	if len(s.Mode) > 0 {
 		gin.SetMode(s.Mode)
@@ -34,12 +58,18 @@ func New(name string) (*WebServer, error) {
 	return s, nil
 }
 
+// New new a WebServer
+func MustNew(name string, opts ...Option) *WebServer {
+	s, err := New(name, opts...)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return s
+}
+
 //WebServer ..
 type WebServer struct {
-	name   string
-	ctx    context.Context
-	cancel context.CancelFunc
-
+	name string
 	*gin.Engine
 	*http.Server
 	Mode string
@@ -47,7 +77,8 @@ type WebServer struct {
 
 //Start ..
 func (s *WebServer) Start(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.Server.Addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", s.Server.Addr)
 	if err != nil {
 		return err
 	}

@@ -14,15 +14,17 @@ var confFile = flag.String("config", "./config.yaml", "config path")
 
 func main() {
 	flag.Parse()
+	// var c config.Config
+	// conf.LoadConfig(*confFile, &c)
 	app := beauty.New(
-	// beauty.WithServer(web.MustNew(
+	// beauty.WithServer(web.New(
 	// 	"api",
 	// 	web.WithAddr(":8080"),
 	// 	web.WithRouter(router),
 	// )),
 	)
 	err := app.Run(
-		web.MustNew(
+		web.New(
 			"api",
 			web.WithAddr(":8080"),
 			router,

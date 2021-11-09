@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rushteam/beauty/pkg/log"
-	"go.uber.org/zap"
 )
 
 //ServiceKind ..
@@ -39,7 +37,7 @@ func WithRouter(router Router) Option {
 }
 
 //New new a WebServer with the name
-func New(name string, opts ...Option) (*WebServer, error) {
+func New(name string, opts ...Option) *WebServer {
 	x := gin.New()
 	x.Use(recoverMiddleware())
 	s := &WebServer{
@@ -55,15 +53,6 @@ func New(name string, opts ...Option) (*WebServer, error) {
 	}
 	if len(s.Mode) > 0 {
 		gin.SetMode(s.Mode)
-	}
-	return s, nil
-}
-
-// New new a WebServer
-func MustNew(name string, opts ...Option) *WebServer {
-	s, err := New(name, opts...)
-	if err != nil {
-		log.Fatal("new server error", zap.Error(err))
 	}
 	return s
 }

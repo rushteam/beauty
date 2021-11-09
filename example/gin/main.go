@@ -14,7 +14,10 @@ var confFile = flag.String("config", "./config.yaml", "config path")
 func main() {
 	flag.Parse()
 	app := beauty.New(
-		web.WithServer(router),
+		web.WithServer(
+			router,
+			web.WithAddr(":8081"),
+		),
 		// beauty.WithServer(web.MustNew(
 		// 	"api",
 		// 	web.WithAddr(":8080"),

@@ -44,9 +44,8 @@ type Service interface {
 
 //App ..
 type App struct {
-	ctx    context.Context
-	logger *zap.Logger
-	hooks  map[HookEvent][]HookFunc
+	ctx   context.Context
+	hooks map[HookEvent][]HookFunc
 
 	services []Service
 
@@ -84,6 +83,7 @@ func New(opts ...AppOption) *App {
 
 // Run ..
 func (app *App) Run(services ...Service) error {
+	log.Info("app start", zap.String("start time", time.Now().Format("2006-01-02 15:04:05")))
 	app.waitSignals()
 	app.services = append(app.services, services...)
 	app.runHooks(EventBeforeRun)

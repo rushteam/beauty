@@ -9,7 +9,7 @@ import (
 	"github.com/rushteam/beauty/pkg/service/web"
 )
 
-// var confFile = flag.String("config", "./config.yaml", "config path")
+var confFile = flag.String("config", "./config.yaml", "config path")
 
 func main() {
 	flag.Parse()

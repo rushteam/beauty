@@ -14,11 +14,12 @@ var confFile = flag.String("config", "./config.yaml", "config path")
 func main() {
 	flag.Parse()
 	app := beauty.New(
-		beauty.WithServer(web.MustNew(
-			"api",
-			web.WithAddr(":8080"),
-			web.WithRouter(router),
-		)),
+		web.WithServer(router),
+		// beauty.WithServer(web.MustNew(
+		// 	"api",
+		// 	web.WithAddr(":8080"),
+		// 	web.WithRouter(router),
+		// )),
 	)
 	err := app.Run()
 	if err != nil {

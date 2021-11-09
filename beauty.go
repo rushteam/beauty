@@ -81,11 +81,16 @@ func New(opts ...AppOption) *App {
 	return app
 }
 
+// AppendService ..
+func (app *App) AppendService(services ...Service) {
+	app.services = append(app.services, services...)
+}
+
 // Run ..
 func (app *App) Run(services ...Service) error {
 	log.Info("app start", zap.String("start time", time.Now().Format("2006-01-02 15:04:05")))
 	app.waitSignals()
-	app.services = append(app.services, services...)
+	app.AppendService(services...)
 	app.runHooks(EventBeforeRun)
 	for _, srv := range app.services {
 		func(srv Service) {

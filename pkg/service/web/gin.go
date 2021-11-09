@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rushteam/beauty"
 )
 
 //ServiceKind ..
@@ -65,6 +66,12 @@ func MustNew(name string, opts ...Option) *WebServer {
 		log.Fatal(err)
 	}
 	return s
+}
+func WithServer(opts ...Option) beauty.AppOption {
+	return func(app *beauty.App) {
+		s := MustNew("test", opts...)
+		app.AppendService(s)
+	}
 }
 
 //WebServer ..

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"runtime"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rushteam/beauty"
@@ -14,13 +15,19 @@ import (
 func main() {
 	flag.Parse()
 	app := beauty.New(
-		beauty.WithServer(web.MustNew(
+	// beauty.WithServer(web.MustNew(
+	// 	"api",
+	// 	web.WithAddr(":8080"),
+	// 	web.WithRouter(router),
+	// )),
+	)
+	err := app.Run(
+		web.MustNew(
 			"api",
 			web.WithAddr(":8080"),
-			web.WithRouter(router),
-		)),
+			router,
+		),
 	)
-	err := app.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,5 +36,8 @@ func main() {
 func router(r *web.WebServer) {
 	r.GET("/", func(c *gin.Context) {
 		c.String(200, "hi beauty")
+	})
+	r.GET("/version", func(c *gin.Context) {
+		c.String(200, runtime.Version())
 	})
 }

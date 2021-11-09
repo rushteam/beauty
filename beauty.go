@@ -2,6 +2,7 @@ package beauty
 
 import (
 	"context"
+	"net"
 	"os"
 	"time"
 
@@ -39,21 +40,15 @@ type Service interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 	String() string
-	// Service() *registry.Service
 }
 
 //App ..
 type App struct {
-	ctx    context.Context
-	logger *zap.Logger
-	hooks  map[HookEvent][]HookFunc
-
-	services []Service
-
-	// registry registry.Registry
+	ctx             context.Context
+	hooks           map[HookEvent][]HookFunc
+	services        []Service
 	shutdownTimeout time.Duration
-
-	cycle *lifecycle.Cycle
+	cycle           *lifecycle.Cycle
 }
 
 //Hook add a hook func to stage
@@ -133,6 +128,17 @@ func (app *App) Shutdown() {
 		log.Warn("timeout shutdown")
 	}
 	app.cycle.Close()
+}
+
+func (app *App) Listen(addr string) net.Listener {
+	log.Info("listen", zap.String("addr", addr))
+	var lc net.ListenConfig
+	ln, err := lc.Listen(app.Context(), "tcp", addr)
+	if err != nil {
+		log.Fatal("listen error", zap.Error(err))
+		return nil
+	}
+	return ln
 }
 
 func (app *App) waitSignals() {

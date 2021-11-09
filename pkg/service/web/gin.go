@@ -2,12 +2,13 @@ package web
 
 import (
 	"context"
-	"log"
 	"net"
 	"net/http"
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rushteam/beauty/pkg/log"
+	"go.uber.org/zap"
 )
 
 //ServiceKind ..
@@ -62,7 +63,7 @@ func New(name string, opts ...Option) (*WebServer, error) {
 func MustNew(name string, opts ...Option) *WebServer {
 	s, err := New(name, opts...)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("new server error", zap.Error(err))
 	}
 	return s
 }

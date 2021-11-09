@@ -68,6 +68,13 @@ func MustNew(name string, opts ...Option) *WebServer {
 	return s
 }
 
+// func WithServer(name string, opts ...Option) beauty.AppOption {
+// 	return func(app *beauty.App) {
+// 		s := MustNew(name, opts...)
+// 		app.AppendService(s)
+// 	}
+// }
+
 //WebServer ..
 type WebServer struct {
 	name string

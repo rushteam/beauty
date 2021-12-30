@@ -24,10 +24,10 @@ const (
 //HookFunc ..
 type HookFunc func(app *App)
 
-//AppOption ..
-type AppOption func(app *App)
+//Option ..
+type Option func(app *App)
 
-func WithServer(s Service) AppOption {
+func WithServer(s Service) Option {
 	return func(app *App) {
 		app.services = append(app.services, s)
 	}
@@ -64,7 +64,7 @@ func (app *App) runHooks(stage HookEvent) {
 }
 
 //New ..
-func New(opts ...AppOption) *App {
+func New(opts ...Option) *App {
 	app := &App{
 		cycle:           lifecycle.New(),
 		hooks:           make(map[HookEvent][]HookFunc),
@@ -73,7 +73,6 @@ func New(opts ...AppOption) *App {
 	for _, opt := range opts {
 		opt(app)
 	}
-
 	return app
 }
 

@@ -46,6 +46,7 @@ func New(name string, opts ...Option) *WebServer {
 		Engine: x,
 		Server: &http.Server{
 			Handler: x,
+			Addr:    ":http",
 		},
 	}
 	for _, opt := range opts {

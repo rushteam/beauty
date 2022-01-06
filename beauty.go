@@ -27,6 +27,7 @@ type HookFunc func(app *App)
 //Option ..
 type Option func(app *App)
 
+//WithServer ..
 func WithServer(s Service) Option {
 	return func(app *App) {
 		app.services = append(app.services, s)

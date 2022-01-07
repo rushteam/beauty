@@ -32,6 +32,10 @@ func WithServer(s Service) Option {
 		app.services = append(app.services, s)
 	}
 }
+func WithLogger() Option {
+	log.Logger, _ = zap.NewDevelopment()
+	return func(app *App) {}
+}
 
 // var _ registry.Service = (*Options)(nil)
 

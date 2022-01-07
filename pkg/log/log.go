@@ -5,8 +5,7 @@ import (
 )
 
 //Logger ..
-// var Logger, _ = zap.NewProduction()
-var Logger, _ = zap.NewDevelopment()
+var Logger = zap.NewNop()
 
 //Debug ..
 func Debug(msg string, fields ...zap.Field) {

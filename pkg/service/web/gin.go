@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rushteam/beauty/pkg/config"
 )
 
 //ServiceKind ..
@@ -26,7 +27,17 @@ func WithMode(mode string) Option {
 }
 func WithAddr(addr string) Option {
 	return func(s *WebServer) {
-		s.Server.Addr = addr
+		if len(addr) > 0 {
+			s.Server.Addr = addr
+		}
+	}
+}
+func WithConfig(conf config.Config) Option {
+	return func(s *WebServer) {
+		addr := conf.GetString("addr")
+		if len(addr) > 0 {
+			s.Server.Addr = addr
+		}
 	}
 }
 

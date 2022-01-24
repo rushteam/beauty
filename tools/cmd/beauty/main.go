@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli"
 	"github.com/rushteam/beauty/tools/new"
+	"github.com/urfave/cli"
 )
 
 //Version ..
@@ -39,6 +39,3 @@ func main() {
 		fmt.Println("error:", err)
 	}
 }
-
-体验账号：17200000045。密码：Tdx5947306。
-体验过程中如遇到需输验证码，请输入：274053。

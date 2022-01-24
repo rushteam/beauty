@@ -46,18 +46,20 @@ func WithRouter(router Router) Option {
 		router(s)
 	}
 }
+func Use(fns ...gin.HandlerFunc) Option {
+	return func(s *WebServer) {
+		s.Engine.Use(fns...)
+	}
+}
 
 //New new a WebServer with the name
 func New(name string, opts ...Option) *WebServer {
-	x := gin.New()
-	x.Use(recoverMiddleware())
 	s := &WebServer{
 		name:   name,
 		Mode:   DebugMode,
-		Engine: x,
+		Engine: gin.New(),
 		Server: &http.Server{
-			Handler: x,
-			Addr:    ":http",
+			Addr: ":http",
 		},
 	}
 	for _, opt := range opts {
@@ -66,15 +68,10 @@ func New(name string, opts ...Option) *WebServer {
 	if len(s.Mode) > 0 {
 		gin.SetMode(s.Mode)
 	}
+	s.Use(recoverMiddleware())
+	s.Server.Handler = s.Engine
 	return s
 }
-
-// func WithServer(name string, opts ...Option) beauty.AppOption {
-// 	return func(app *beauty.App) {
-// 		s := MustNew(name, opts...)
-// 		app.AppendService(s)
-// 	}
-// }
 
 //WebServer ..
 type WebServer struct {

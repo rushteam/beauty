@@ -8,11 +8,11 @@ type Config struct {
 }
 
 //New ..
-func New(name string) (*Config, error) {
+func New(filename string) (*Config, error) {
 	v := viper.New()
 	// v.AddConfigPath(basePath + "/config/" + env + "/")
 	// v.SetConfigName(name) // 设置配置文件名 (不带后缀)
-	v.SetConfigFile(name)
+	v.SetConfigFile(filename)
 	v.SetConfigType("yaml")
 	err := v.ReadInConfig() // 读取配置数据
 	if err != nil {

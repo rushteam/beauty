@@ -4,9 +4,6 @@ import (
 	"context"
 	"net"
 
-	"github.com/rushteam/beauty/pkg/config"
-	"github.com/rushteam/beauty/pkg/log"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -20,12 +17,12 @@ func New(name string) (*Server, error) {
 		Addr:   ":50000",
 		Server: grpc.NewServer(),
 	}
-	if conf, err := config.New(config.Env(), name); err == nil {
-		s.Mode = conf.GetString(ServiceKind + ".mode")
-		s.Addr = conf.GetString(ServiceKind + ".addr")
-	} else {
-		log.Warn("no config file...", zap.String("kind", ServiceKind), zap.String("name", name))
-	}
+	// if conf, err := config.New(config.Env(), name); err == nil {
+	// 	s.Mode = conf.GetString(ServiceKind + ".mode")
+	// 	s.Addr = conf.GetString(ServiceKind + ".addr")
+	// } else {
+	// 	log.Warn("no config file...", zap.String("kind", ServiceKind), zap.String("name", name))
+	// }
 	return s, nil
 }
 

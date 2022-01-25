@@ -34,11 +34,12 @@ func WithAddr(addr string) Option {
 		}
 	}
 }
-func WithConfig(conf config.Config) Option {
+func WithConfig(conf *config.Config) Option {
 	return func(s *WebServer) {
-		addr := conf.GetString(s.name + ".addr")
-		if len(addr) > 0 {
-			s.Server.Addr = addr
+		if conf != nil {
+			if addr := conf.GetString(s.name + ".addr"); len(addr) > 0 {
+				s.Server.Addr = addr
+			}
 		}
 	}
 }

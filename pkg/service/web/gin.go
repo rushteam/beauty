@@ -34,7 +34,7 @@ func WithAddr(addr string) Option {
 }
 func WithConfig(conf config.Config) Option {
 	return func(s *WebServer) {
-		addr := conf.GetString("addr")
+		addr := conf.GetString(s.name + ".addr")
 		if len(addr) > 0 {
 			s.Server.Addr = addr
 		}

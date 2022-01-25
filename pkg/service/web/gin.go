@@ -8,6 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rushteam/beauty/pkg/config"
+	"github.com/rushteam/beauty/pkg/log"
+	"go.uber.org/zap"
 )
 
 //ServiceKind ..
@@ -88,6 +90,7 @@ func (s *WebServer) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Info("service listen", zap.String("name", s.String()), zap.String("addr", ln.Addr().String()))
 	if err := s.Server.Serve(ln); err != http.ErrServerClosed {
 		return err
 	}

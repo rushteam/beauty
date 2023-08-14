@@ -11,7 +11,7 @@ import (
 func main() {
 	s := &srv{}
 	s2 := &srv{}
-	app := beauty.New(beauty.WithServer(s), beauty.WithServer(s2))
+	app := beauty.New(beauty.WithService(s, s2))
 	if err := app.Start(context.Background()); err != nil {
 		log.Fatalln(err)
 	}

@@ -1,21 +1,28 @@
 package signals
 
 import (
+	"context"
+	"log"
 	"os"
 	"os/signal"
 )
 
-//Shutdown ...
-func Shutdown(stop func()) {
-	sig := make(chan os.Signal, 2)
-	signal.Notify(
-		sig,
-		shutdownSignals...,
-	)
+// Shutdown ...
+func NotifyShutdownContext(ctx context.Context, f func()) context.Context {
+	ctx, cancel := context.WithCancel(ctx)
 	go func() {
-		<-sig
-		go stop()
-		<-sig
-		os.Exit(1) // second signal. Exit directly.
+		c := make(chan os.Signal, 2)
+		signal.Notify(c, shutdownSignals...)
+		defer signal.Stop(c)
+		select {
+		case <-ctx.Done():
+		case sig := <-c:
+			log.Printf("stoping with signal: %v", sig.String())
+			f()
+			cancel()
+			<-c
+			os.Exit(1) // second signal. Exit directly.
+		}
 	}()
+	return ctx
 }

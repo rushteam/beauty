@@ -2,11 +2,7 @@ package beauty
 
 import (
 	"context"
-	"net"
-	"os"
-	"time"
 
-	"github.com/rushteam/beauty/pkg/lifecycle"
 	"github.com/rushteam/beauty/pkg/log"
 	"github.com/rushteam/beauty/pkg/signals"
 	"go.uber.org/zap"
@@ -21,13 +17,13 @@ const (
 	EventAfterRun
 )
 
-//HookFunc ..
+// HookFunc ..
 type HookFunc func(app *App)
 
-//Option ..
+// Option ..
 type Option func(app *App)
 
-//WithServer ..
+// WithServer ..
 func WithServer(s Service) Option {
 	return func(app *App) {
 		app.services = append(app.services, s)
@@ -40,23 +36,19 @@ func WithLogger() Option {
 
 // var _ registry.Service = (*Options)(nil)
 
-//Service ..
+// Service ..
 type Service interface {
 	Start(ctx context.Context) error
-	Stop(ctx context.Context) error
 	String() string
 }
 
-//App ..
+// App ..
 type App struct {
-	ctx             context.Context
-	hooks           map[HookEvent][]HookFunc
-	services        []Service
-	shutdownTimeout time.Duration
-	cycle           *lifecycle.Cycle
+	hooks    map[HookEvent][]HookFunc
+	services []Service
 }
 
-//Hook add a hook func to stage
+// Hook add a hook func to stage
 func (app *App) Hook(stage HookEvent, fn HookFunc) {
 	app.hooks[stage] = append(app.hooks[stage], fn)
 }
@@ -68,91 +60,38 @@ func (app *App) runHooks(stage HookEvent) {
 	}
 }
 
-//New ..
+// New ..
 func New(opts ...Option) *App {
-	app := &App{
-		cycle:           lifecycle.New(),
-		hooks:           make(map[HookEvent][]HookFunc),
-		shutdownTimeout: time.Second * 2,
+	s := &App{
+		hooks: make(map[HookEvent][]HookFunc),
 	}
 	for _, opt := range opts {
-		opt(app)
+		opt(s)
 	}
-	return app
+	return s
 }
 
 // AppendService ..
-func (app *App) AppendService(services ...Service) {
-	app.services = append(app.services, services...)
+func (s *App) AppendService(services ...Service) {
+	s.services = append(s.services, services...)
 }
 
-// Run ..
-func (app *App) Run(services ...Service) error {
-	log.Info("app start", zap.String("start time", time.Now().Format("2006-01-02 15:04:05")))
-	app.waitSignals()
-	app.AppendService(services...)
-	app.runHooks(EventBeforeRun)
-	for _, srv := range app.services {
-		func(srv Service) {
-			app.cycle.Run(func() error {
-				return srv.Start(app.Context())
-			})
-			log.Info("service start", zap.String("name", srv.String()))
-		}(srv)
-	}
-	app.runHooks(EventAfterRun)
-	defer log.Sync()
-	err := <-app.cycle.Wait()
-	if err != nil {
-		log.Error("exit error", zap.Error(err))
-	}
-	return nil
-}
-
-func (app *App) Context() context.Context {
-	if app.ctx == nil {
-		app.ctx = context.Background()
-	}
-	return app.ctx
-}
-
-// Shutdown ...
-func (app *App) Shutdown() {
-	ctx, cancel := context.WithTimeout(app.Context(), app.shutdownTimeout)
-	defer cancel()
-	log.Info("shutdown", zap.Int("pid", os.Getpid()), zap.String("timeout", app.shutdownTimeout.String()))
-	for _, srv := range app.services {
-		func(srv Service) {
-			app.cycle.Run(func() error {
-				return srv.Stop(ctx)
-			})
-			log.Info("service stop", zap.String("name", srv.String()))
-		}(srv)
-	}
-	select {
-	case <-app.cycle.Done():
-		log.Info("grace shutdown")
-		//正常结束
-	case <-ctx.Done():
-		//超时
-		log.Warn("timeout shutdown")
-	}
-	app.cycle.Close()
-}
-
-func (app *App) Listen(addr string) net.Listener {
-	log.Info("listen", zap.String("addr", addr))
-	var lc net.ListenConfig
-	ln, err := lc.Listen(app.Context(), "tcp", addr)
-	if err != nil {
-		log.Fatal("listen error", zap.Error(err))
-		return nil
-	}
-	return ln
-}
-
-func (app *App) waitSignals() {
-	signals.Shutdown(func() {
-		app.Shutdown()
+// Start ..
+func (s *App) Start(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	// log.Info("app start", zap.String("start time", time.Now().Format("2006-01-02 15:04:05")))
+	signals.NotifyShutdownContext(ctx, func() {
+		cancel()
 	})
+	s.runHooks(EventBeforeRun)
+	for _, srv := range s.services {
+		func(srv Service) {
+			srv.Start(ctx)
+		}(srv)
+	}
+	<-ctx.Done()
+	s.runHooks(EventAfterRun)
+	cancel()
+	defer log.Sync()
+	return nil
 }

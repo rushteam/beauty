@@ -4,8 +4,6 @@ go 1.16
 
 require (
 	github.com/gin-gonic/gin v1.7.4
-	github.com/go-chi/chi v1.5.4
-	github.com/golang/protobuf v1.5.2
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/viper v1.9.0
@@ -15,5 +13,4 @@ require (
 	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/genproto v0.0.0-20210928142010-c7af6a1a74c9 // indirect
 	google.golang.org/grpc v1.41.0
-	google.golang.org/protobuf v1.27.1
 )

@@ -2,8 +2,10 @@ package beauty
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/rushteam/beauty/pkg/log"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/signals"
 	"go.uber.org/zap"
 )
@@ -29,6 +31,15 @@ func WithService(s ...Service) Option {
 		app.services = append(app.services, s...)
 	}
 }
+
+// WithWebServer
+func WithWebServer(addr string, mux http.Handler) Option {
+	s := webserver.New(addr, mux)
+	return func(app *App) {
+		app.services = append(app.services, s)
+	}
+}
+
 func WithLogger() Option {
 	log.Logger, _ = zap.NewDevelopment()
 	return func(app *App) {}

@@ -25,7 +25,7 @@ func main() {
 		beauty.WithService(s, s2),
 		beauty.WithWebServer(
 			":8080",
-			beauty.WithWebRoutes(routes...),
+			routes,
 			beauty.WithWebDefaultMiddleware(),
 		),
 	)

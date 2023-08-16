@@ -36,17 +36,6 @@ func WithService(s ...Service) Option {
 
 type RouteOption func(r *chi.Mux)
 
-func WithWebRoutes(routes ...Route) RouteOption {
-	return func(r *chi.Mux) {
-		for _, v := range routes {
-			if v.Method == "" {
-				v.Method = http.MethodGet
-			}
-			r.Method(v.Method, v.URI, v.Handler)
-		}
-	}
-}
-
 func WithWebMiddleware(middlewares ...func(http.Handler) http.Handler) RouteOption {
 	return func(r *chi.Mux) {
 		for _, v := range middlewares {
@@ -61,10 +50,16 @@ func WithWebDefaultMiddleware() RouteOption {
 		r.Use(middleware.Recoverer)
 	}
 }
-func WithWebServer(addr string, opts ...RouteOption) Option {
+func WithWebServer(addr string, routes []Route, opts ...RouteOption) Option {
 	r := chi.NewRouter()
 	for _, v := range opts {
 		v(r)
+	}
+	for _, v := range routes {
+		if v.Method == "" {
+			v.Method = http.MethodGet
+		}
+		r.Method(v.Method, v.URI, v.Handler)
 	}
 	s := webserver.New(addr, r)
 	return func(app *App) {

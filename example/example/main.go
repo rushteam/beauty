@@ -12,11 +12,23 @@ import (
 func main() {
 	s := &srv{}
 	s2 := &srv{}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Welcome"))
-	})
-	app := beauty.New(beauty.WithService(s, s2), beauty.WithWebServer(":8080", mux))
+	var routes = []beauty.Route{
+		{
+			URI: "/",
+			Handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("Welcome"))
+			},
+		},
+	}
+
+	app := beauty.New(
+		beauty.WithService(s, s2),
+		beauty.WithWebServer(
+			":8080",
+			beauty.WithWebRoutes(routes...),
+			beauty.WithWebDefaultMiddleware(),
+		),
+	)
 	if err := app.Start(context.Background()); err != nil {
 		log.Fatalln(err)
 	}

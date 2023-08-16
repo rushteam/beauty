@@ -3,7 +3,7 @@ package beauty
 import "net/http"
 
 type Route struct {
-	URI     string
 	Method  string
+	URI     string
 	Handler http.HandlerFunc
 }

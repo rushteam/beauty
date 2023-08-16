@@ -34,21 +34,37 @@ func WithService(s ...Service) Option {
 	}
 }
 
-// WithWebServer
-func WithWebServer(addr string, mux http.Handler) Option {
-	s := webserver.New(addr, mux)
-	return func(app *App) {
-		app.services = append(app.services, s)
+type RouteOption func(r *chi.Mux)
+
+func WithWebRoutes(routes ...Route) RouteOption {
+	return func(r *chi.Mux) {
+		for _, v := range routes {
+			if v.Method == "" {
+				v.Method = http.MethodGet
+			}
+			r.Method(v.Method, v.URI, v.Handler)
+		}
 	}
 }
-func WithRoutes(addr string, routes ...Route) Option {
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	for _, v := range routes {
-		if v.Method == "" {
-			v.Method = http.MethodGet
+
+func WithWebMiddleware(middlewares ...func(http.Handler) http.Handler) RouteOption {
+	return func(r *chi.Mux) {
+		for _, v := range middlewares {
+			r.Use(v)
 		}
-		r.Method(v.Method, v.URI, v.Handler)
+	}
+}
+
+func WithWebDefaultMiddleware() RouteOption {
+	return func(r *chi.Mux) {
+		r.Use(middleware.Logger)
+		r.Use(middleware.Recoverer)
+	}
+}
+func WithWebServer(addr string, opts ...RouteOption) Option {
+	r := chi.NewRouter()
+	for _, v := range opts {
+		v(r)
 	}
 	s := webserver.New(addr, r)
 	return func(app *App) {

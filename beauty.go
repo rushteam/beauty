@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
 	"github.com/rushteam/beauty/pkg/log"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/signals"
@@ -35,6 +37,20 @@ func WithService(s ...Service) Option {
 // WithWebServer
 func WithWebServer(addr string, mux http.Handler) Option {
 	s := webserver.New(addr, mux)
+	return func(app *App) {
+		app.services = append(app.services, s)
+	}
+}
+func WithRoutes(addr string, routes ...Route) Option {
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	for _, v := range routes {
+		if v.Method == "" {
+			v.Method = http.MethodGet
+		}
+		r.Method(v.Method, v.URI, v.Handler)
+	}
+	s := webserver.New(addr, r)
 	return func(app *App) {
 		app.services = append(app.services, s)
 	}

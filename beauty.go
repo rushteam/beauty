@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
 	"github.com/rushteam/beauty/pkg/log"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/signals"
@@ -41,13 +40,6 @@ func WithWebMiddleware(middlewares ...func(http.Handler) http.Handler) RouteOpti
 		for _, v := range middlewares {
 			r.Use(v)
 		}
-	}
-}
-
-func WithWebDefaultMiddleware() RouteOption {
-	return func(r *chi.Mux) {
-		r.Use(middleware.Logger)
-		r.Use(middleware.Recoverer)
 	}
 }
 

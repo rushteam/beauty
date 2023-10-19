@@ -58,7 +58,10 @@ func Action(c *cli.Context) error {
 	log.Println("make project dir:", Project.Path)
 
 	//get package path throuth mod env
-	if hi, err := here.Current(); err == nil {
+
+	// if hi, err := here.Current(); err == nil {
+	if hi, err := here.Dir(Project.Path); err == nil {
+		log.Println("???", hi)
 		if len(hi.ImportPath) > 0 {
 			Project.ModPath = hi.ImportPath + "/"
 		}
@@ -84,7 +87,6 @@ func Action(c *cli.Context) error {
 		filename := strings.TrimSuffix(path, ".tpl")
 		outputPath := filepath.Join(Project.Path, filename)
 		log.Println("create file:", outputPath)
-
 		tmpl, err := template.New(info.Name()).Parse(string(data))
 		if err != nil {
 			return err
@@ -94,8 +96,8 @@ func Action(c *cli.Context) error {
 			return nil
 		}
 		defer dst.Close()
-		tmpl.Execute(dst, Project)
-		return nil
+		log.Println("Project.ModPath", Project)
+		return tmpl.Execute(dst, Project)
 	})
 	return nil
 }

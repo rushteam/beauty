@@ -26,7 +26,6 @@ func main() {
 		beauty.WithWebServer(
 			":8080",
 			routes,
-			beauty.WithWebDefaultMiddleware(),
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {

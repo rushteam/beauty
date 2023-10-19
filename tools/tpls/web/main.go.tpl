@@ -19,7 +19,7 @@ func main() {
 		beauty.WithWebServer(
 			port,
 			router.Routes,
-			beauty.WithWebDefaultMiddleware(),
+			router.Middlewares,
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {

@@ -23,6 +23,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:    s.Addr,
 		Handler: s.Mux,
 	}
+	log.Println("web server listen", s.Addr)
 	go server.ListenAndServe()
 	<-ctx.Done()
 	log.Println("server stopped...")

@@ -3,11 +3,10 @@
 package router
 
 import (
-	"net/http"
-
 	"github.com/rushteam/beauty"
 )
 
 var Middlewares = beauty.WithWebMiddleware(
 	beauty.WebLogger,
+	beauty.WebRecoverer,
 )

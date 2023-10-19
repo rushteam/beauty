@@ -4,10 +4,10 @@ import (
 	"fmt"
 
 	"github.com/rushteam/beauty/tools/internal/cmd/new"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
-var Commands = []cli.Command{
+var Commands = []*cli.Command{
 	{
 		Name:   "new",
 		Usage:  "new a project with template",

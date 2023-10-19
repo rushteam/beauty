@@ -1,6 +1,7 @@
 package new
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -12,7 +13,7 @@ import (
 	"github.com/gobuffalo/here"
 	"github.com/rushteam/beauty/tools/internal/pkg"
 	"github.com/rushteam/beauty/tools/tpls"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 type project struct {
@@ -29,12 +30,11 @@ var Project = &project{
 // Action ..
 func Action(c *cli.Context) error {
 	args := c.Args()
-	if len(args) == 0 {
-		log.Println("missing project name")
-		return nil
+	if args.Len() == 0 {
+		return cli.Exit(fmt.Errorf("missing project name"), 1)
 	}
-	if len(args[0]) > 0 {
-		Project.Name = args[0]
+	if n := args.Get(0); len(n) > 0 {
+		Project.Name = n
 	}
 	//get abs path
 	if Project.Path == "" {

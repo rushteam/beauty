@@ -1,4 +1,4 @@
-package new
+package pkg
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 // GoModFile ..
 const GoModFile = "go.mod"
 
-//Create ..
+// Create ..
 func Create(filename string) (*os.File, error) {
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		return os.Create(filename)
@@ -19,7 +19,7 @@ func Create(filename string) (*os.File, error) {
 	return nil, fmt.Errorf("%s already exist", filename)
 }
 
-//MkdirAll ..
+// MkdirAll ..
 func MkdirAll(dirs ...string) error {
 	dir := filepath.Join(dirs...)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -41,7 +41,7 @@ func MkdirAll(dirs ...string) error {
 // 	return string(content), nil
 // }
 
-//GetModPath ..
+// GetModPath ..
 func GetModPath() string {
 	b, err := run("go", "env", "GOMOD")
 	if err != nil {
@@ -50,7 +50,7 @@ func GetModPath() string {
 	return string(b)
 }
 
-//get a run result
+// get a run result
 func run(n string, args ...string) ([]byte, error) {
 	c := exec.Command(n, args...)
 	bb := &bytes.Buffer{}

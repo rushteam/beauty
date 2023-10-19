@@ -50,6 +50,7 @@ func WithWebDefaultMiddleware() RouteOption {
 		r.Use(middleware.Recoverer)
 	}
 }
+
 func WithWebServer(addr string, routes []Route, opts ...RouteOption) Option {
 	r := chi.NewRouter()
 	for _, v := range opts {

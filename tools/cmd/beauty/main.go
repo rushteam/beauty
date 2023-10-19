@@ -1,14 +1,14 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"os"
 
-	"github.com/rushteam/beauty/tools/new"
+	"github.com/rushteam/beauty/tools/internal/cmd/new"
 	"github.com/urfave/cli"
 )
 
-//Version ..
+// Version ..
 var Version = "0.0.1"
 
 var commands = []cli.Command{
@@ -27,7 +27,6 @@ var commands = []cli.Command{
 	},
 }
 
-//go:generate pkger -o tools/cmd/beauty
 func main() {
 	app := cli.NewApp()
 	app.Name = "beauty"
@@ -36,6 +35,6 @@ func main() {
 	app.Commands = commands
 
 	if err := app.Run(os.Args); err != nil {
-		fmt.Println("error:", err)
+		log.Fatalln("error:", err)
 	}
 }

@@ -1,15 +1,17 @@
 package new
 
 import (
-	"fmt"
-	"io/ioutil"
+	"io"
+	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 
 	"github.com/gobuffalo/here"
-	"github.com/markbates/pkger"
+	"github.com/rushteam/beauty/tools/internal/pkg"
+	"github.com/rushteam/beauty/tools/tpls"
 	"github.com/urfave/cli"
 )
 
@@ -19,16 +21,16 @@ type project struct {
 	ModPath string
 }
 
-//Project ..
+// Project ..
 var Project = &project{
 	Name: "demo",
 }
 
-//Action ..
+// Action ..
 func Action(c *cli.Context) error {
 	args := c.Args()
 	if len(args) == 0 {
-		fmt.Println("missing project name")
+		log.Println("missing project name")
 		return nil
 	}
 	if len(args[0]) > 0 {
@@ -37,10 +39,10 @@ func Action(c *cli.Context) error {
 	//get abs path
 	if Project.Path == "" {
 		pwd, err := os.Getwd()
-		if err == nil {
+		if err != nil {
 			return err
 		}
-		Project.Path = pwd
+		Project.Path = filepath.Join(pwd, Project.Name)
 	} else {
 		path, err := filepath.Abs(Project.Path)
 		if err != nil {
@@ -50,9 +52,10 @@ func Action(c *cli.Context) error {
 	}
 
 	//make project dir
-	if err := MkdirAll(Project.Path, Project.Name); err != nil {
+	if err := pkg.MkdirAll(Project.Path); err != nil {
 		return err
 	}
+	log.Println("make project dir:", Project.Path)
 
 	//get package path throuth mod env
 	if hi, err := here.Current(); err == nil {
@@ -60,40 +63,39 @@ func Action(c *cli.Context) error {
 			Project.ModPath = hi.ImportPath + "/"
 		}
 	}
-	if err := pkger.Walk("/templates/web/", func(path string, info os.FileInfo, err error) error {
+	tpl := tpls.Root()
+	fs.WalkDir(tpl, ".", func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() {
+			pkg.MkdirAll(filepath.Join(Project.Path, path))
 			return nil
 		}
-		src, err := pkger.Open(path)
+		src, err := tpl.Open(path)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		data, err := ioutil.ReadAll(src)
+		data, err := io.ReadAll(src)
 		if err != nil {
 			return err
 		}
+		filename := strings.TrimSuffix(path, ".tpl")
+		outputPath := filepath.Join(Project.Path, filename)
+		log.Println("create file:", outputPath)
+
 		tmpl, err := template.New(info.Name()).Parse(string(data))
-		i := strings.Index(path, ":/templates/web/") + len(":/templates/web/")
-		path = path[i:]
-		path = strings.TrimSuffix(path, ".tpl")
-
-		MkdirAll(Project.Path, Project.Name, filepath.Dir(path))
-
-		dstPath := filepath.Join(Project.Path, Project.Name, path)
-		dst, err := Create(dstPath)
 		if err != nil {
-			fmt.Println(err)
+			return err
+		}
+		dst, err := pkg.Create(outputPath)
+		if err != nil {
 			return nil
 		}
 		defer dst.Close()
 		tmpl.Execute(dst, Project)
 		return nil
-	}); err != nil {
-		return err
-	}
+	})
 	return nil
 }

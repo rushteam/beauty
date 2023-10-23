@@ -6,15 +6,15 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/go-chi/chi"
+	// "github.com/go-chi/chi"
 	"github.com/rushteam/beauty"
 )
 
 func main() {
 	s := &srv{}
 	s2 := &srv{}
-	route := chi.NewMux()
-	route.Get("/", func(w http.ResponseWriter, r *http.Request) {
+	r := http.NewServeMux()
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Welcome"))
 	})
 
@@ -22,7 +22,7 @@ func main() {
 		beauty.WithService(s, s2),
 		beauty.WithWebServer(
 			":8080",
-			route,
+			r,
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {

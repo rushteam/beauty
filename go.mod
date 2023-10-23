@@ -4,7 +4,6 @@ go 1.16
 
 require (
 	github.com/gin-gonic/gin v1.7.4
-	github.com/go-chi/chi v1.5.4
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/viper v1.9.0

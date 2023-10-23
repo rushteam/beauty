@@ -1,43 +1,25 @@
 package log
 
 import (
-	"go.uber.org/zap"
+	"log/slog"
 )
 
-//Logger ..
-var Logger = zap.NewNop()
-
-//Debug ..
-func Debug(msg string, fields ...zap.Field) {
-	Logger.Debug(msg, fields...)
+// Debug ..
+func Debug(msg string, args ...any) {
+	slog.Debug(msg, args...)
 }
 
-//Info ..
-func Info(msg string, fields ...zap.Field) {
-	Logger.Info(msg, fields...)
+// Info ..
+func Info(msg string, args ...any) {
+	slog.Info(msg, args...)
 }
 
-//Warn ..
-func Warn(msg string, fields ...zap.Field) {
-	Logger.Warn(msg, fields...)
+// Warn ..
+func Warn(msg string, args ...any) {
+	slog.Warn(msg, args...)
 }
 
-//Error ..
-func Error(msg string, fields ...zap.Field) {
-	Logger.Warn(msg, fields...)
-}
-
-//Panic ..
-func Panic(msg string, fields ...zap.Field) {
-	Logger.Panic(msg, fields...)
-}
-
-//Fatal ..
-func Fatal(msg string, fields ...zap.Field) {
-	Logger.Fatal(msg, fields...)
-}
-
-//Sync ..
-func Sync() error {
-	return Logger.Sync()
+// Error ..
+func Error(msg string, args ...any) {
+	slog.Warn(msg, args...)
 }

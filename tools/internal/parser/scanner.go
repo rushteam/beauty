@@ -5,10 +5,10 @@ import (
 	"io"
 	"text/scanner"
 
-	"github.com/rushteam/beauty/tools/parser/ast"
+	"github.com/rushteam/beauty/tools/internal/parser/ast"
 )
 
-//Parser ..
+// Parser ..
 func Parser(src io.Reader, filename string) ([]*ast.Stmt, error) {
 	s := newScanner(src, filename)
 	if yyParse(s) != 0 {
@@ -17,7 +17,7 @@ func Parser(src io.Reader, filename string) ([]*ast.Stmt, error) {
 	return s.Stmts, nil
 }
 
-//newScanner ..
+// newScanner ..
 func newScanner(src io.Reader, filename string) *Scanner {
 	p := scanner.Position{Filename: filename}
 	s := &Scanner{
@@ -37,7 +37,7 @@ type Scanner struct {
 	Err   error
 }
 
-//Lex ..
+// Lex ..
 func (s *Scanner) Error(msg string) {
 	s.Err = fmt.Errorf("scanner: %v %v\n", msg, s.s.Pos())
 }
@@ -49,7 +49,7 @@ var identTokens = map[string]int{
 	"route":   Route,
 }
 
-//Lex ..
+// Lex ..
 func (s *Scanner) Lex(lval *yySymType) int {
 	var tok int
 	var val, v string

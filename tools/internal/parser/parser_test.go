@@ -5,28 +5,34 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rushteam/beauty/tools/parser/ast"
+	"github.com/rushteam/beauty/tools/internal/parser/ast"
 )
 
 func TestParser(t *testing.T) {
 	content := `
-service helloworld (
-	@route GET|POST "/index/:id"
-    rpc Index(getRequest) returns (getResponse)
-    rpc Helloworld(getRequest) returns (getResponse)
-)
+service helloworld {}
+service demo {
+	rpc Index(getRequest) returns (getResponse)
+}
 `
+	// 	content := `
+	// service helloworld {
+	// 	@route GET|POST "/index/:id"
+	// 	rpc Index(getRequest) returns (getResponse)
+	// 	rpc Helloworld(getRequest) returns (getResponse)
+	// }
+	// `
 	stmts, err := Parser(strings.NewReader(content), "")
 	if err != nil {
 		t.Error(err)
 	}
-	// fmt.Printf("%+v", stmts[0])
+	fmt.Printf(">>> %+v", len(stmts))
 	var gen = ""
 	ast.Inspect(stmts, func(node ast.Node) bool {
 		// fmt.Printf("node: %+v \n", n)
 		switch n := node.(type) {
 		case *ast.Service:
-			gen += fmt.Sprintf("service %v (\n", n.Name)
+			gen += fmt.Sprintf("service %v: %+v\n", n.Name, n)
 		case *ast.Route:
 			gen += fmt.Sprintf("@route %v %v\n", strings.Join(n.Methods, "|"), n.URI)
 		case *ast.RPC:

@@ -6,26 +6,23 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/go-chi/chi"
 	"github.com/rushteam/beauty"
 )
 
 func main() {
 	s := &srv{}
 	s2 := &srv{}
-	var routes = []beauty.Route{
-		{
-			URI: "/",
-			Handler: func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("Welcome"))
-			},
-		},
-	}
+	route := chi.NewMux()
+	route.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Welcome"))
+	})
 
 	app := beauty.New(
 		beauty.WithService(s, s2),
 		beauty.WithWebServer(
 			":8080",
-			routes,
+			route,
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {

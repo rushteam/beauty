@@ -3,7 +3,6 @@ package beauty
 import (
 	"context"
 
-	"github.com/go-chi/chi"
 	"github.com/rushteam/beauty/pkg/log"
 	"github.com/rushteam/beauty/pkg/signals"
 	"go.uber.org/zap"
@@ -30,8 +29,6 @@ func WithService(s ...Service) Option {
 		app.services = append(app.services, s...)
 	}
 }
-
-type RouteOption func(r *chi.Mux)
 
 func WithLogger() Option {
 	log.Logger, _ = zap.NewDevelopment()

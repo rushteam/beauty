@@ -5,7 +5,6 @@ import (
 
 	"github.com/rushteam/beauty/pkg/log"
 	"github.com/rushteam/beauty/pkg/signals"
-	"go.uber.org/zap"
 )
 
 type HookEvent int
@@ -28,11 +27,6 @@ func WithService(s ...Service) Option {
 	return func(app *App) {
 		app.services = append(app.services, s...)
 	}
-}
-
-func WithLogger() Option {
-	log.Logger, _ = zap.NewDevelopment()
-	return func(app *App) {}
 }
 
 // var _ registry.Service = (*Options)(nil)

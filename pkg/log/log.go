@@ -23,3 +23,8 @@ func Warn(msg string, args ...any) {
 func Error(msg string, args ...any) {
 	slog.Warn(msg, args...)
 }
+
+// Sync ..
+func Sync() error {
+	return nil
+}

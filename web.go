@@ -3,6 +3,7 @@ package beauty
 import (
 	"net/http"
 
+	// "github.com/go-chi/chi/middleware"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 
@@ -11,6 +12,14 @@ func WithWebServer(addr string, mux http.Handler) Option {
 		app.services = append(app.services, webserver.New(addr, mux))
 	}
 }
+
+// var WebLogger = middleware.Logger
+// var WebRecoverer = middleware.Recoverer
+
+// var DefaultMiddlewares = []func(next http.Handler) http.Handler{
+// 	middleware.Logger,
+// 	middleware.Recoverer,
+// }
 
 /*
 type Route struct {

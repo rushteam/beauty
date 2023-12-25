@@ -80,7 +80,7 @@ func (s *App) Start(ctx context.Context) error {
 	})
 	s.runHooks(EventBeforeRun)
 	for _, srv := range s.services {
-		func(srv Service) {
+		go func(srv Service) {
 			srv.Start(ctx)
 		}(srv)
 	}

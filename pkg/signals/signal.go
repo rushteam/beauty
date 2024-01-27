@@ -2,9 +2,10 @@ package signals
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
+
+	"github.com/rushteam/beauty/pkg/logger"
 )
 
 // Shutdown ...
@@ -17,7 +18,7 @@ func NotifyShutdownContext(ctx context.Context, f func()) context.Context {
 		select {
 		case <-ctx.Done():
 		case sig := <-c:
-			log.Printf("stoping with signal: %v", sig.String())
+			logger.Info("stoping with signal", "signal", sig.String())
 			f()
 			cancel()
 			<-c

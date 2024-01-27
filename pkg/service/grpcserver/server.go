@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/rushteam/beauty/pkg/logger"
 	"google.golang.org/grpc"
 )
 
@@ -38,16 +39,16 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.Addr = ln.Addr().String() //确保随机端口时候 s.Addr 值的正确性
 	go func() {
-		log.Println("grpc server serve", s.Addr)
+		logger.Info("grpc server serve", "addr", s.Addr)
 		if err := s.Server.Serve(ln); err != nil {
-			log.Fatalf("grpc server serve failed: %s\n", err)
-			// log.Println("grpc server serve failed", err)
-			// slog.Error("grpc server serve failed", slog.Any("error", err))
+			if err != grpc.ErrServerStopped {
+				log.Fatalf("grpc server serve failed: %s\n", err)
+			}
 			return
 		}
 	}()
 	<-ctx.Done()
-	log.Println("grpc server stopped...")
+	logger.Info("grpc server stopped...")
 	s.Server.GracefulStop()
 	return nil
 }

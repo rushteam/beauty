@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+
+	"github.com/rushteam/beauty/pkg/logger"
 )
 
 func New(addr string, mux http.Handler) *Server {
@@ -29,7 +31,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Handler: s.Mux,
 	}
 	go func() {
-		log.Println("web server serve", s.Addr)
+		logger.Info("web server serve", "addr", s.Addr)
 		if err := server.Serve(ln); err != nil {
 			if err != http.ErrServerClosed {
 				log.Fatalf("web server listen failed: %s\n", err)
@@ -37,7 +39,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 	<-ctx.Done()
-	log.Println("web server stopped...")
+	logger.Info("web server stopped...")
 	return server.Shutdown(ctx)
 }
 

@@ -2,6 +2,8 @@ package beauty
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
@@ -74,20 +76,24 @@ func (s *App) AppendService(services ...Service) {
 // Start ..
 func (s *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	// log.Info("app start", zap.String("start time", time.Now().Format("2006-01-02 15:04:05")))
 	signals.NotifyShutdownContext(ctx, func() {
 		cancel()
 	})
 	s.runHooks(EventBeforeRun)
+	wg := sync.WaitGroup{}
 	for _, srv := range s.services {
+		wg.Add(1)
 		go func(srv Service) {
+			defer wg.Done()
 			if err := srv.Start(ctx); err != nil {
 				logger.Error("service start error", "error", err)
 			}
 		}(srv)
 	}
+	wg.Wait()
 	<-ctx.Done()
 	s.runHooks(EventAfterRun)
 	defer logger.Sync()
+	time.Sleep(time.Millisecond * 200)
 	return nil
 }

@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 )
 
@@ -19,17 +20,27 @@ type Server struct {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	ln, err := net.Listen("tcp", s.Addr)
+	if err != nil {
+		return err
+	}
 	server := &http.Server{
 		Addr:    s.Addr,
 		Handler: s.Mux,
 	}
-	log.Println("web server listen", s.Addr)
-	go server.ListenAndServe()
+	go func() {
+		log.Println("web server serve", s.Addr)
+		if err := server.Serve(ln); err != nil {
+			if err != http.ErrServerClosed {
+				log.Fatalf("web server listen failed: %s\n", err)
+			}
+		}
+	}()
 	<-ctx.Done()
-	log.Println("server stopped...")
+	log.Println("web server stopped...")
 	return server.Shutdown(ctx)
 }
 
 func (s *Server) String() string {
-	return "server"
+	return "web"
 }

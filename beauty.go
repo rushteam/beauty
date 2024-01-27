@@ -3,7 +3,7 @@ package beauty
 import (
 	"context"
 
-	"github.com/rushteam/beauty/pkg/log"
+	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
 )
 
@@ -81,12 +81,13 @@ func (s *App) Start(ctx context.Context) error {
 	s.runHooks(EventBeforeRun)
 	for _, srv := range s.services {
 		go func(srv Service) {
-			srv.Start(ctx)
+			if err := srv.Start(ctx); err != nil {
+				logger.Error("service start error", "error", err)
+			}
 		}(srv)
 	}
 	<-ctx.Done()
 	s.runHooks(EventAfterRun)
-	cancel()
-	defer log.Sync()
+	defer logger.Sync()
 	return nil
 }

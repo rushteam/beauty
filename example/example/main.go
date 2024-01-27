@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -11,18 +10,21 @@ import (
 )
 
 func main() {
-	s := &srv{}
-	s2 := &srv{}
+	// s := &srv{}
+	// s2 := &srv{}
 	r := http.NewServeMux()
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Welcome"))
 	})
 
 	app := beauty.New(
-		beauty.WithService(s, s2),
+		// beauty.WithService(s, s2),
 		beauty.WithWebServer(
-			":8080",
+			":http",
 			r,
+		),
+		beauty.WithGrpcServer(
+			":58080",
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {
@@ -30,13 +32,12 @@ func main() {
 	}
 }
 
-type srv struct {
-}
+// type srv struct {
+// }
 
-func (s *srv) Start(ctx context.Context) error {
-	fmt.Println("..")
-	return nil
-}
-func (s *srv) String() string {
-	return "server"
-}
+// func (s *srv) Start(ctx context.Context) error {
+// 	return nil
+// }
+// func (s *srv) String() string {
+// 	return "empty server"
+// }

@@ -15,18 +15,11 @@ func New(addr string) *Server {
 		Addr:   addr,
 		Server: grpc.NewServer(),
 	}
-	// if conf, err := config.New(config.Env(), name); err == nil {
-	// 	s.Mode = conf.GetString(ServiceKind + ".mode")
-	// 	s.Addr = conf.GetString(ServiceKind + ".addr")
-	// } else {
-	// 	log.Warn("no config file...", zap.String("kind", ServiceKind), zap.String("name", name))
-	// }
 	return s
 }
 
 // Server ..
 type Server struct {
-	Mode   string
 	Addr   string
 	Server *grpc.Server
 }

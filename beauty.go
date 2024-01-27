@@ -94,6 +94,6 @@ func (s *App) Start(ctx context.Context) error {
 	<-ctx.Done()
 	s.runHooks(EventAfterRun)
 	defer logger.Sync()
-	time.Sleep(time.Millisecond * 200)
+	time.Sleep(time.Millisecond * 100)
 	return nil
 }

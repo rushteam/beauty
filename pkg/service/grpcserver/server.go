@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"net"
-	"time"
 
 	"github.com/rushteam/beauty/pkg/logger"
 	"google.golang.org/grpc"
@@ -44,7 +43,7 @@ func (s *Server) Start(ctx context.Context) error {
 			return
 		}
 	}()
-	time.Sleep(time.Second)
+	// time.Sleep(time.Second)
 	// fmt.Println("GetServiceInfo", s.Server.GetServiceInfo())
 	<-ctx.Done()
 	logger.Info("grpc server stopped...")

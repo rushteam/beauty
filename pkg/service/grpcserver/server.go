@@ -4,16 +4,20 @@ import (
 	"context"
 	"log"
 	"net"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/logger"
 	"google.golang.org/grpc"
 )
 
 // New create a web service with the name
-func New(addr string) *Server {
+func New(addr string, handler func(*grpc.Server)) *Server {
 	s := &Server{
 		Addr:   addr,
 		Server: grpc.NewServer(),
+	}
+	if handler != nil {
+		handler(s.Server)
 	}
 	return s
 }
@@ -40,6 +44,8 @@ func (s *Server) Start(ctx context.Context) error {
 			return
 		}
 	}()
+	time.Sleep(time.Second)
+	// fmt.Println("GetServiceInfo", s.Server.GetServiceInfo())
 	<-ctx.Done()
 	logger.Info("grpc server stopped...")
 	s.Server.GracefulStop()

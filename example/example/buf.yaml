@@ -1,0 +1,7 @@
+version: v1beta1
+name: buf.build/example/myrepo
+deps:
+  - buf.build/googleapis/googleapis
+build:
+  roots:
+    - api

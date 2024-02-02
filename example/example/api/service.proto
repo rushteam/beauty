@@ -1,0 +1,26 @@
+// 定义 gRPC 服务
+syntax = "proto3";
+
+package v1alpha;
+
+option go_package = "api/v1";
+
+import "google/api/annotations.proto";
+
+service Greeter {
+  // 接收一个名字，返回一条欢迎消息
+  rpc SayHello (HelloRequest) returns (HelloReply) {
+    option (google.api.http) = {
+      post: "/v1/greeter/sayhello"
+      body: "*"
+    };
+  }
+}
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}

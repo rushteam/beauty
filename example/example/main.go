@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	// "github.com/go-chi/chi"
 
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/example/example/api/v1"
+	"github.com/rushteam/beauty/pkg/service/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
 	"google.golang.org/grpc"
 )
@@ -22,6 +24,27 @@ func main() {
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Welcome"))
 	})
+
+	go func() {
+		time.Sleep(time.Second * 3)
+		client, err := grpcclient.New(
+			grpcclient.WithDiscover("etcd:///127.0.0.1"),
+			grpcclient.WithAddr(":58080"),
+		)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		c := v1.NewGreeterClient(client)
+		resp, err := c.SayHello(context.Background(), &v1.HelloRequest{})
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println(">>>", resp, err)
+		client.Close()
+	}()
+
 	gw := grpcgw.New()
 	v1.RegisterGreeterHandlerServer(context.Background(), gw, &GreeterServer{})
 

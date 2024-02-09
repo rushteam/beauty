@@ -49,6 +49,7 @@ type App struct {
 func (app *App) Hook(stage HookEvent, fn HookFunc) {
 	app.hooks[stage] = append(app.hooks[stage], fn)
 }
+
 func (app *App) runHooks(stage HookEvent) {
 	if hooks, ok := app.hooks[stage]; ok {
 		for _, h := range hooks {

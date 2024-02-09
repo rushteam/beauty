@@ -3,14 +3,22 @@ package beauty
 import (
 	"net/http"
 
-	// "github.com/go-chi/chi/middleware"
+	"github.com/rushteam/beauty/pkg/service/cron"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"google.golang.org/grpc"
 )
 
 func WithWebServer(addr string, mux http.Handler) Option {
-	return func(app *App) {
-		app.services = append(app.services, webserver.New(addr, mux))
-	}
+	return WithService(webserver.New(addr, mux))
+}
+
+func WithGrpcServer(addr string, handler func(*grpc.Server)) Option {
+	return WithService(grpcserver.New(addr, handler))
+}
+
+func WithCrontab(opts ...cron.CronOptions) Option {
+	return WithService(cron.New(opts...))
 }
 
 // var WebLogger = middleware.Logger

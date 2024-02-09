@@ -4,24 +4,30 @@ import (
 	"log/slog"
 )
 
+var logger *slog.Logger
+
+func init() {
+	logger = slog.Default().WithGroup("beauty")
+}
+
 // Debug ..
 func Debug(msg string, args ...any) {
-	slog.Debug(msg, args...)
+	logger.Debug(msg, args...)
 }
 
 // Info ..
 func Info(msg string, args ...any) {
-	slog.Info(msg, args...)
+	logger.Info(msg, args...)
 }
 
 // Warn ..
 func Warn(msg string, args ...any) {
-	slog.Warn(msg, args...)
+	logger.Warn(msg, args...)
 }
 
 // Error ..
 func Error(msg string, args ...any) {
-	slog.Warn(msg, args...)
+	logger.Warn(msg, args...)
 }
 
 // Sync ..

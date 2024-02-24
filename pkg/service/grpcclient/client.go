@@ -15,6 +15,7 @@ func WithConfig(config Config) Option {
 		c.DialOpts = append(c.DialOpts, grpc.WithBlock())
 	}
 }
+
 func WithDiscover(addr string) Option {
 	return func(c *Client) {
 		// c.Addr = config.Addr

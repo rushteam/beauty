@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
 )
@@ -24,14 +25,50 @@ type HookFunc func(app *App)
 // Option ..
 type Option func(app *App)
 
-// WithService ..
-func WithService(s ...Service) Option {
-	return func(app *App) {
-		app.services = append(app.services, s...)
+type ServiceTag func(*ServiceInfo)
+
+type ServiceInfo struct {
+	Service
+	Name string
+	Addr string
+	Tags map[string]string
+}
+
+func (s ServiceInfo) ServiceName() string {
+	return s.Name
+}
+
+func WithServiceName(name string) ServiceTag {
+	return func(t *ServiceInfo) {
+		t.Name = name
 	}
 }
 
-// var _ registry.Service = (*Options)(nil)
+func WithServiceTag(k, v string) ServiceTag {
+	return func(t *ServiceInfo) {
+		t.Tags[k] = v
+	}
+}
+
+// WithService ..
+func WithService(s Service, tags ...ServiceTag) Option {
+	si := &ServiceInfo{
+		Service: s,
+		Name:    s.String(),
+		Tags:    make(map[string]string, 0),
+	}
+	for _, tag := range tags {
+		tag(si)
+	}
+	return func(app *App) {
+		app.services = append(app.services, si)
+	}
+}
+func WithRegistry(r discover.Registry) Option {
+	return func(app *App) {
+		app.registry = append(app.registry, r)
+	}
+}
 
 // Service ..
 type Service interface {
@@ -43,6 +80,7 @@ type Service interface {
 type App struct {
 	hooks    map[HookEvent][]HookFunc
 	services []Service
+	registry []discover.Registry
 }
 
 // Hook add a hook func to stage
@@ -70,9 +108,9 @@ func New(opts ...Option) *App {
 }
 
 // AppendService ..
-func (s *App) AppendService(services ...Service) {
-	s.services = append(s.services, services...)
-}
+// func (s *App) AppendService(services ...Service) {
+// 	s.services = append(s.services, services...)
+// }
 
 // Start ..
 func (s *App) Start(ctx context.Context) error {
@@ -85,7 +123,20 @@ func (s *App) Start(ctx context.Context) error {
 	for _, srv := range s.services {
 		wg.Add(1)
 		go func(srv Service) {
-			defer wg.Done()
+			defer func() {
+				for _, r := range s.registry {
+					if v, ok := srv.(discover.Endpoint); ok {
+						r.Deregister(v)
+					}
+				}
+				wg.Done()
+			}()
+			//register
+			for _, r := range s.registry {
+				if v, ok := srv.(discover.Endpoint); ok {
+					r.Register(v)
+				}
+			}
 			if err := srv.Start(ctx); err != nil {
 				logger.Error("service start error", "error", err)
 			}

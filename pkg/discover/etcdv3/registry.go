@@ -28,7 +28,6 @@ func (r etcdRegistry) Register(ctx context.Context, info discover.Service) error
 }
 
 func (r etcdRegistry) Deregister(ctx context.Context, info discover.Service) error {
-	logger.Info("Deregistering service %s", info.Name())
 	return nil
 }
 

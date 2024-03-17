@@ -135,7 +135,7 @@ func (s *App) Start(ctx context.Context) error {
 		go func(srv *ServiceContext) {
 			defer func() {
 				for _, r := range s.registry {
-					if err := r.Deregister(ctx, srv); err != nil {
+					if err := r.Deregister(context.Background(), srv); err != nil {
 						logger.Error("service registry Deregister error", "error", err)
 					}
 				}

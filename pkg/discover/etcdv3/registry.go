@@ -28,7 +28,9 @@ func (r etcdRegistry) Register(ctx context.Context, info discover.Service) error
 }
 
 func (r etcdRegistry) Deregister(ctx context.Context, info discover.Service) error {
-	return nil
+	key := buildServiceKey(r.namespace, info.Name(), info.ID())
+	_, err := r.client.Delete(ctx, key)
+	return err
 }
 
 func (r etcdRegistry) keepAlive(ctx context.Context, key, val string) {

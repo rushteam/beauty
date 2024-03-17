@@ -44,8 +44,6 @@ func (s *Server) Start(ctx context.Context) error {
 			return
 		}
 	}()
-	// time.Sleep(time.Second)
-	// fmt.Println("GetServiceInfo", s.Server.GetServiceInfo())
 	<-ctx.Done()
 	logger.Info("grpc server stopped...")
 	s.Server.GracefulStop()

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/logger"
 )
 
@@ -48,5 +49,5 @@ func (s *Server) String() string {
 	if err != nil {
 		logger.Error("web server addr error", err)
 	}
-	return "http://" + host + ":" + port
+	return addr.Parse(host) + ":" + port
 }

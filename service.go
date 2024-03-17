@@ -9,11 +9,11 @@ import (
 	"google.golang.org/grpc"
 )
 
-func WithWebServer(addr string, mux http.Handler, tags ...ServiceTag) Option {
+func WithWebServer(addr string, mux http.Handler, tags ...ServiceOption) Option {
 	return WithService(webserver.New(addr, mux), tags...)
 }
 
-func WithGrpcServer(addr string, handler func(*grpc.Server), tags ...ServiceTag) Option {
+func WithGrpcServer(addr string, handler func(*grpc.Server), tags ...ServiceOption) Option {
 	return WithService(grpcserver.New(addr, handler), tags...)
 }
 

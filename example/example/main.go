@@ -11,6 +11,8 @@ import (
 
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/example/example/api/v1"
+	"github.com/rushteam/beauty/pkg/discover/etcdv3"
+	_ "github.com/rushteam/beauty/pkg/discover/etcdv3"
 	"github.com/rushteam/beauty/pkg/service/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
 	"google.golang.org/grpc"
@@ -26,22 +28,24 @@ func main() {
 	})
 
 	go func() {
-		time.Sleep(time.Second * 3)
+		time.Sleep(time.Second)
 		client, err := grpcclient.New(
-			grpcclient.WithDiscover("etcd:///127.0.0.1"),
-			grpcclient.WithAddr(":58080"),
+			// grpcclient.WithDiscover("etcd:///127.0.0.1"),
+			//58080
+			grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/test"),
 		)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("client>", err)
 			return
 		}
 		c := v1.NewGreeterClient(client)
 		resp, err := c.SayHello(context.Background(), &v1.HelloRequest{})
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("client>", err)
 			return
 		}
-		fmt.Println(">>>", resp, err)
+		fmt.Println("client>", resp, err)
+		time.Sleep(time.Second * 10)
 		client.Close()
 	}()
 
@@ -50,19 +54,28 @@ func main() {
 
 	app := beauty.New(
 		// beauty.WithService(s, s2),
+		// beauty.WithRegistry(discover.NewNoop()),
+		beauty.WithRegistry(etcdv3.NewEtcdRegistry(etcdv3.EtcdConfig{
+			Endpoints: []string{
+				"127.0.0.1:2379",
+			},
+		})),
 		beauty.WithWebServer(
 			":8080",
 			gw,
+			beauty.WithServiceName("helloworld.gw"),
 		),
 		beauty.WithWebServer(
 			":http",
 			r,
+			beauty.WithServiceName("helloworld.web"),
 		),
 		beauty.WithGrpcServer(
 			":58080",
 			func(s *grpc.Server) {
 				v1.RegisterGreeterServer(s, &GreeterServer{})
 			},
+			beauty.WithServiceName("helloworld.rpc"),
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {
@@ -75,8 +88,9 @@ type GreeterServer struct {
 }
 
 func (GreeterServer) SayHello(context.Context, *v1.HelloRequest) (*v1.HelloReply, error) {
-	fmt.Println("hello world")
-	return &v1.HelloReply{}, nil
+	return &v1.HelloReply{
+		Message: "hello world",
+	}, nil
 }
 
 // type srv struct {

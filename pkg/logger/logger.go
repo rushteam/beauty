@@ -27,7 +27,7 @@ func Warn(msg string, args ...any) {
 
 // Error ..
 func Error(msg string, args ...any) {
-	logger.Warn(msg, args...)
+	logger.Error(msg, args...)
 }
 
 // Sync ..

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/logger"
 	"google.golang.org/grpc"
 )
@@ -53,5 +54,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // String ..
 func (s *Server) String() string {
-	return "grpc"
+	host, port, err := net.SplitHostPort(s.Addr)
+	if err != nil {
+		logger.Error("web server addr error", err)
+	}
+	return addr.Parse(host) + ":" + port
 }

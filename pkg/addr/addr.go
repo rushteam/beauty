@@ -71,9 +71,9 @@ func localIPs() []string {
 
 		for _, addr := range addrs {
 			if ip := addrToIP(addr); ip != nil {
-				if ip.IsLoopback() {
-					fmt.Println("isLoopback", ip)
-				}
+				// if ip.IsLoopback() {
+				// 	fmt.Println("isLoopback", ip)
+				// }
 				ipAddrs = append(ipAddrs, ip.String())
 			}
 		}
@@ -130,7 +130,7 @@ func IPs() []string {
 }
 
 // Parse try parse addr to host and port
-func Parse(addr string) string {
+func ParseHostPort(addr string) string {
 	host, port, err := net.SplitHostPort(addr)
 	if err == nil {
 		addr = host

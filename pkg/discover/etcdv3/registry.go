@@ -54,13 +54,6 @@ func (r etcdRegistry) keepAlive(ctx context.Context, key, val string) {
 	}
 }
 
-type EtcdConfig struct {
-	Endpoints []string
-	Username  string
-	Password  string
-	Namespace string
-}
-
 func NewEtcdRegistry(c EtcdConfig) discover.Registry {
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: c.Endpoints,

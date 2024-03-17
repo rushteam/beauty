@@ -28,11 +28,10 @@ func main() {
 	})
 
 	go func() {
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * 5)
 		client, err := grpcclient.New(
 			// grpcclient.WithDiscover("etcd:///127.0.0.1"),
-			//58080
-			grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/test"),
+			grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/beauty/helloworld.rpc"),
 		)
 		if err != nil {
 			fmt.Println("client>", err)
@@ -59,6 +58,7 @@ func main() {
 			Endpoints: []string{
 				"127.0.0.1:2379",
 			},
+			Namespace: "/beauty",
 		})),
 		beauty.WithWebServer(
 			":8080",
@@ -76,6 +76,7 @@ func main() {
 				v1.RegisterGreeterServer(s, &GreeterServer{})
 			},
 			beauty.WithServiceName("helloworld.rpc"),
+			beauty.WithServiceMeta("version", "v1.0"),
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {

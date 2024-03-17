@@ -56,7 +56,6 @@ func (c *Client) Close() {
 
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
-		Addr: ":58080",
 		DialOpts: []grpc.DialOption{
 			// grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),

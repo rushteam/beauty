@@ -45,9 +45,5 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) String() string {
-	host, port, err := net.SplitHostPort(s.Addr)
-	if err != nil {
-		logger.Error("web server addr error", err)
-	}
-	return addr.Parse(host) + ":" + port
+	return addr.ParseHostPort(s.Addr)
 }

@@ -52,14 +52,14 @@ func (s ServiceContext) Metadata() map[string]string {
 }
 
 func WithServiceName(name string) ServiceOption {
-	return func(t *ServiceContext) {
-		t.name = name
+	return func(s *ServiceContext) {
+		s.name = name
 	}
 }
 
 func WithServiceMeta(k, v string) ServiceOption {
-	return func(t *ServiceContext) {
-		t.metadata[k] = v
+	return func(s *ServiceContext) {
+		s.metadata[k] = v
 	}
 }
 

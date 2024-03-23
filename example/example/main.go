@@ -40,7 +40,15 @@ func main() {
 		// span := trace.SpanFromContext(context.Background())
 		defer span.End()
 		span.SetAttributes(attribute.String("url", r.URL.String()))
-		time.Sleep(10 * time.Second)
+		w.Write([]byte("hi"))
+	})
+	r.HandleFunc("/meter", func(w http.ResponseWriter, r *http.Request) {
+		// _, span := otel.Tracer("http").Start(context.Background(), "request")
+		// // span := trace.SpanFromContext(context.Background())
+		// defer span.End()
+		// span.SetAttributes(attribute.String("url", r.URL.String()))
+		m, _ := otel.Meter("http").Int64Counter("request")
+		m.Add(context.Background(), 100)
 		w.Write([]byte("hi"))
 	})
 
@@ -72,6 +80,7 @@ func main() {
 		// beauty.WithService(s, s2),
 		// beauty.WithRegistry(discover.NewNoop()),
 		beauty.WithTrace(),
+		beauty.WithMetric(),
 		beauty.WithRegistry(etcdv3.NewEtcdRegistry(etcdv3.EtcdConfig{
 			Endpoints: []string{
 				"127.0.0.1:2379",

@@ -7,13 +7,17 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
+
+	// "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
+	// semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var tracer trace.Tracer
 
-func NewTracing() func() {
+func NewTracer() context.CancelFunc {
 	// exporter, err := jaeger.NewRawExporter(
 	// 	jaeger.WithCollectorEndpoint("http://your-jaeger-collector-endpoint:14268/api/traces"),
 	// 	jaeger.WithProcess(jaeger.Process{
@@ -29,9 +33,24 @@ func NewTracing() func() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// res, err := resource.Merge(
+	// 	resource.Environment(),
+	// 	resource.NewSchemaless(
+	// 		semconv.ServiceName("beauty"),
+	// 		semconv.ServiceVersion("0.0.1"),
+	// 		// semconv.SchemaURL,
+	// 		// semconv.ServerAddress(),
+	// 		// semconv.ServerPort(),
+	// 		// semconv.ServiceInstanceID(),
+	// 	),
+	// )
+	if err != nil {
+		log.Fatal(err)
+	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		// sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
@@ -48,7 +67,3 @@ func SpanFromContext(ctx context.Context, spanName string, opts ...trace.SpanSta
 	}
 	return tracer.Start(ctx, spanName, opts...)
 }
-
-// func newExporter() (sdktrace.SpanExporter, error) {
-// 	return stdouttrace.New()
-// }

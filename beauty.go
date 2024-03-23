@@ -88,10 +88,20 @@ func WithRegistry(r discover.Registry) Option {
 
 func WithTrace() Option {
 	return func(app *App) {
-		cancel := tracing.NewTracing()
+		cancel := tracing.NewTracer()
 		app.Hook(EventAfterRun, func(app *App) {
 			defer cancel()
-			logger.Info("tracing stopping...")
+			logger.Info("otel tracing stopping...")
+		})
+	}
+}
+
+func WithMetric() Option {
+	return func(app *App) {
+		cancel := tracing.NewMetric()
+		app.Hook(EventAfterRun, func(app *App) {
+			defer cancel()
+			logger.Info("otel metric stopping...")
 		})
 	}
 }

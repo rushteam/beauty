@@ -3,51 +3,58 @@ package conf
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path/filepath"
+	"strings"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
 )
 
-var loaders = make(map[string]Loader)
-
-// Config ..
-// type Config struct {
-// 	*viper.Viper
-// }
-
-// // Sub 子配置 warp viper.Viper
-// func (c *Config) Sub(key string) *Config {
-// 	if conf := c.Viper.Sub(key); conf != nil {
-// 		return &Config{
-// 			Viper: conf,
-// 		}
-// 	}
-// 	return nil
-// }
-
-// New ..
-// func New(filename string) (*Config, error) {
-// 	v := viper.New()
-// 	// v.AddConfigPath(basePath + "/config/" + env + "/")
-// 	// v.SetConfigName(name) // 设置配置文件名 (不带后缀)
-// 	// v.SetConfigType("yaml")
-// 	v.SetConfigFile(filename)
-// 	err := v.ReadInConfig() // 读取配置数据
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return &Config{Viper: v}, nil
-// }
-
 type Loader interface {
-	Load(key string, dest interface{}) error
-	LoadAndWatch(ctx context.Context, key string, dst interface{}) error
+	Unmarshal(dst any) error
+	Watch(ctx context.Context, fn func())
+	// LoadAndWatch(ctx context.Context, key string, dst interface{}) error
+}
+type loader struct {
+	driver string
+	*viper.Viper
 }
 
-func New(driver string) (Loader, error) {
-	if l, ok := loaders[driver]; ok {
-		return l, nil
+func (l *loader) Unmarshal(dst any) error {
+	return l.Viper.Unmarshal(dst)
+}
+
+func (l *loader) Watch(ctx context.Context, fn func()) {
+	go func() {
+		if l.driver == "file" {
+			l.Viper.OnConfigChange(func(in fsnotify.Event) {
+				fn()
+			})
+			l.Viper.WatchConfig()
+		}
+		<-ctx.Done()
+	}()
+}
+
+func New(rawURL string) (Loader, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing: %w", err)
 	}
-	return nil, fmt.Errorf("not found loader: %v", driver)
-}
-
-func RegistryLoader(driver string, l Loader) {
-	loaders[driver] = l
+	if len(u.Scheme) == 0 {
+		u.Scheme = "file"
+	}
+	l := &loader{
+		driver: u.Scheme,
+		Viper:  viper.New(),
+	}
+	l.SetConfigFile(u.Path)
+	l.SetConfigType(strings.TrimPrefix(filepath.Ext(u.Path), "."))
+	// l.AddConfigPath(filepath.Dir(filename))
+	// l.SetConfigName(strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)))
+	if err := l.ReadInConfig(); err != nil {
+		return l, err
+	}
+	return l, nil
 }

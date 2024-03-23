@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"log/slog"
 )
 
@@ -12,22 +13,22 @@ func init() {
 
 // Debug ..
 func Debug(msg string, args ...any) {
-	logger.Debug(msg, args...)
+	logger.Log(context.Background(), slog.LevelDebug, msg, args...)
 }
 
 // Info ..
 func Info(msg string, args ...any) {
-	logger.Info(msg, args...)
+	logger.Log(context.Background(), slog.LevelInfo, msg, args...)
 }
 
 // Warn ..
 func Warn(msg string, args ...any) {
-	logger.Warn(msg, args...)
+	logger.Log(context.Background(), slog.LevelWarn, msg, args...)
 }
 
 // Error ..
 func Error(msg string, args ...any) {
-	logger.Error(msg, args...)
+	logger.Log(context.Background(), slog.LevelError, msg, args...)
 }
 
 // Sync ..

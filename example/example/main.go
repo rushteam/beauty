@@ -15,6 +15,11 @@ import (
 	_ "github.com/rushteam/beauty/pkg/discover/etcdv3"
 	"github.com/rushteam/beauty/pkg/service/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
+	"github.com/rushteam/beauty/pkg/tracing"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+
+	// "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 )
 
@@ -24,7 +29,20 @@ func main() {
 	// s2 := &srv{}
 	r := http.NewServeMux()
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// span := trace.SpanFromContext(r.Context())
+		_, span := tracing.SpanFromContext(r.Context(), "http")
+		defer span.End()
+		span.SetAttributes(attribute.String("url", r.URL.String()))
+		span.AddEvent("request")
 		w.Write([]byte("Welcome"))
+	})
+	r.HandleFunc("/123", func(w http.ResponseWriter, r *http.Request) {
+		_, span := otel.Tracer("http").Start(context.Background(), "request")
+		// span := trace.SpanFromContext(context.Background())
+		defer span.End()
+		span.SetAttributes(attribute.String("url", r.URL.String()))
+		time.Sleep(10 * time.Second)
+		w.Write([]byte("hi"))
 	})
 
 	go func() {
@@ -54,6 +72,7 @@ func main() {
 	app := beauty.New(
 		// beauty.WithService(s, s2),
 		// beauty.WithRegistry(discover.NewNoop()),
+		beauty.WithTrace(),
 		beauty.WithRegistry(etcdv3.NewEtcdRegistry(etcdv3.EtcdConfig{
 			Endpoints: []string{
 				"127.0.0.1:2379",

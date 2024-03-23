@@ -9,6 +9,7 @@ import (
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
+	"github.com/rushteam/beauty/pkg/tracing"
 )
 
 type HookEvent int
@@ -82,6 +83,16 @@ func WithService(s Service, opts ...ServiceOption) Option {
 func WithRegistry(r discover.Registry) Option {
 	return func(app *App) {
 		app.registry = append(app.registry, r)
+	}
+}
+
+func WithTrace() Option {
+	return func(app *App) {
+		cancel := tracing.NewTracing()
+		app.Hook(EventAfterRun, func(app *App) {
+			defer cancel()
+			logger.Info("tracing stopping...")
+		})
 	}
 }
 

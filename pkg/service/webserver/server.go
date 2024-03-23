@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/logger"
@@ -41,6 +42,8 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 	<-ctx.Done()
 	logger.Info("web server stopped...")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
 	return server.Shutdown(ctx)
 }
 

@@ -12,21 +12,22 @@ type Option func(c *Client)
 func WithConfig(config Config) Option {
 	return func(c *Client) {
 		c.Addr = config.Addr
-		c.DialOpts = append(c.DialOpts, grpc.WithBlock())
+		// c.DialOpts = append(c.DialOpts, grpc.WithBlock())
 	}
 }
 
-func WithDiscover(addr string) Option {
-	return func(c *Client) {
-		// c.Addr = config.Addr
-	}
-}
+// func WithDiscover(addr discover.Resolver) Option {
+// 	return func(c *Client) {
+// 		// c.Addr = config.Addr
+// 	}
+// }
 
 func WithAddr(addr string) Option {
 	return func(c *Client) {
-		c.DialOpts = append(c.DialOpts, grpc.WithBlock())
+		c.Addr = addr
 	}
 }
+
 func WithBlock() Option {
 	return func(c *Client) {
 		c.DialOpts = append(c.DialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -54,20 +55,19 @@ func (c *Client) Close() {
 }
 
 func New(opts ...Option) (*Client, error) {
-	client := &Client{
-		Addr: ":58080",
+	c := &Client{
 		DialOpts: []grpc.DialOption{
-			grpc.WithBlock(),
+			// grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 	}
 	for _, opt := range opts {
-		opt(client)
+		opt(c)
 	}
-	conn, err := grpc.DialContext(context.Background(), client.Addr, client.DialOpts...)
+	conn, err := grpc.DialContext(context.Background(), c.Addr, c.DialOpts...)
 	if err != nil {
 		return &Client{}, err
 	}
-	client.ClientConn = conn
-	return client, nil
+	c.ClientConn = conn
+	return c, nil
 }

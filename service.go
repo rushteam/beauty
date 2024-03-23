@@ -9,12 +9,12 @@ import (
 	"google.golang.org/grpc"
 )
 
-func WithWebServer(addr string, mux http.Handler) Option {
-	return WithService(webserver.New(addr, mux))
+func WithWebServer(addr string, mux http.Handler, tags ...ServiceOption) Option {
+	return WithService(webserver.New(addr, mux), tags...)
 }
 
-func WithGrpcServer(addr string, handler func(*grpc.Server)) Option {
-	return WithService(grpcserver.New(addr, handler))
+func WithGrpcServer(addr string, handler func(*grpc.Server), tags ...ServiceOption) Option {
+	return WithService(grpcserver.New(addr, handler), tags...)
 }
 
 func WithCrontab(opts ...cron.CronOptions) Option {
@@ -30,33 +30,33 @@ func WithCrontab(opts ...cron.CronOptions) Option {
 // }
 
 /*
-type Route struct {
-	Method  string
-	URI     string
-	Handler http.HandlerFunc
-}
+	type Route struct {
+		Method  string
+		URI     string
+		Handler http.HandlerFunc
+	}
 
 type RouteOption func(r *chi.Mux)
 
-func WithWebServerChi(addr string, routes []Route, opts ...RouteOption) Option {
-	r := chi.NewRouter()
-	for _, v := range opts {
-		v(r)
-	}
-	for _, v := range routes {
-		if v.Method == "" {
-			v.Method = http.MethodGet
+	func WithWebServerChi(addr string, routes []Route, opts ...RouteOption) Option {
+		r := chi.NewRouter()
+		for _, v := range opts {
+			v(r)
 		}
-		r.Method(v.Method, v.URI, v.Handler)
+		for _, v := range routes {
+			if v.Method == "" {
+				v.Method = http.MethodGet
+			}
+			r.Method(v.Method, v.URI, v.Handler)
+		}
+		return WithWebServer(addr, r)
 	}
-	return WithWebServer(addr, r)
-}
 
-func WithChiMiddleware(middlewares ...func(http.Handler) http.Handler) RouteOption {
-	return func(r *chi.Mux) {
-		for _, v := range middlewares {
-			r.Use(v)
+	func WithChiMiddleware(middlewares ...func(http.Handler) http.Handler) RouteOption {
+		return func(r *chi.Mux) {
+			for _, v := range middlewares {
+				r.Use(v)
+			}
 		}
 	}
-}
 */

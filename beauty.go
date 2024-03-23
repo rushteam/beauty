@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
+	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
 )
@@ -24,14 +26,64 @@ type HookFunc func(app *App)
 // Option ..
 type Option func(app *App)
 
-// WithService ..
-func WithService(s ...Service) Option {
-	return func(app *App) {
-		app.services = append(app.services, s...)
+type ServiceOption func(*ServiceContext)
+
+type ServiceContext struct {
+	Service
+	id       string
+	name     string
+	addr     string
+	metadata map[string]string
+}
+
+func (s ServiceContext) ID() string {
+	return s.id
+}
+func (s ServiceContext) Name() string {
+	return s.name
+}
+
+func (s ServiceContext) Addr() string {
+	return s.addr
+}
+
+func (s ServiceContext) Metadata() map[string]string {
+	return s.metadata
+}
+
+func WithServiceName(name string) ServiceOption {
+	return func(s *ServiceContext) {
+		s.name = name
 	}
 }
 
-// var _ registry.Service = (*Options)(nil)
+func WithServiceMeta(k, v string) ServiceOption {
+	return func(s *ServiceContext) {
+		s.metadata[k] = v
+	}
+}
+
+// WithService ..
+func WithService(s Service, opts ...ServiceOption) Option {
+	uuid, _ := uuid.NewV4()
+	sc := &ServiceContext{
+		Service:  s,
+		id:       uuid.String(),
+		metadata: make(map[string]string, 0),
+		addr:     s.String(),
+	}
+	for _, o := range opts {
+		o(sc)
+	}
+	return func(app *App) {
+		app.services = append(app.services, sc)
+	}
+}
+func WithRegistry(r discover.Registry) Option {
+	return func(app *App) {
+		app.registry = append(app.registry, r)
+	}
+}
 
 // Service ..
 type Service interface {
@@ -42,7 +94,8 @@ type Service interface {
 // App ..
 type App struct {
 	hooks    map[HookEvent][]HookFunc
-	services []Service
+	services []*ServiceContext
+	registry []discover.Registry
 }
 
 // Hook add a hook func to stage
@@ -69,11 +122,6 @@ func New(opts ...Option) *App {
 	return s
 }
 
-// AppendService ..
-func (s *App) AppendService(services ...Service) {
-	s.services = append(s.services, services...)
-}
-
 // Start ..
 func (s *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -84,8 +132,20 @@ func (s *App) Start(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	for _, srv := range s.services {
 		wg.Add(1)
-		go func(srv Service) {
-			defer wg.Done()
+		go func(srv *ServiceContext) {
+			defer func() {
+				for _, r := range s.registry {
+					if err := r.Deregister(context.Background(), srv); err != nil {
+						logger.Error("service registry Deregister error", "error", err)
+					}
+				}
+				wg.Done()
+			}()
+			for _, r := range s.registry {
+				if err := r.Register(ctx, srv); err != nil {
+					logger.Error("service registry Register error", "error", err)
+				}
+			}
 			if err := srv.Start(ctx); err != nil {
 				logger.Error("service start error", "error", err)
 			}

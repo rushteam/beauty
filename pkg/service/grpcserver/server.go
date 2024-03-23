@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/logger"
 	"google.golang.org/grpc"
 )
@@ -43,8 +44,6 @@ func (s *Server) Start(ctx context.Context) error {
 			return
 		}
 	}()
-	// time.Sleep(time.Second)
-	// fmt.Println("GetServiceInfo", s.Server.GetServiceInfo())
 	<-ctx.Done()
 	logger.Info("grpc server stopped...")
 	s.Server.GracefulStop()
@@ -53,5 +52,5 @@ func (s *Server) Start(ctx context.Context) error {
 
 // String ..
 func (s *Server) String() string {
-	return "grpc"
+	return addr.ParseHostPort(s.Addr)
 }

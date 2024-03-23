@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/logger"
 )
 
@@ -44,5 +45,5 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) String() string {
-	return "web"
+	return addr.ParseHostPort(s.Addr)
 }

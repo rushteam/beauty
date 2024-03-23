@@ -4,11 +4,23 @@ go 1.21.3
 
 require (
 	github.com/spf13/viper v1.17.0
+	go.etcd.io/etcd/client/v3 v3.5.9
 	google.golang.org/grpc v1.61.0
 )
 
 require (
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
+	github.com/coreos/go-semver v0.3.0 // indirect
+	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.9 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.5.9 // indirect
+	go.uber.org/atomic v1.9.0 // indirect
+	go.uber.org/zap v1.21.0 // indirect
+)
+
+require (
+	github.com/fsnotify/fsnotify v1.6.0
+	github.com/gofrs/uuid/v5 v5.0.0
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0
 	github.com/hashicorp/hcl v1.0.0 // indirect

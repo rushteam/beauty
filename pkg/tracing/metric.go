@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/core"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 
@@ -14,7 +15,21 @@ import (
 
 var meter metric.Meter
 
-func NewMetric() context.CancelFunc {
+type metricComponent struct{}
+
+func (c *metricComponent) Name() string {
+	return "metric"
+}
+
+func (c *metricComponent) Init() context.CancelFunc {
+	return newMetric()
+}
+
+func NewMetric() core.Component {
+	return &metricComponent{}
+}
+
+func newMetric() context.CancelFunc {
 	metricExporter, err := stdoutmetric.New(
 		stdoutmetric.WithPrettyPrint(),
 	)

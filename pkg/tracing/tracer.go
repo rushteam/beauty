@@ -12,12 +12,27 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	// semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"github.com/rushteam/beauty/pkg/core"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var tracer trace.Tracer
 
-func NewTracer() context.CancelFunc {
+type traceComponent struct{}
+
+func (c *traceComponent) Name() string {
+	return "tracer"
+}
+
+func (c *traceComponent) Init() context.CancelFunc {
+	return newTracer()
+}
+
+func NewTracer() core.Component {
+	return &traceComponent{}
+}
+
+func newTracer() context.CancelFunc {
 	// exporter, err := jaeger.NewRawExporter(
 	// 	jaeger.WithCollectorEndpoint("http://your-jaeger-collector-endpoint:14268/api/traces"),
 	// 	jaeger.WithProcess(jaeger.Process{

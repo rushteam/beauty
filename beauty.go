@@ -2,10 +2,12 @@ package beauty
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/rushteam/beauty/pkg/core"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
@@ -86,24 +88,23 @@ func WithRegistry(r discover.Registry) Option {
 	}
 }
 
-func WithTrace() Option {
+func WithComponent(c core.Component) Option {
 	return func(app *App) {
-		cancel := tracing.NewTracer()
+		cancel := c.Init()
+		logger.Info(fmt.Sprintf("component %s inited", c.Name()))
 		app.Hook(EventAfterRun, func(app *App) {
 			defer cancel()
-			logger.Info("otel tracing stopping...")
+			logger.Info(fmt.Sprintf("component %s stopping...", c.Name()))
 		})
 	}
 }
 
+func WithTrace() Option {
+	return WithComponent(tracing.NewTracer())
+}
+
 func WithMetric() Option {
-	return func(app *App) {
-		cancel := tracing.NewMetric()
-		app.Hook(EventAfterRun, func(app *App) {
-			defer cancel()
-			logger.Info("otel metric stopping...")
-		})
-	}
+	return WithComponent(tracing.NewMetric())
 }
 
 // Service ..

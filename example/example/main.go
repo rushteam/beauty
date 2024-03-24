@@ -11,8 +11,8 @@ import (
 
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/example/example/api/v1"
+	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"github.com/rushteam/beauty/pkg/discover/etcdv3"
-	"github.com/rushteam/beauty/pkg/service/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
 	"github.com/rushteam/beauty/pkg/tracing"
 	"go.opentelemetry.io/otel"

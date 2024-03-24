@@ -7,7 +7,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.9
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.24.0
 	go.opentelemetry.io/otel/trace v1.24.0
-	google.golang.org/grpc v1.61.0
+	google.golang.org/grpc v1.62.1
 )
 
 require (
@@ -25,7 +25,9 @@ require (
 )
 
 require (
+	github.com/dubonzi/otelresty v1.3.0
 	github.com/fsnotify/fsnotify v1.6.0
+	github.com/go-resty/resty/v2 v2.12.0
 	github.com/gofrs/uuid/v5 v5.0.0
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0
@@ -46,11 +48,11 @@ require (
 	go.opentelemetry.io/otel/sdk v1.24.0
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
-	golang.org/x/net v0.20.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
+	golang.org/x/net v0.22.0 // indirect
+	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	google.golang.org/genproto v0.0.0-20240116215550-a9fa1716bcac // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240102182953-50ed04b92917
+	google.golang.org/genproto v0.0.0-20240123012728-ef4313101c80 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240125205218-1f4bbc51befe // indirect
 	google.golang.org/protobuf v1.33.0
 	gopkg.in/ini.v1 v1.67.0 // indirect

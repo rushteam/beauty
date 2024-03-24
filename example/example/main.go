@@ -35,21 +35,17 @@ func main() {
 		span.AddEvent("request")
 		w.Write([]byte("Welcome"))
 	})
-	r.HandleFunc("/123", func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc("/trace", func(w http.ResponseWriter, r *http.Request) {
 		_, span := otel.Tracer("http").Start(context.Background(), "request")
 		// span := trace.SpanFromContext(context.Background())
 		defer span.End()
 		span.SetAttributes(attribute.String("url", r.URL.String()))
-		w.Write([]byte("hi"))
+		w.Write([]byte("trace"))
 	})
 	r.HandleFunc("/meter", func(w http.ResponseWriter, r *http.Request) {
-		// _, span := otel.Tracer("http").Start(context.Background(), "request")
-		// // span := trace.SpanFromContext(context.Background())
-		// defer span.End()
-		// span.SetAttributes(attribute.String("url", r.URL.String()))
 		m, _ := otel.Meter("http").Int64Counter("request")
 		m.Add(context.Background(), 100)
-		w.Write([]byte("hi"))
+		w.Write([]byte("meter"))
 	})
 
 	go func() {

@@ -15,38 +15,72 @@ import (
 
 var meter metric.Meter
 
-type metricComponent struct{}
+type MetricOption func(c *metricComponent)
+
+func WithMetricReader(reader sdkmetric.Reader) MetricOption {
+	return func(o *metricComponent) {
+		o.options = append(o.options, sdkmetric.WithReader(reader))
+	}
+}
+
+func WithMetricOption(opt sdkmetric.Option) MetricOption {
+	return func(o *metricComponent) {
+		o.options = append(o.options, opt)
+	}
+}
+
+func WithMetricProvider(provider metric.MeterProvider) MetricOption {
+	return func(o *metricComponent) {
+		o.provider = provider
+	}
+}
+
+func WithMetricStdoutReader() MetricOption {
+	exporter, err := stdoutmetric.New(
+		stdoutmetric.WithPrettyPrint(),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return WithMetricReader(sdkmetric.NewPeriodicReader(
+		exporter,
+		sdkmetric.WithInterval(5*time.Second), // default 1m, for test 5s
+	))
+}
+
+type metricComponent struct {
+	provider metric.MeterProvider
+	options  []sdkmetric.Option
+}
 
 func (c *metricComponent) Name() string {
 	return "metric"
 }
 
 func (c *metricComponent) Init() context.CancelFunc {
-	return newMetric()
+	if c.provider == nil {
+		meterProvider := sdkmetric.NewMeterProvider(
+			// metric.WithResource(res),
+			c.options...,
+		)
+		otel.SetMeterProvider(meterProvider)
+		return func() {
+			_ = meterProvider.Shutdown(context.Background())
+		}
+	}
+	otel.SetMeterProvider(c.provider)
+	return func() {}
 }
 
-func NewMetric() core.Component {
-	return &metricComponent{}
-}
-
-func newMetric() context.CancelFunc {
-	metricExporter, err := stdoutmetric.New(
-		stdoutmetric.WithPrettyPrint(),
-	)
-	if err != nil {
-		log.Fatal(err)
+func NewMetric(opts ...MetricOption) core.Component {
+	c := &metricComponent{}
+	if len(opts) == 0 {
+		opts = append(opts, WithMetricStdoutReader())
 	}
-	meterProvider := sdkmetric.NewMeterProvider(
-		// metric.WithResource(res),
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
-			metricExporter,
-			sdkmetric.WithInterval(5*time.Second), // default 1m, for test 5s
-		)),
-	)
-	otel.SetMeterProvider(meterProvider)
-	return func() {
-		_ = meterProvider.Shutdown(context.Background())
+	for _, opt := range opts {
+		opt(c)
 	}
+	return c
 }
 
 func Meter() metric.Meter {

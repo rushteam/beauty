@@ -7,14 +7,17 @@ import (
 
 	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/logger"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 )
 
 // New create a web service with the name
 func New(addr string, handler func(*grpc.Server)) *Server {
 	s := &Server{
-		Addr:   addr,
-		Server: grpc.NewServer(),
+		Addr: addr,
+		Server: grpc.NewServer(
+			grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		),
 	}
 	if handler != nil {
 		handler(s.Server)

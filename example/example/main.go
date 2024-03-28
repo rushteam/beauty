@@ -8,7 +8,7 @@ import (
 	"time"
 
 	// "github.com/go-chi/chi"
-
+	// "github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/example/example/api/v1"
 	"github.com/rushteam/beauty/pkg/client/grpcclient"
@@ -17,6 +17,7 @@ import (
 	"github.com/rushteam/beauty/pkg/tracing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 
 	// "go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -47,6 +48,7 @@ func main() {
 		m.Add(context.Background(), 100)
 		w.Write([]byte("meter"))
 	})
+	// r.Handle("/metrics", promhttp.Handler())
 
 	go func() {
 		time.Sleep(time.Second * 5)
@@ -72,11 +74,16 @@ func main() {
 	gw := grpcgw.New()
 	v1.RegisterGreeterHandlerServer(context.Background(), gw, &GreeterServer{})
 
+	metricExprter, err := prometheus.New()
+	if err != nil {
+		panic(err)
+	}
+
 	app := beauty.New(
 		// beauty.WithService(s, s2),
 		// beauty.WithRegistry(discover.NewNoop()),
 		beauty.WithTrace(),
-		beauty.WithMetric(),
+		beauty.WithMetric(tracing.WithMetricReader(metricExprter)),
 		beauty.WithRegistry(etcdv3.NewEtcdRegistry(etcdv3.EtcdConfig{
 			Endpoints: []string{
 				"127.0.0.1:2379",

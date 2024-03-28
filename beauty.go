@@ -103,8 +103,8 @@ func WithTrace() Option {
 	return WithComponent(tracing.NewTracer())
 }
 
-func WithMetric() Option {
-	return WithComponent(tracing.NewMetric())
+func WithMetric(opts ...tracing.MetricOption) Option {
+	return WithComponent(tracing.NewMetric(opts...))
 }
 
 // Service ..

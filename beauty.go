@@ -3,6 +3,7 @@ package beauty
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -180,4 +181,15 @@ func (s *App) Start(ctx context.Context) error {
 	logger.Info(fmt.Sprintf("stop after %s", sleep))
 	time.Sleep(sleep)
 	return nil
+}
+
+func Go(f func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error(fmt.Sprintf("panic recovered: %v", r))
+			}
+		}()
+		f()
+	}()
 }

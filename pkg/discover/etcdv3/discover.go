@@ -53,32 +53,21 @@ func (r EtcdRegistry) Watch(ctx context.Context, serviceName string, update disc
 	update(services)
 	// fmt.Println("resp.Header.Revision", resp.Header.Revision, key)
 	w := clientv3.NewWatcher(r.client)
-	ch := w.Watch(ctx, prefix, clientv3.WithPrefix())
+	ch := w.Watch(ctx, prefix,
+		clientv3.WithPrefix(),
+		clientv3.WithRev(resp.Header.Revision),
+	)
 	if err := w.RequestProgress(ctx); err != nil {
 		logger.Error("watch Progress error", slog.Any("err", err))
 	}
-	// ch := r.client.Watch(ctx, key,
-	// 	clientv3.WithPrefix(),
-	// 	clientv3.WithProgressNotify(),
-	// // clientv3.WithRev(resp.Header.Revision),
-	// )
-	// services, err := r.Find(ctx, serviceName)
-	// if err != nil {
-	// 	return err
-	// }
-	// for _, v := range services {
-	// 	endpoints[]
-	// }
 	for {
 		select {
-		// case <-ctx.Done():
-		// 	fmt.Println(">>>>>>>>>>>>>>>>>>>done")
-		// 	return nil
+		case <-ctx.Done():
+			return nil
 		case event, closed := <-ch:
 			if closed {
 				logger.Error("watch closed")
-				continue
-				// return nil
+				return nil
 			}
 			if event.Canceled {
 				logger.Error("watch event canceled", slog.Any("err", event.Err()))

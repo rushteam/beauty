@@ -50,25 +50,39 @@ func main() {
 	})
 	// r.Handle("/metrics", promhttp.Handler())
 
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(time.Second * 5)
+		time.Sleep(time.Second * 3)
 		client, err := grpcclient.New(
 			// grpcclient.WithDiscover("etcd:///127.0.0.1"),
 			grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/beauty/helloworld.rpc"),
 		)
 		if err != nil {
-			fmt.Println("client>", err)
+			fmt.Println("client>error1", err)
 			return
 		}
-		c := v1.NewGreeterClient(client)
-		resp, err := c.SayHello(context.Background(), &v1.HelloRequest{})
-		if err != nil {
-			fmt.Println("client>", err)
-			return
+		defer client.Close()
+		t := time.NewTicker(time.Second)
+		for {
+			select {
+			case <-ctx.Done():
+				fmt.Println("client>done")
+				return
+			case <-t.C:
+				fmt.Println("client>call")
+				func() {
+					ctxTimeout, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					c := v1.NewGreeterClient(client)
+					resp, err := c.SayHello(ctxTimeout, &v1.HelloRequest{})
+					if err != nil {
+						fmt.Println("client>call>error", err)
+						return
+					}
+					fmt.Println("client>", resp, err)
+				}()
+			}
 		}
-		fmt.Println("client>", resp, err)
-		time.Sleep(time.Second * 10)
-		client.Close()
 	}()
 
 	gw := grpcgw.New()
@@ -84,7 +98,7 @@ func main() {
 		// beauty.WithRegistry(discover.NewNoop()),
 		beauty.WithTrace(),
 		beauty.WithMetric(tracing.WithMetricReader(metricExprter)),
-		beauty.WithRegistry(etcdv3.NewEtcdRegistry(etcdv3.EtcdConfig{
+		beauty.WithRegistry(etcdv3.NewRegistry(&etcdv3.EtcdConfig{
 			Endpoints: []string{
 				"127.0.0.1:2379",
 			},
@@ -109,6 +123,9 @@ func main() {
 			beauty.WithServiceMeta("version", "v1.0"),
 		),
 	)
+	app.Hook(beauty.EventAfterRun, func(app *beauty.App) {
+		cancel()
+	})
 	if err := app.Start(context.Background()); err != nil {
 		log.Fatalln(err)
 	}

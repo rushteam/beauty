@@ -9,16 +9,12 @@ import (
 
 type noopRegistry struct{}
 
-func (r noopRegistry) Register(ctx context.Context, info Service) error {
+func (r noopRegistry) Register(ctx context.Context, info Service) (context.CancelFunc, error) {
 	logger.Info("Registering service", slog.String("name", info.Name()))
-	return nil
+	return func() {
+		logger.Info("Deregistering service", slog.String("name", info.Name()))
+	}, nil
 }
-
-func (r noopRegistry) Deregister(ctx context.Context, info Service) error {
-	logger.Info("Deregistering service", slog.String("name", info.Name()))
-	return nil
-}
-
 func NewNoop() Registry {
 	return &noopRegistry{}
 }

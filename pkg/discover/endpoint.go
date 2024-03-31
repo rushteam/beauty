@@ -13,6 +13,7 @@ type Service interface {
 }
 
 type ServiceInfo struct {
+	ID   string `json:"id"`
 	Name string `json:"name"`
 	Addr string `json:"addr"`
 	// Version   string            `json:"version"`

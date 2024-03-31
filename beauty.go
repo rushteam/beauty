@@ -84,7 +84,9 @@ func WithService(s Service, opts ...ServiceOption) Option {
 }
 func WithRegistry(r discover.Registry) Option {
 	return func(app *App) {
-		app.registry = append(app.registry, r)
+		if r != nil {
+			app.registry = append(app.registry, r)
+		}
 	}
 }
 
@@ -155,18 +157,15 @@ func (s *App) Start(ctx context.Context) error {
 	for _, srv := range s.services {
 		wg.Add(1)
 		go func(srv *ServiceContext) {
-			defer func() {
-				for _, r := range s.registry {
-					if err := r.Deregister(context.Background(), srv); err != nil {
-						logger.Error("service registry Deregister error", "error", err)
-					}
-				}
-				wg.Done()
-			}()
+			defer wg.Done()
 			for _, r := range s.registry {
-				if err := r.Register(ctx, srv); err != nil {
-					logger.Error("service registry Register error", "error", err)
+				// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
+				stop, err := r.Register(ctx, srv)
+				if err != nil {
+					logger.Error("service registry.Register error", "error", err)
+					return
 				}
+				defer stop()
 			}
 			if err := srv.Start(ctx); err != nil {
 				logger.Error("service start error", "error", err)
@@ -177,6 +176,8 @@ func (s *App) Start(ctx context.Context) error {
 	<-ctx.Done()
 	s.runHooks(EventAfterRun)
 	defer logger.Sync()
-	time.Sleep(time.Millisecond * 100)
+	sleep := time.Millisecond*100 + time.Second*time.Duration(len(s.registry))
+	logger.Info(fmt.Sprintf("stop after %s", sleep))
+	time.Sleep(sleep)
 	return nil
 }

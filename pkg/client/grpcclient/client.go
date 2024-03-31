@@ -2,9 +2,11 @@ package grpcclient
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 type Option func(c *Client)
@@ -57,6 +59,12 @@ func (c *Client) Close() {
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
 		DialOpts: []grpc.DialOption{
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                time.Second * 20,
+				Timeout:             time.Second * 10,
+				PermitWithoutStream: true,
+			}),
+			grpc.WithIdleTimeout(time.Second * 10),
 			// grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},

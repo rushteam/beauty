@@ -8,7 +8,7 @@ import (
 	"github.com/rushteam/beauty/pkg/logger"
 )
 
-// Shutdown ...
+// Shutdown with fitst signal, second signal exit directly
 func NotifyShutdownContext(ctx context.Context, f func()) context.Context {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {

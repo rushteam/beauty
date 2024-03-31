@@ -1,87 +1,104 @@
 package etcdv3
 
 import (
-	"strings"
-	"time"
 
 	// "github.com/ymcvalu/grpc-discovery/pkg/instance"
 
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+
 	"github.com/rushteam/beauty/pkg/discover"
+	"github.com/rushteam/beauty/pkg/logger"
 	"google.golang.org/grpc/resolver"
 )
 
 func init() {
-	resolver.Register(newEtcdResolver())
+	resolver.Register(&etcdBuilder{})
 }
 
-func newEtcdResolver() resolver.Builder {
-	return &etcdResolver{}
+type etcdBuilder struct {
+	// stop    chan struct{}
+	// cc      resolver.ClientConn
+	// key     string
+	// backoff func(int) time.Duration
+	// watcher *watcher
 }
 
-type etcdResolver struct {
-	stop    chan struct{}
-	cc      resolver.ClientConn
-	key     string
-	backoff func(int) time.Duration
-	watcher *watcher
-}
-
-func (b *etcdResolver) Scheme() string {
+func (b *etcdBuilder) Scheme() string {
 	return "etcd"
 }
 
-func (b *etcdResolver) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	r := &etcdResolver{
-		cc:      cc,
-		key:     strings.TrimRight(target.Endpoint(), "/"),
-		stop:    make(chan struct{}),
-		backoff: backoff,
-		watcher: newWatcher(&EtcdConfig{
-			Endpoints: strings.Split(target.URL.Host, ","),
-		}, target.Endpoint()),
+func (b *etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	ns := strings.SplitN(target.Endpoint(), "/", 2)
+	if len(ns) != 2 {
+		return nil, fmt.Errorf("unexpected namespace or serviceName: %v", target.Endpoint())
 	}
-	go r.watch()
+	namespace := ns[0]
+	serviceName := ns[1]
+	password, _ := target.URL.User.Password()
+
+	updateState := func(services []discover.ServiceInfo) {
+		if len(services) > 0 {
+			cc.UpdateState(buildState(services))
+		}
+	}
+	discovery := NewRegistry(&EtcdConfig{
+		Endpoints: strings.Split(target.URL.Host, ","),
+		Username:  target.URL.User.Username(),
+		Password:  password,
+		Namespace: namespace,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &Resolver{stop: make(chan struct{})}
+	go func() {
+		<-r.stop
+		defer cancel()
+	}()
+	go func() {
+		if err := discovery.Watch(ctx, serviceName, updateState); err != nil {
+			logger.Error("discovery watch failed", slog.Any("err", err))
+		}
+	}()
 	return r, nil
 }
 
-func (r *etcdResolver) watch() {
-	for {
-		endpoints, err := r.watcher.Next()
-		if err != nil {
-			continue
-		}
-		r.cc.UpdateState(resolver.State{
-			Addresses: getAddrs(endpoints),
-		})
-	}
-}
-
-func (r *etcdResolver) ResolveNow(opt resolver.ResolveNowOptions) {
-	// fmt.Println("ResolveNow", opt)
-}
-
-func (r *etcdResolver) Close() {
-	r.stop <- struct{}{}
-	r.watcher.ctx.Done()
-}
-
-func getAddrs(endpoints map[string]*discover.ServiceInfo) []resolver.Address {
-	addrs := make([]resolver.Address, 0, len(endpoints))
-	for _, v := range endpoints {
-		if v == nil {
-			continue
-		}
+func buildState(services []discover.ServiceInfo) resolver.State {
+	addrs := make([]resolver.Address, 0, len(services))
+	// endpoints := make([]resolver.Endpoint, 0, len(services))
+	for _, v := range services {
 		addrs = append(addrs, resolver.Address{
 			Addr:       v.Addr,
 			ServerName: v.Name,
 		})
+		// endpoints = append(endpoints, resolver.Endpoint{
+		// 	Addresses: []resolver.Address{
+		// 		{
+		// 			Addr:       v.Addr,
+		// 			ServerName: v.Name,
+		// 		},
+		// 	},
+		// 	// Attributes: &attributes.Attributes{},
+		// })
 	}
-	return addrs
+	// fmt.Println("Updating service endpoints", endpoints)
+	return resolver.State{
+		Addresses: addrs,
+		// Endpoints: endpoints,
+		// ServiceConfig: &serviceconfig.ParseResult{},
+		// Attributes:    &attributes.Attributes{},
+	}
 }
 
-func backoff(i int) time.Duration {
-	if i > 5 {
-		i = 5
-	}
-	return time.Duration(i) * time.Second
+type Resolver struct {
+	stop chan struct{}
+}
+
+func (r *Resolver) ResolveNow(opt resolver.ResolveNowOptions) {
+	// fmt.Println("ResolveNow", opt)
+}
+
+func (r *Resolver) Close() {
+	close(r.stop)
 }

@@ -42,6 +42,12 @@ func WithInsecure() Option {
 	}
 }
 
+func WithDialOpts(opts ...grpc.DialOption) Option {
+	return func(c *Client) {
+		c.DialOpts = append(c.DialOpts, opts...)
+	}
+}
+
 type Config struct {
 	Addr string
 }

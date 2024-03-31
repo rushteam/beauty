@@ -2,6 +2,7 @@ package grpcclient
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -27,6 +28,15 @@ func WithBlock() Option {
 func WithInsecure() Option {
 	return func(c *Client) {
 		c.DialOpts = append(c.DialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+}
+
+func WithBalancingPolicy(policy string) Option {
+	// {"loadBalancingConfig": [{"round_robin":{}}]}
+	serverConfig := fmt.Sprintf(`{"loadBalancingPolicy":"%s"}`, policy)
+	return func(c *Client) {
+		// grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}]}`),
+		c.DialOpts = append(c.DialOpts, grpc.WithDefaultServiceConfig(serverConfig))
 	}
 }
 

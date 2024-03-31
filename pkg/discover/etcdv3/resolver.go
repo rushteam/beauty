@@ -11,6 +11,7 @@ import (
 
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
+	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -18,13 +19,7 @@ func init() {
 	resolver.Register(&etcdBuilder{})
 }
 
-type etcdBuilder struct {
-	// stop    chan struct{}
-	// cc      resolver.ClientConn
-	// key     string
-	// backoff func(int) time.Duration
-	// watcher *watcher
-}
+type etcdBuilder struct{}
 
 func (b *etcdBuilder) Scheme() string {
 	return "etcd"
@@ -58,12 +53,16 @@ func (b *etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts
 
 func buildState(services []discover.ServiceInfo) resolver.State {
 	addrs := make([]resolver.Address, 0, len(services))
+	attributes := &attributes.Attributes{}
 	// endpoints := make([]resolver.Endpoint, 0, len(services))
-	for _, v := range services {
+	for _, s := range services {
 		addrs = append(addrs, resolver.Address{
-			Addr:       v.Addr,
-			ServerName: v.Name,
+			Addr:       s.Addr,
+			ServerName: s.Name,
 		})
+		for k, v := range s.Metadata {
+			attributes.WithValue(k, v)
+		}
 		// endpoints = append(endpoints, resolver.Endpoint{
 		// 	Addresses: []resolver.Address{
 		// 		{
@@ -77,9 +76,10 @@ func buildState(services []discover.ServiceInfo) resolver.State {
 	// fmt.Println("Updating service endpoints", endpoints)
 	return resolver.State{
 		Addresses: addrs,
+		//Endpoints 不知道为啥用不了,文档中说Addresses要废弃换Endpoints 没仔细研究 基本上都是用的Addresses
 		// Endpoints: endpoints,
 		// ServiceConfig: &serviceconfig.ParseResult{},
-		// Attributes:    &attributes.Attributes{},
+		Attributes: attributes,
 	}
 }
 

@@ -98,7 +98,7 @@ func main() {
 		// beauty.WithRegistry(discover.NewNoop()),
 		beauty.WithTrace(),
 		beauty.WithMetric(tracing.WithMetricReader(metricExprter)),
-		beauty.WithRegistry(etcdv3.NewRegistry(&etcdv3.EtcdConfig{
+		beauty.WithRegistry(etcdv3.NewRegistry(&etcdv3.Config{
 			Endpoints: []string{
 				"127.0.0.1:2379",
 			},

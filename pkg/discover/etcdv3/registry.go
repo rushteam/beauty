@@ -16,7 +16,7 @@ var grantTTL int64 = 10
 
 var m = make(map[string]*EtcdRegistry)
 
-func NewRegistry(c *EtcdConfig) *EtcdRegistry {
+func NewRegistry(c *Config) *EtcdRegistry {
 	key := c.String()
 	if v, ok := m[key]; ok {
 		return v
@@ -41,7 +41,7 @@ func NewRegistry(c *EtcdConfig) *EtcdRegistry {
 }
 
 type EtcdRegistry struct {
-	config    *EtcdConfig
+	config    *Config
 	client    *clientv3.Client
 	namespace string
 	discover.Registry

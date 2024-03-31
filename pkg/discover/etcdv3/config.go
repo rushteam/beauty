@@ -5,14 +5,14 @@ import (
 	"strings"
 )
 
-type EtcdConfig struct {
+type Config struct {
 	Endpoints []string
 	Username  string
 	Password  string
 	Namespace string
 }
 
-func (c *EtcdConfig) String() string {
+func (c *Config) String() string {
 	var user *url.Userinfo
 	if len(c.Username) > 0 {
 		user = url.User(c.Username)

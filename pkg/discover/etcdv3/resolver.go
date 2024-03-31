@@ -40,7 +40,7 @@ func (b *etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts
 		ctx:         ctx,
 		cancel:      cancel,
 		serviceName: serviceName,
-		discovery: NewRegistry(&EtcdConfig{
+		discovery: NewRegistry(&Config{
 			Endpoints: strings.Split(target.URL.Host, ","),
 			Username:  target.URL.User.Username(),
 			Password:  password,

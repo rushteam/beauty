@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -57,12 +58,13 @@ func New(opts ...Option) (*Client, error) {
 			grpc.WithIdleTimeout(time.Second * 10),
 			// grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithChainUnaryInterceptor(),
+			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		},
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.DialOpts = append(c.DialOpts, grpc.WithChainUnaryInterceptor(c.unaryInterceptors...))
 	conn, err := grpc.DialContext(context.Background(), c.Addr, c.DialOpts...)
 	if err != nil {
 		return &Client{}, err

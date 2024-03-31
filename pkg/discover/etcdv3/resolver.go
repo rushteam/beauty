@@ -39,28 +39,20 @@ func (b *etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts
 	serviceName := ns[1]
 	password, _ := target.URL.User.Password()
 
-	updateState := func(services []discover.ServiceInfo) {
-		if len(services) > 0 {
-			cc.UpdateState(buildState(services))
-		}
-	}
-	discovery := NewRegistry(&EtcdConfig{
-		Endpoints: strings.Split(target.URL.Host, ","),
-		Username:  target.URL.User.Username(),
-		Password:  password,
-		Namespace: namespace,
-	})
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &Resolver{stop: make(chan struct{})}
-	go func() {
-		<-r.stop
-		defer cancel()
-	}()
-	go func() {
-		if err := discovery.Watch(ctx, serviceName, updateState); err != nil {
-			logger.Error("discovery watch failed", slog.Any("err", err))
-		}
-	}()
+	r := &Resolver{
+		cc:          cc,
+		ctx:         ctx,
+		cancel:      cancel,
+		serviceName: serviceName,
+		discovery: NewRegistry(&EtcdConfig{
+			Endpoints: strings.Split(target.URL.Host, ","),
+			Username:  target.URL.User.Username(),
+			Password:  password,
+			Namespace: namespace,
+		}),
+	}
+	go r.start()
 	return r, nil
 }
 
@@ -92,7 +84,11 @@ func buildState(services []discover.ServiceInfo) resolver.State {
 }
 
 type Resolver struct {
-	stop chan struct{}
+	cc          resolver.ClientConn
+	ctx         context.Context
+	cancel      context.CancelFunc
+	serviceName string
+	discovery   discover.Discovery
 }
 
 func (r *Resolver) ResolveNow(opt resolver.ResolveNowOptions) {
@@ -100,5 +96,16 @@ func (r *Resolver) ResolveNow(opt resolver.ResolveNowOptions) {
 }
 
 func (r *Resolver) Close() {
-	close(r.stop)
+	r.cancel()
+}
+
+func (r *Resolver) start() {
+	updateState := func(services []discover.ServiceInfo) {
+		if len(services) > 0 {
+			r.cc.UpdateState(buildState(services))
+		}
+	}
+	if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
+		logger.Error("discovery watch failed", slog.Any("err", err))
+	}
 }

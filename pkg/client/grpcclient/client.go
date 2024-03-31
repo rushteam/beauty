@@ -11,19 +11,6 @@ import (
 
 type Option func(c *Client)
 
-func WithConfig(config Config) Option {
-	return func(c *Client) {
-		c.Addr = config.Addr
-		// c.DialOpts = append(c.DialOpts, grpc.WithBlock())
-	}
-}
-
-// func WithDiscover(addr discover.Resolver) Option {
-// 	return func(c *Client) {
-// 		// c.Addr = config.Addr
-// 	}
-// }
-
 func WithAddr(addr string) Option {
 	return func(c *Client) {
 		c.Addr = addr
@@ -48,14 +35,11 @@ func WithDialOpts(opts ...grpc.DialOption) Option {
 	}
 }
 
-type Config struct {
-	Addr string
-}
-
 type Client struct {
 	*grpc.ClientConn
-	Addr     string
-	DialOpts []grpc.DialOption
+	Addr              string
+	DialOpts          []grpc.DialOption
+	unaryInterceptors []grpc.UnaryClientInterceptor
 }
 
 func (c *Client) Close() {
@@ -73,6 +57,7 @@ func New(opts ...Option) (*Client, error) {
 			grpc.WithIdleTimeout(time.Second * 10),
 			// grpc.WithBlock(),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithChainUnaryInterceptor(),
 		},
 	}
 	for _, opt := range opts {

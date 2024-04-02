@@ -40,6 +40,20 @@ func WithBalancingPolicy(policy string) Option {
 	}
 }
 
+func WithDefault() Option {
+	return func(c *Client) {
+		c.DialOpts = append(c.DialOpts,
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                time.Second * 20,
+				Timeout:             time.Second * 10,
+				PermitWithoutStream: true,
+			}),
+			grpc.WithIdleTimeout(time.Second*10),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+	}
+}
+
 func WithDialOpts(opts ...grpc.DialOption) Option {
 	return func(c *Client) {
 		c.DialOpts = append(c.DialOpts, opts...)
@@ -57,17 +71,9 @@ func (c *Client) Close() {
 	c.ClientConn.Close()
 }
 
-func New(opts ...Option) (*Client, error) {
+func New(ctx context.Context, opts ...Option) (*Client, error) {
 	c := &Client{
 		DialOpts: []grpc.DialOption{
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:                time.Second * 20,
-				Timeout:             time.Second * 10,
-				PermitWithoutStream: true,
-			}),
-			grpc.WithIdleTimeout(time.Second * 10),
-			// grpc.WithBlock(),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		},
 	}
@@ -75,7 +81,7 @@ func New(opts ...Option) (*Client, error) {
 		opt(c)
 	}
 	c.DialOpts = append(c.DialOpts, grpc.WithChainUnaryInterceptor(c.unaryInterceptors...))
-	conn, err := grpc.DialContext(context.Background(), c.Addr, c.DialOpts...)
+	conn, err := grpc.DialContext(ctx, c.Addr, c.DialOpts...)
 	if err != nil {
 		return &Client{}, err
 	}

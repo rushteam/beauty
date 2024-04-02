@@ -22,11 +22,6 @@ func (b *builder) Scheme() string {
 
 func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
 	serviceName := target.Endpoint()
-	// password, _ := target.URL.User.Password()
-	// Endpoints: strings.Split(target.URL.Host, ","),
-	// 	Username:  target.URL.User.Username(),
-	// 	Password:  password,
-	// 	Namespace: namespace,
 	registry := NewRegistry(&Config{
 		Addr:      strings.Split(target.URL.Host, ","),
 		Cluster:   "",

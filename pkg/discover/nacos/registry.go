@@ -41,15 +41,18 @@ func NewRegistry(c *Config) *Registry {
 			),
 		)
 	}
+	var clientOpts = []constant.ClientOption{
+		constant.WithNotLoadCacheAtStart(true),
+		constant.WithTimeoutMs(5000),
+		// constant.WithLogDir("/tmp/nacos/log"),
+		// constant.WithCacheDir("/tmp/nacos/cache"),
+		// constant.WithLogLevel("info"),
+	}
+	if len(c.Namespace) > 0 {
+		clientOpts = append(clientOpts, constant.WithNamespaceId(c.Namespace))
+	}
 	client, err := clients.NewNamingClient(vo.NacosClientParam{
-		ClientConfig: constant.NewClientConfig(
-			constant.WithNotLoadCacheAtStart(true),
-			constant.WithTimeoutMs(5000),
-			constant.WithNamespaceId(c.Namespace), //When namespace is public, fill in the blank string here.
-			// constant.WithLogDir("/tmp/nacos/log"),
-			// constant.WithCacheDir("/tmp/nacos/cache"),
-			// constant.WithLogLevel("info"),
-		),
+		ClientConfig:  constant.NewClientConfig(clientOpts...),
 		ServerConfigs: serverConfigs,
 	})
 	if err != nil {

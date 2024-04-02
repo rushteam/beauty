@@ -83,6 +83,7 @@ func WithService(s Service, opts ...ServiceOption) Option {
 		app.services = append(app.services, sc)
 	}
 }
+
 func WithRegistry(r discover.Registry) Option {
 	return func(app *App) {
 		if r != nil {
@@ -102,8 +103,8 @@ func WithComponent(c core.Component) Option {
 	}
 }
 
-func WithTrace() Option {
-	return WithComponent(tracing.NewTracer())
+func WithTrace(opts ...tracing.TraceOption) Option {
+	return WithComponent(tracing.NewTracer(opts...))
 }
 
 func WithMetric(opts ...tracing.MetricOption) Option {

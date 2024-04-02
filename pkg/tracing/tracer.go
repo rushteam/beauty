@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 
 	// "go.opentelemetry.io/otel/sdk/resource"
+
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	// semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
@@ -18,21 +19,52 @@ import (
 
 var tracer trace.Tracer
 
-type traceComponent struct{}
+type TraceOption func(c *traceComponent)
+
+type traceComponent struct {
+	provider trace.TracerProvider
+	options  []sdktrace.TracerProviderOption
+}
 
 func (c *traceComponent) Name() string {
 	return "tracer"
 }
 
+func WithTraceProvider(provider trace.TracerProvider) TraceOption {
+	return func(o *traceComponent) {
+		o.provider = provider
+	}
+}
+
+func WithTraceProviderOption(opts ...sdktrace.TracerProviderOption) TraceOption {
+	return func(o *traceComponent) {
+		o.options = append(o.options, opts...)
+	}
+}
+
+func WithTraceSampler(sampler sdktrace.Sampler) TraceOption {
+	sdktrace.ParentBased(sdktrace.AlwaysSample(), sdktrace.WithLocalParentNotSampled())
+	return WithTraceProviderOption(sdktrace.WithSampler(sampler))
+}
+
+func WithTraceExporter(exporter sdktrace.SpanExporter, opts ...sdktrace.BatchSpanProcessorOption) TraceOption {
+	return WithTraceProviderOption(sdktrace.WithBatcher(exporter, opts...))
+}
+
+func WithTraceStdoutExporter() TraceOption {
+	exporter, err := stdouttrace.New(
+		stdouttrace.WithPrettyPrint(),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return WithTraceProviderOption(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+}
+
 func (c *traceComponent) Init() context.CancelFunc {
-	return newTracer()
-}
-
-func NewTracer() core.Component {
-	return &traceComponent{}
-}
-
-func newTracer() context.CancelFunc {
 	// exporter, err := jaeger.NewRawExporter(
 	// 	jaeger.WithCollectorEndpoint("http://your-jaeger-collector-endpoint:14268/api/traces"),
 	// 	jaeger.WithProcess(jaeger.Process{
@@ -62,11 +94,10 @@ func newTracer() context.CancelFunc {
 	if err != nil {
 		log.Fatal(err)
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		// sdktrace.WithResource(res),
-	)
+	// sdktrace.WithBatcher(exporter),
+	// 	sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	// sdktrace.WithResource(res),
+	tp := sdktrace.NewTracerProvider(c.options...)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 	tracer = tp.Tracer("beauty")
@@ -74,6 +105,17 @@ func newTracer() context.CancelFunc {
 		tp.Shutdown(context.Background())
 		_ = exporter.Shutdown(context.Background())
 	}
+}
+
+func NewTracer(opts ...TraceOption) core.Component {
+	c := &traceComponent{}
+	if len(opts) == 0 {
+		opts = append(opts, WithTraceStdoutExporter())
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 func SpanFromContext(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {

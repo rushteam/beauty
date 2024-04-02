@@ -23,9 +23,9 @@ func WithMetricReader(reader sdkmetric.Reader) MetricOption {
 	}
 }
 
-func WithMetricOption(opt sdkmetric.Option) MetricOption {
+func WithMetricOption(opts ...sdkmetric.Option) MetricOption {
 	return func(o *metricComponent) {
-		o.options = append(o.options, opt)
+		o.options = append(o.options, opts...)
 	}
 }
 

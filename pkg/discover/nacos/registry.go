@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
@@ -22,6 +23,7 @@ var (
 )
 
 var instance = make(map[string]*Registry)
+var mu sync.Mutex
 
 func NewRegistry(c *Config) *Registry {
 	key := c.String()
@@ -58,6 +60,8 @@ func NewRegistry(c *Config) *Registry {
 		c:      c,
 		client: client,
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	instance[c.String()] = r
 	return r
 }

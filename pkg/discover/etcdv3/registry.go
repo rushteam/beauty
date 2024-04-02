@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/discover"
@@ -16,6 +17,7 @@ import (
 var grantTTL int64 = 10
 
 var instance = make(map[string]*Registry)
+var mu sync.Mutex
 
 var (
 	_ discover.Registry  = (*Registry)(nil)
@@ -42,6 +44,8 @@ func NewRegistry(c *Config) *Registry {
 		prefix: c.Prefix,
 		config: c,
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	instance[key] = r
 	return r
 }

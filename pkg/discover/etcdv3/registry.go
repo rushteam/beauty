@@ -15,7 +15,7 @@ import (
 
 var grantTTL int64 = 10
 
-var m = make(map[string]*Registry)
+var instance = make(map[string]*Registry)
 
 var (
 	_ discover.Registry  = (*Registry)(nil)
@@ -24,7 +24,7 @@ var (
 
 func NewRegistry(c *Config) *Registry {
 	key := c.String()
-	if v, ok := m[key]; ok {
+	if v, ok := instance[key]; ok {
 		return v
 	}
 	client, err := clientv3.New(clientv3.Config{
@@ -42,7 +42,7 @@ func NewRegistry(c *Config) *Registry {
 		prefix: c.Prefix,
 		config: c,
 	}
-	m[key] = r
+	instance[key] = r
 	return r
 }
 

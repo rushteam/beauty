@@ -21,7 +21,13 @@ var (
 	_ discover.Discovery = (*Registry)(nil)
 )
 
+var instance = make(map[string]*Registry)
+
 func NewRegistry(c *Config) *Registry {
+	key := c.String()
+	if v, ok := instance[key]; ok {
+		return v
+	}
 	var serverConfigs []constant.ServerConfig
 	for _, v := range c.Addr {
 		host, port := addr.ParseHostAndPort(v)
@@ -48,10 +54,12 @@ func NewRegistry(c *Config) *Registry {
 		logger.Error("nacos Registry client error", slog.Any("err", err))
 		return nil
 	}
-	return &Registry{
+	r := &Registry{
 		c:      c,
 		client: client,
 	}
+	instance[c.String()] = r
+	return r
 }
 
 type Registry struct {

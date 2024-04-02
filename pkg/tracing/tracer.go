@@ -43,7 +43,8 @@ func WithTraceProviderOption(opts ...sdktrace.TracerProviderOption) TraceOption 
 }
 
 func WithTraceSampler(sampler sdktrace.Sampler) TraceOption {
-	sdktrace.ParentBased(sdktrace.AlwaysSample(), sdktrace.WithLocalParentNotSampled())
+	// sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.5))
+	// sdktrace.ParentBased(sdktrace.AlwaysSample(), sdktrace.WithLocalParentNotSampled())
 	return WithTraceProviderOption(sdktrace.WithSampler(sampler))
 }
 

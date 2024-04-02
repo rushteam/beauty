@@ -12,7 +12,9 @@ import (
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/example/example/api/v1"
 	"github.com/rushteam/beauty/pkg/client/grpcclient"
+
 	"github.com/rushteam/beauty/pkg/discover/etcdv3"
+	// "github.com/rushteam/beauty/pkg/discover/nacos"
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
 	"github.com/rushteam/beauty/pkg/tracing"
 	"go.opentelemetry.io/otel"
@@ -56,7 +58,8 @@ func main() {
 		client, err := grpcclient.New(
 			// grpcclient.WithDiscover("etcd:///127.0.0.1"),
 			grpcclient.WithBalancingPolicy("p2c_ewma"),
-			grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/beauty/helloworld.rpc"),
+			grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/helloworld.rpc"),
+			// grpcclient.WithAddr("nacos://127.0.0.1:8848/helloworld.rpc"),
 		)
 		if err != nil {
 			fmt.Println("client>error1", err)
@@ -103,8 +106,15 @@ func main() {
 			Endpoints: []string{
 				"127.0.0.1:2379",
 			},
-			Namespace: "/beauty",
+			Prefix: "/beauty",
 		})),
+		// beauty.WithRegistry(nacos.NewRegistry(&nacos.Config{
+		// 	Addr:      []string{"127.0.0.1:8848"},
+		// 	Cluster:   "",
+		// 	Namespace: "",
+		// 	Group:     "",
+		// 	Weight:    100,
+		// })),
 		beauty.WithWebServer(
 			":8080",
 			gw,

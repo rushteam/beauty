@@ -9,7 +9,7 @@ type Config struct {
 	Endpoints []string
 	Username  string
 	Password  string
-	Namespace string
+	Prefix    string
 }
 
 func (c *Config) String() string {
@@ -24,7 +24,7 @@ func (c *Config) String() string {
 		Scheme: "etcd",
 		User:   user,
 		Host:   strings.Join(c.Endpoints, ","),
-		Path:   c.Namespace,
+		Path:   c.Prefix,
 	}
 	return u.String()
 }

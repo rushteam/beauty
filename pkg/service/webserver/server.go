@@ -13,14 +13,15 @@ import (
 
 func New(addr string, mux http.Handler) *Server {
 	return &Server{
-		Mux:  mux,
-		Addr: addr,
+		Server: &http.Server{
+			Addr:    addr,
+			Handler: mux,
+		},
 	}
 }
 
 type Server struct {
-	Addr string
-	Mux  http.Handler
+	*http.Server
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -28,13 +29,10 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{
-		Addr:    s.Addr,
-		Handler: s.Mux,
-	}
+	s.Addr = ln.Addr().String()
 	go func() {
 		logger.Info("web server serve", "addr", s.Addr)
-		if err := server.Serve(ln); err != nil {
+		if err := s.Serve(ln); err != nil {
 			if err != http.ErrServerClosed {
 				log.Fatalf("web server listen failed: %s\n", err)
 			}
@@ -44,7 +42,7 @@ func (s *Server) Start(ctx context.Context) error {
 	logger.Info("web server stopped...")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
-	return server.Shutdown(ctx)
+	return s.Shutdown(ctx)
 }
 
 func (s *Server) String() string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/discover"
@@ -14,9 +15,14 @@ import (
 
 var grantTTL int64 = 10
 
-var m = make(map[string]*EtcdRegistry)
+var m = make(map[string]*Registry)
 
-func NewRegistry(c *Config) *EtcdRegistry {
+var (
+	_ discover.Registry  = (*Registry)(nil)
+	_ discover.Discovery = (*Registry)(nil)
+)
+
+func NewRegistry(c *Config) *Registry {
 	key := c.String()
 	if v, ok := m[key]; ok {
 		return v
@@ -31,30 +37,30 @@ func NewRegistry(c *Config) *EtcdRegistry {
 		logger.Error("etcdRegistry client error", slog.Any("err", err))
 		return nil
 	}
-	r := &EtcdRegistry{
-		client:    client,
-		namespace: c.Namespace,
-		config:    c,
+	r := &Registry{
+		client: client,
+		prefix: c.Prefix,
+		config: c,
 	}
 	m[key] = r
 	return r
 }
 
-type EtcdRegistry struct {
-	config    *Config
-	client    *clientv3.Client
-	namespace string
+type Registry struct {
+	config *Config
+	client *clientv3.Client
+	prefix string
 	discover.Registry
 	discover.Discovery
 }
 
-func (r EtcdRegistry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
+func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	value := discover.ServiceInfo{
 		Name:     info.Name(),
 		Addr:     info.Addr(),
 		Metadata: info.Metadata(),
 	}
-	key := buildServiceKey(r.namespace, info.Name(), info.ID())
+	key := buildServiceKey(r.prefix, info.Name(), info.ID())
 	ctx, stop := context.WithCancel(ctx)
 	go r.keepAlive(ctx, key, value.Marshal())
 	return func() {
@@ -67,7 +73,7 @@ func (r EtcdRegistry) Register(ctx context.Context, info discover.Service) (cont
 	}, nil
 }
 
-func (r EtcdRegistry) keepAlive(ctx context.Context, key, val string) {
+func (r Registry) keepAlive(ctx context.Context, key, val string) {
 	var leaseid clientv3.LeaseID
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*3)
 	if lease, err := r.client.Grant(timeoutCtx, grantTTL); err == nil {
@@ -118,6 +124,107 @@ func (r EtcdRegistry) keepAlive(ctx context.Context, key, val string) {
 	}
 }
 
-func buildServiceKey(ns, name, id string) string {
-	return fmt.Sprintf("%s/%s/%s", ns, name, id)
+func buildServiceKey(prefix, name, id string) string {
+	return fmt.Sprintf("/%s/%s/%s", strings.TrimLeft(prefix, "/"), name, id)
+}
+
+func buildServicePath(prefix, name string) string {
+	return fmt.Sprintf("/%s/%s", strings.TrimLeft(prefix, "/"), name)
+}
+
+func getInstanceFromKey(key, prefix string) string {
+	return strings.TrimPrefix(strings.ReplaceAll(string(key), prefix, ""), "/")
+}
+
+func (r Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo, error) {
+	var services []discover.ServiceInfo
+	path := buildServicePath(r.prefix, name)
+	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
+	if err != nil {
+		return services, err
+	}
+	for _, kv := range resp.Kvs {
+		// /beauty/helloworld.rpc/6bf14822-755d-4571-a7f5-bfe336783742
+		instanceID := getInstanceFromKey(string(kv.Key), path)
+		v := discover.ServiceInfo{}
+		v.Unmarshal(kv.Value)
+		v.ID = instanceID
+		services = append(services, v)
+	}
+	return services, nil
+}
+
+func (r Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
+	path := buildServicePath(r.prefix, serviceName)
+	var endpoints = make(map[string]discover.ServiceInfo)
+	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
+	if err != nil {
+		return fmt.Errorf("failed to get service: %w", err)
+	}
+	for _, kv := range resp.Kvs {
+		v := discover.ServiceInfo{}
+		v.Unmarshal(kv.Value)
+		v.ID = getInstanceFromKey(string(kv.Key), path)
+		endpoints[v.ID] = v
+	}
+	var services []discover.ServiceInfo
+	for _, v := range endpoints {
+		services = append(services, v)
+	}
+	update(services)
+	// fmt.Println("resp.Header.Revision", resp.Header.Revision, key)
+	w := clientv3.NewWatcher(r.client)
+	ch := w.Watch(ctx, path,
+		clientv3.WithPrefix(),
+		clientv3.WithRev(resp.Header.Revision),
+	)
+	if err := w.RequestProgress(ctx); err != nil {
+		logger.Error("watch Progress error", slog.Any("err", err))
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event, closed := <-ch:
+			if closed {
+				logger.Error("watch closed")
+				return nil
+			}
+			if event.Canceled {
+				logger.Error("watch event canceled", slog.Any("err", event.Err()))
+				return nil
+			}
+			// if event.IsProgressNotify() {
+			// 	fmt.Println("watch ProgressNotify")
+			// 	continue
+			// }
+			// time.Sleep(time.Second * 1)
+			// fmt.Println("watch >>>>>", event, event.Events, event.Header.Revision)
+			for _, ev := range event.Events {
+				// fmt.Println(">>", key, ev.Type)
+				key := string(ev.Kv.Key)
+				// ev.IsCreate()
+				// instanceID := getInstanceFromKey(key, prefix)
+				switch ev.Type {
+				case clientv3.EventTypePut:
+					v := discover.ServiceInfo{}
+					v.Unmarshal(ev.Kv.Value)
+					v.ID = getInstanceFromKey(key, path)
+					endpoints[key] = v
+					var services []discover.ServiceInfo
+					for _, v := range endpoints {
+						services = append(services, v)
+					}
+					update(services)
+				case clientv3.EventTypeDelete:
+					delete(endpoints, key)
+					var services []discover.ServiceInfo
+					for _, v := range endpoints {
+						services = append(services, v)
+					}
+					update(services)
+				}
+			}
+		}
+	}
 }

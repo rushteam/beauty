@@ -91,6 +91,9 @@ func Extract(addr string) (string, error) {
 		}
 	}
 	var podAddrs = os.Getenv("POD_IP")
+	if len(podAddrs) > 0 {
+		return podAddrs, nil
+	}
 	var privateAddrs []string
 	var publicAddrs []string
 	var loopbackAddrs []string
@@ -111,9 +114,6 @@ func Extract(addr string) (string, error) {
 			publicAddrs = append(publicAddrs, ipAddr)
 		}
 	}
-	if len(podAddrs) > 0 {
-		return podAddrs, nil
-	}
 	if len(privateAddrs) > 0 {
 		return privateAddrs[0], nil
 	} else if len(publicAddrs) > 0 {
@@ -131,10 +131,22 @@ func IPs() []string {
 
 // Parse try parse addr to host and port
 func ParseHostPort(addr string) string {
+	host, port := ParseHostAndPort(addr)
+	return net.JoinHostPort(host, port)
+}
+
+var portNaming = map[string]string{
+	"http": "80",
+}
+
+func ParseHostAndPort(addr string) (string, string) {
 	host, port, err := net.SplitHostPort(addr)
 	if err == nil {
 		addr = host
 	}
 	host, _ = Extract(host)
-	return net.JoinHostPort(host, port)
+	if v, ok := portNaming[port]; ok {
+		port = v
+	}
+	return host, port
 }

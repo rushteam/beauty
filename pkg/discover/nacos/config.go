@@ -11,14 +11,23 @@ type Config struct {
 	Namespace string   `json:"namespace"`
 	Group     string   `json:"group"`
 	Weight    float64  `json:"weight"`
+	Username  string   `json:"username"`
+	Password  string   `json:"password"`
 }
 
 func (c *Config) String() string {
+	var user *url.Userinfo
+	if len(c.Username) > 0 {
+		user = url.User(c.Username)
+		if len(c.Password) > 0 {
+			user = url.UserPassword(c.Username, c.Password)
+		}
+	}
 	u := url.URL{
 		Scheme: "nacos",
-		// User:   user,
-		Host: strings.Join(c.Addr, ","),
-		Path: c.Namespace,
+		User:   user,
+		Host:   strings.Join(c.Addr, ","),
+		Path:   c.Namespace,
 	}
 	return u.String()
 }

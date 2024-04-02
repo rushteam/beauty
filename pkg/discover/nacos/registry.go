@@ -51,6 +51,15 @@ func NewRegistry(c *Config) *Registry {
 	if len(c.Namespace) > 0 {
 		clientOpts = append(clientOpts, constant.WithNamespaceId(c.Namespace))
 	}
+	if len(c.Namespace) > 0 {
+		clientOpts = append(clientOpts, constant.WithNamespaceId(c.Namespace))
+	}
+	if len(c.Username) > 0 {
+		clientOpts = append(clientOpts, constant.WithUsername(c.Username))
+	}
+	if len(c.Username) > 0 {
+		clientOpts = append(clientOpts, constant.WithPassword(c.Username))
+	}
 	client, err := clients.NewNamingClient(vo.NacosClientParam{
 		ClientConfig:  constant.NewClientConfig(clientOpts...),
 		ServerConfigs: serverConfigs,

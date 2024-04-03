@@ -4,8 +4,6 @@ import (
 
 	// "github.com/ymcvalu/grpc-discovery/pkg/instance"
 
-	"strings"
-
 	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"google.golang.org/grpc/resolver"
 )
@@ -21,14 +19,7 @@ func (b *builder) Scheme() string {
 }
 
 func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	serviceName := target.Endpoint()
-	registry := NewRegistry(&Config{
-		Addr:      strings.Split(target.URL.Host, ","),
-		Cluster:   "",
-		Namespace: "",
-		Group:     "",
-	})
-	r := grpcclient.NewResolver(cc, serviceName, registry)
+	r := grpcclient.NewResolver(cc, target.Endpoint(), NewRegistryWithURL(target.URL))
 	go r.Start()
 	return r, nil
 }

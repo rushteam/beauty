@@ -110,9 +110,9 @@ func (c *traceComponent) Init() context.CancelFunc {
 
 func NewTracer(opts ...TraceOption) core.Component {
 	c := &traceComponent{}
-	if len(opts) == 0 {
-		opts = append(opts, WithTraceStdoutExporter())
-	}
+	// if len(opts) == 0 {
+	// 	opts = append(opts, WithTraceStdoutExporter())
+	// }
 	for _, opt := range opts {
 		opt(c)
 	}

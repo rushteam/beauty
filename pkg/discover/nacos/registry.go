@@ -4,9 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/gorilla/schema"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
@@ -24,6 +27,24 @@ var (
 
 var instance = make(map[string]*Registry)
 var mu sync.Mutex
+
+func NewRegistryWithURL(u url.URL) *Registry {
+	c := &Config{
+		Addr:      strings.Split(u.Host, ","),
+		Cluster:   "",
+		Namespace: "",
+		Group:     "",
+		Weight:    100,
+		AppName:   "beauty",
+	}
+	if u.User != nil {
+		c.Username = u.User.Username()
+		c.Password, _ = u.User.Password()
+	}
+	decoder := schema.NewDecoder()
+	decoder.Decode(c, u.Query())
+	return NewRegistry(c)
+}
 
 func NewRegistry(c *Config) *Registry {
 	key := c.String()
@@ -48,8 +69,8 @@ func NewRegistry(c *Config) *Registry {
 		// constant.WithCacheDir("/tmp/nacos/cache"),
 		// constant.WithLogLevel("info"),
 	}
-	if len(c.Namespace) > 0 {
-		clientOpts = append(clientOpts, constant.WithNamespaceId(c.Namespace))
+	if len(c.AppName) > 0 {
+		clientOpts = append(clientOpts, constant.WithAppName(c.AppName))
 	}
 	if len(c.Namespace) > 0 {
 		clientOpts = append(clientOpts, constant.WithNamespaceId(c.Namespace))
@@ -57,8 +78,8 @@ func NewRegistry(c *Config) *Registry {
 	if len(c.Username) > 0 {
 		clientOpts = append(clientOpts, constant.WithUsername(c.Username))
 	}
-	if len(c.Username) > 0 {
-		clientOpts = append(clientOpts, constant.WithPassword(c.Username))
+	if len(c.Password) > 0 {
+		clientOpts = append(clientOpts, constant.WithPassword(c.Password))
 	}
 	client, err := clients.NewNamingClient(vo.NacosClientParam{
 		ClientConfig:  constant.NewClientConfig(clientOpts...),

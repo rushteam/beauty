@@ -74,9 +74,9 @@ func (c *metricComponent) Init() context.CancelFunc {
 
 func NewMetric(opts ...MetricOption) core.Component {
 	c := &metricComponent{}
-	if len(opts) == 0 {
-		opts = append(opts, WithMetricStdoutReader())
-	}
+	// if len(opts) == 0 {
+	// 	opts = append(opts, WithMetricStdoutReader())
+	// }
 	for _, opt := range opts {
 		opt(c)
 	}

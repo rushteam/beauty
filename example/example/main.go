@@ -59,10 +59,11 @@ func main() {
 		time.Sleep(time.Second * 3)
 		client, err := grpcclient.New(
 			context.Background(),
+			grpcclient.WithDefault(),
 			// grpcclient.WithDiscover("etcd:///127.0.0.1"),
 			grpcclient.WithBalancingPolicy("p2c_ewma"),
 			// grpcclient.WithAddr("etcd://127.0.0.1:2379,127.0.0.2:2379/helloworld.rpc"),
-			grpcclient.WithAddr("nacos://127.0.0.1:8848/helloworld.rpc"),
+			grpcclient.WithAddr("nacos://127.0.0.1:8848/helloworld.rpc?app_name=test"),
 		)
 		if err != nil {
 			fmt.Println("client>error1", err)

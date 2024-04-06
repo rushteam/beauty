@@ -42,18 +42,20 @@ func NewRegistryWithURL(u url.URL) *Registry {
 }
 
 func NewRegistry(c *Config) *Registry {
+	client, err := nacos.NewNamingClient(&nacos.Config{
+		Addr:      c.Addr,
+		Namespace: c.Namespace,
+		Weight:    c.Weight,
+		Username:  c.Username,
+		Password:  c.Password,
+		AppName:   c.AppName,
+	})
+	if err != nil {
+		logger.Error("nacos naming client error", slog.Any("err", err))
+	}
 	return &Registry{
-		c: c,
-		client: nacos.NewNamingClient(&nacos.Config{
-			Addr:      c.Addr,
-			Cluster:   c.Cluster,
-			Namespace: c.Namespace,
-			Group:     c.Group,
-			Weight:    c.Weight,
-			Username:  c.Username,
-			Password:  c.Password,
-			AppName:   c.AppName,
-		}),
+		c:      c,
+		client: client,
 	}
 }
 

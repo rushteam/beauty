@@ -1,7 +1,8 @@
 package nacos
 
 import (
-	"log/slog"
+	"fmt"
+	"net"
 	"strconv"
 	"sync"
 
@@ -9,24 +10,21 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
-	"github.com/rushteam/beauty/pkg/addr"
-	"github.com/rushteam/beauty/pkg/logger"
 )
 
 var instance = make(map[string]naming_client.INamingClient)
 var mu sync.Mutex
 
-func NewNamingClient(c *Config) naming_client.INamingClient {
+func NewNamingClient(c *Config) (naming_client.INamingClient, error) {
 	key := c.String()
 	if v, ok := instance[key]; ok {
-		return v
+		return v, nil
 	}
 	var serverConfigs []constant.ServerConfig
-	for _, v := range c.Addr {
-		host, port := addr.ParseHostAndPort(v)
+	for _, addr := range c.Addr {
+		host, port, _ := net.SplitHostPort(addr)
 		portUint, _ := strconv.ParseUint(port, 10, 64)
-		serverConfigs = append(
-			serverConfigs,
+		serverConfigs = append(serverConfigs,
 			*constant.NewServerConfig(host, portUint,
 				constant.WithScheme("http"),
 			),
@@ -56,11 +54,10 @@ func NewNamingClient(c *Config) naming_client.INamingClient {
 		ServerConfigs: serverConfigs,
 	})
 	if err != nil {
-		logger.Error("nacos naming client error", slog.Any("err", err))
-		return nil
+		return nil, fmt.Errorf("nacos naming client: %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	instance[c.String()] = client
-	return client
+	return client, nil
 }

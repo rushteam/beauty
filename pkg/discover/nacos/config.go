@@ -7,14 +7,14 @@ import (
 )
 
 type Config struct {
-	Addr      []string `json:"addr"`
-	Cluster   string   `json:"cluster" schema:"cluster"`
-	Group     string   `json:"group" schema:"group"`
-	Namespace string   `json:"namespace" schema:"namespace"`
-	Weight    float64  `json:"weight" schema:"weight"`
-	Username  string   `json:"username"`
-	Password  string   `json:"password"`
-	AppName   string   `schema:"app_name"`
+	Addr      []string `mapstructure:"addr"`
+	Cluster   string   `mapstructure:"cluster" schema:"cluster"`
+	Group     string   `mapstructure:"group" schema:"group"`
+	Namespace string   `mapstructure:"namespace" schema:"namespace"`
+	Weight    float64  `mapstructure:"weight" schema:"weight"`
+	Username  string   `mapstructure:"username"`
+	Password  string   `mapstructure:"password"`
+	AppName   string   `mapstructure:"app_name" schema:"app_name"`
 }
 
 func (c *Config) String() string {

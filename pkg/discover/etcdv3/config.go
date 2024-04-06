@@ -6,10 +6,10 @@ import (
 )
 
 type Config struct {
-	Endpoints []string
-	Username  string
-	Password  string
-	Prefix    string
+	Endpoints []string `mapstructure:"endpoints"`
+	Username  string   `mapstructure:"username"`
+	Password  string   `mapstructure:"password"`
+	Prefix    string   `mapstructure:"prefix"`
 }
 
 func (c *Config) String() string {

@@ -7,15 +7,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/gorilla/schema"
-	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
-	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
 	"github.com/nacos-group/nacos-sdk-go/v2/model"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 	"github.com/rushteam/beauty/pkg/addr"
+	"github.com/rushteam/beauty/pkg/client/nacos"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 )
@@ -24,9 +22,6 @@ var (
 	_ discover.Registry  = (*Registry)(nil)
 	_ discover.Discovery = (*Registry)(nil)
 )
-
-var instance = make(map[string]*Registry)
-var mu sync.Mutex
 
 func NewRegistryWithURL(u url.URL) *Registry {
 	c := &Config{
@@ -47,62 +42,24 @@ func NewRegistryWithURL(u url.URL) *Registry {
 }
 
 func NewRegistry(c *Config) *Registry {
-	key := c.String()
-	if v, ok := instance[key]; ok {
-		return v
+	return &Registry{
+		c: c,
+		client: nacos.NewNamingClient(&nacos.Config{
+			Addr:      c.Addr,
+			Cluster:   c.Cluster,
+			Namespace: c.Namespace,
+			Group:     c.Group,
+			Weight:    c.Weight,
+			Username:  c.Username,
+			Password:  c.Password,
+			AppName:   c.AppName,
+		}),
 	}
-	var serverConfigs []constant.ServerConfig
-	for _, v := range c.Addr {
-		host, port := addr.ParseHostAndPort(v)
-		portUint, _ := strconv.ParseUint(port, 10, 64)
-		serverConfigs = append(
-			serverConfigs,
-			*constant.NewServerConfig(host, portUint,
-				constant.WithScheme("http"),
-			),
-		)
-	}
-	var clientOpts = []constant.ClientOption{
-		constant.WithNotLoadCacheAtStart(true),
-		constant.WithTimeoutMs(5000),
-		// constant.WithLogDir("/tmp/nacos/log"),
-		// constant.WithCacheDir("/tmp/nacos/cache"),
-		// constant.WithLogLevel("info"),
-	}
-	if len(c.AppName) > 0 {
-		clientOpts = append(clientOpts, constant.WithAppName(c.AppName))
-	}
-	if len(c.Namespace) > 0 {
-		clientOpts = append(clientOpts, constant.WithNamespaceId(c.Namespace))
-	}
-	if len(c.Username) > 0 {
-		clientOpts = append(clientOpts, constant.WithUsername(c.Username))
-	}
-	if len(c.Password) > 0 {
-		clientOpts = append(clientOpts, constant.WithPassword(c.Password))
-	}
-	client, err := clients.NewNamingClient(vo.NacosClientParam{
-		ClientConfig:  constant.NewClientConfig(clientOpts...),
-		ServerConfigs: serverConfigs,
-	})
-	if err != nil {
-		logger.Error("nacos Registry client error", slog.Any("err", err))
-		return nil
-	}
-	r := &Registry{
-		c:      c,
-		client: client,
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	instance[c.String()] = r
-	return r
 }
 
 type Registry struct {
 	c      *Config
 	client naming_client.INamingClient
-	discover.Registry
 }
 
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
@@ -121,7 +78,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		Ephemeral:   true,
 	})
 	if err != nil {
-		logger.Error("nacos DeregisterInstance failed", slog.Any("err", err), slog.String("svc.name", info.Name()))
+		logger.Error("nacos RegisterInstance failed", slog.Any("err", err), slog.String("svc.name", info.Name()))
 		return func() {}, nil
 	}
 	return func() {

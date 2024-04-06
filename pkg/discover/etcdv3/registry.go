@@ -202,13 +202,8 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 			// 	fmt.Println("watch ProgressNotify")
 			// 	continue
 			// }
-			// time.Sleep(time.Second * 1)
-			// fmt.Println("watch >>>>>", event, event.Events, event.Header.Revision)
 			for _, ev := range event.Events {
-				// fmt.Println(">>", key, ev.Type)
 				key := string(ev.Kv.Key)
-				// ev.IsCreate()
-				// instanceID := getInstanceFromKey(key, prefix)
 				switch ev.Type {
 				case clientv3.EventTypePut:
 					v := discover.ServiceInfo{}

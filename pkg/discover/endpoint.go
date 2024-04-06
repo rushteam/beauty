@@ -13,14 +13,14 @@ type Service interface {
 }
 
 type ServiceInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Addr string `json:"addr"`
-	// Version   string            `json:"version"`
-	// Weight    int               `json:"weight"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Addr     string            `json:"addr"`
 	Metadata map[string]string `json:"metadata"`
-	// Endpoints []string          `json:"endpoints"`
 }
+
+// Version   string            `json:"version"`
+// Weight    int               `json:"weight"`
 
 func (s *ServiceInfo) Unmarshal(b []byte) error {
 	buf := bytes.NewBuffer(b)

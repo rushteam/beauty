@@ -4,11 +4,14 @@ import (
 	"context"
 )
 
-// type baseResolver struct{}
+type Registry interface {
+	Register(context.Context, Service) (context.CancelFunc, error)
+}
 
-// func (baseResolver) ResolveNow(resolver.ResolveNowOptions) {}
-
-// func (baseResolver) Close() {}
+// type KeepAlive interface {
+// 	KeepAlive() error
+// 	Stop() error
+// }
 
 type Discovery interface {
 	Find(ctx context.Context, serviceName string) ([]ServiceInfo, error)
@@ -18,38 +21,19 @@ type Discovery interface {
 type Notify func([]ServiceInfo)
 
 // type Watcher interface {
-// 	Next(map[string]ServiceInfo) error
-// 	Close()
-// 	Done() <-chan struct{}
+// 	Next() <-chan map[string]ServiceInfo
+// 	Close() error
 // }
 
-// func (w Watcher) Next() []ServiceInfo
+// type watch struct {
+// 	ch chan map[string]ServiceInfo
+// }
 
-// func (w *Watcher) Next() ([]ServiceInfo, error) {
-// 	endpoints, err := w.d.Find(w.ctx, w.serviceName)
-// 	if err != nil {
+// func (w watch) Next() <-chan map[string]ServiceInfo {
+// 	return w.ch
+// }
 
-// 	}
-// 	select {
-// 	case <-w.ctx.Done():
-// 		return w.endpoints, w.ctx.Err()
-// 	case event := <-w.ch:
-// 		if event.Canceled {
-// 			log.Printf("failed to watch server addresses changed, caused by: %v", event.Err())
-// 			return w.endpoints, w.ctx.Err()
-// 		}
-// 		for _, ev := range event.Events {
-// 			key := string(ev.Kv.Key)
-// 			// ev.IsCreate()
-// 			switch ev.Type {
-// 			case clientv3.EventTypePut:
-// 				v := discover.ServiceInfo{}
-// 				v.Unmarshal(ev.Kv.Value)
-// 				w.endpoints[key] = &v
-// 			case clientv3.EventTypeDelete:
-// 				delete(w.endpoints, key)
-// 			}
-// 		}
-// 	}
-// 	return w.endpoints, nil
+// func (w watch) Close() error {
+// 	close(w.ch)
+// 	return nil
 // }

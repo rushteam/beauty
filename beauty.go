@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/rushteam/beauty/pkg/core"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
@@ -30,57 +29,25 @@ type HookFunc func(app *App)
 // Option ..
 type Option func(app *App)
 
-type ServiceOption func(*ServiceContext)
-
-type ServiceContext struct {
-	Service
-	id       string
-	name     string
-	addr     string
-	metadata map[string]string
-}
-
-func (s ServiceContext) ID() string {
-	return s.id
-}
-func (s ServiceContext) Name() string {
-	return s.name
-}
-
-func (s ServiceContext) Addr() string {
-	return s.addr
-}
-
-func (s ServiceContext) Metadata() map[string]string {
-	return s.metadata
-}
+// type ServiceOption func(*ServiceContext)
+type ServiceOption func(*discover.ServiceInfo)
 
 func WithServiceName(name string) ServiceOption {
-	return func(s *ServiceContext) {
-		s.name = name
+	return func(s *discover.ServiceInfo) {
+		s.Name = name
 	}
 }
 
 func WithServiceMeta(k, v string) ServiceOption {
-	return func(s *ServiceContext) {
-		s.metadata[k] = v
+	return func(s *discover.ServiceInfo) {
+		s.Metadata[k] = v
 	}
 }
 
 // WithService ..
 func WithService(s Service, opts ...ServiceOption) Option {
-	uuid, _ := uuid.NewV4()
-	sc := &ServiceContext{
-		Service:  s,
-		id:       uuid.String(),
-		metadata: make(map[string]string, 0),
-		addr:     s.String(),
-	}
-	for _, o := range opts {
-		o(sc)
-	}
 	return func(app *App) {
-		app.services = append(app.services, sc)
+		app.services = append(app.services, s)
 	}
 }
 
@@ -116,11 +83,14 @@ type Service interface {
 	Start(ctx context.Context) error
 	String() string
 }
+type ServiceKind interface {
+	Kind() string
+}
 
 // App ..
 type App struct {
 	hooks    map[HookEvent][]HookFunc
-	services []*ServiceContext
+	services []Service
 	registry []discover.Registry
 }
 
@@ -158,16 +128,19 @@ func (s *App) Start(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	for _, srv := range s.services {
 		wg.Add(1)
-		go func(srv *ServiceContext) {
+		go func(srv Service) {
 			defer wg.Done()
-			for _, r := range s.registry {
-				// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
-				stop, err := r.Register(ctx, srv)
-				if err != nil {
-					logger.Error("service registry.Register error", "error", err)
-					return
+			if v, ok := srv.(discover.Service); ok {
+				fmt.Println(">>>>", v)
+				for _, r := range s.registry {
+					// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
+					stop, err := r.Register(ctx, v)
+					if err != nil {
+						logger.Error("service registry.Register error", "error", err)
+						return
+					}
+					defer stop()
 				}
-				defer stop()
 			}
 			if err := srv.Start(ctx); err != nil {
 				logger.Error("service start error", "error", err)

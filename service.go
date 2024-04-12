@@ -3,18 +3,41 @@ package beauty
 import (
 	"net/http"
 
+	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"google.golang.org/grpc"
 )
 
-func WithWebServer(addr string, mux http.Handler, tags ...ServiceOption) Option {
-	return WithService(webserver.New(addr, mux), tags...)
+func WithWebServer(addr string, mux http.Handler, opts ...ServiceOption) Option {
+	si := &discover.ServiceInfo{
+		Metadata: make(map[string]string),
+	}
+	for _, o := range opts {
+		o(si)
+	}
+	return WithService(webserver.New(
+		addr,
+		mux,
+		webserver.WithServiceName(si.Name),
+		webserver.WithMetadata(si.Metadata),
+	))
 }
 
-func WithGrpcServer(addr string, handler func(*grpc.Server), tags ...ServiceOption) Option {
-	return WithService(grpcserver.New(addr, handler), tags...)
+func WithGrpcServer(addr string, handler func(*grpc.Server), opts ...ServiceOption) Option {
+	si := &discover.ServiceInfo{
+		Metadata: make(map[string]string),
+	}
+	for _, o := range opts {
+		o(si)
+	}
+	return WithService(grpcserver.New(
+		addr,
+		handler,
+		grpcserver.WithServiceName(si.Name),
+		grpcserver.WithMetadata(si.Metadata),
+	))
 }
 
 func WithCrontab(opts ...cron.CronOptions) Option {

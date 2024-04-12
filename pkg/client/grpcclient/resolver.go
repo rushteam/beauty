@@ -42,9 +42,8 @@ func (r *Resolver) Close() {
 
 func (r *Resolver) Start() {
 	updateState := func(services []discover.ServiceInfo) {
-		if len(services) > 0 {
-			r.cc.UpdateState(buildState(services))
-		}
+		slog.Info("grpclient service update", slog.Int("service", len(services)))
+		r.cc.UpdateState(buildState(services))
 	}
 	if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
 		logger.Error("discovery watch failed", slog.Any("err", err))

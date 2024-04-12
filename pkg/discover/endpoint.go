@@ -8,12 +8,14 @@ import (
 type Service interface {
 	ID() string
 	Name() string
+	Kind() string
 	Addr() string
 	Metadata() map[string]string
 }
 
 type ServiceInfo struct {
 	ID       string            `json:"id"`
+	Kind     string            `json:"kind"`
 	Name     string            `json:"name"`
 	Addr     string            `json:"addr"`
 	Metadata map[string]string `json:"metadata"`

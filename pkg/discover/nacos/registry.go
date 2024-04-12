@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/schema"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
@@ -23,12 +24,15 @@ var (
 	_ discover.Discovery = (*Registry)(nil)
 )
 
-func NewRegistryWithURL(u url.URL) *Registry {
+var instance = make(map[string]*Registry)
+var mu sync.Mutex
+
+func BuildRegistryWithURL(u url.URL) *Registry {
 	c := &Config{
 		Addr:      strings.Split(u.Host, ","),
-		Cluster:   "",
-		Namespace: "",
-		Group:     "",
+		Cluster:   "", //from url schema
+		Namespace: "", //from url schema
+		Group:     "", //from url schema
 		Weight:    100,
 		AppName:   "beauty",
 	}
@@ -38,36 +42,51 @@ func NewRegistryWithURL(u url.URL) *Registry {
 	}
 	decoder := schema.NewDecoder()
 	decoder.Decode(c, u.Query())
-	return NewRegistry(c)
+	key := c.String()
+	mu.Lock()
+	defer mu.Unlock()
+	if client, ok := instance[key]; ok {
+		return client
+	}
+	instance[key] = NewRegistry(c)
+	return instance[key]
 }
 
 func NewRegistry(c *Config) *Registry {
-	client, err := nacos.NewNamingClient(&nacos.Config{
-		Addr:      c.Addr,
-		Namespace: c.Namespace,
-		Weight:    c.Weight,
-		Username:  c.Username,
-		Password:  c.Password,
-		AppName:   c.AppName,
-	})
-	if err != nil {
-		logger.Error("nacos naming client error", slog.Any("err", err))
-	}
 	return &Registry{
-		c:      c,
-		client: client,
+		c:       c,
+		clients: make(map[string]naming_client.INamingClient),
 	}
 }
 
 type Registry struct {
-	c      *Config
-	client naming_client.INamingClient
+	c       *Config
+	clients map[string]naming_client.INamingClient
 }
 
+func (r Registry) client(key string) naming_client.INamingClient {
+	if c, ok := r.clients[key]; ok {
+		return c
+	}
+	client, err := nacos.NewNamingClient(&nacos.Config{
+		Addr:      r.c.Addr,
+		Namespace: r.c.Namespace,
+		Weight:    r.c.Weight,
+		Username:  r.c.Username,
+		Password:  r.c.Password,
+		AppName:   r.c.AppName,
+	})
+	if err != nil {
+		logger.Error("nacos naming client error", slog.Any("err", err))
+		return nil
+	}
+	r.clients[key] = client
+	return client
+}
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	addr, port := addr.ParseHostAndPort(info.Addr())
 	portUint, _ := strconv.ParseUint(port, 10, 64)
-	_, err := r.client.RegisterInstance(vo.RegisterInstanceParam{
+	_, err := r.client(info.ID()).RegisterInstance(vo.RegisterInstanceParam{
 		Ip:          addr,
 		Port:        portUint,
 		Weight:      r.c.Weight,
@@ -84,7 +103,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		return func() {}, nil
 	}
 	return func() {
-		_, err := r.client.DeregisterInstance(vo.DeregisterInstanceParam{
+		_, err := r.client(info.ID()).DeregisterInstance(vo.DeregisterInstanceParam{
 			Ip:          addr,
 			Port:        portUint,
 			ServiceName: info.Name(),
@@ -105,14 +124,14 @@ func (r Registry) Find(ctx context.Context, serviceName string) ([]discover.Serv
 func (r Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
 	go func() {
 		<-ctx.Done()
-		r.client.Unsubscribe(&vo.SubscribeParam{
+		r.client("watch").Unsubscribe(&vo.SubscribeParam{
 			ServiceName:       serviceName,
 			Clusters:          []string{r.c.Cluster},
 			GroupName:         r.c.Group,
 			SubscribeCallback: func(services []model.Instance, err error) {},
 		})
 	}()
-	return r.client.Subscribe(&vo.SubscribeParam{
+	return r.client("watch").Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
 		Clusters:    []string{r.c.Cluster},
 		GroupName:   r.c.Group,
@@ -128,6 +147,18 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 func buildService(services []model.Instance) []discover.ServiceInfo {
 	var ss []discover.ServiceInfo
 	for _, v := range services {
+		if !v.Healthy {
+			logger.Warn("service not healthy", slog.Any("v", v))
+			continue
+		}
+		if !v.Enable {
+			logger.Warn("service not enable", slog.Any("v", v))
+			continue
+		}
+		if v.Weight <= 0 {
+			logger.Warn("service weight<=0", slog.Any("v", v))
+			continue
+		}
 		port := strconv.FormatUint(v.Port, 10)
 		ss = append(ss, discover.ServiceInfo{
 			ID:       v.InstanceId,

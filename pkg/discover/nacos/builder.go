@@ -19,7 +19,7 @@ func (b *builder) Scheme() string {
 }
 
 func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	r := grpcclient.NewResolver(cc, target.Endpoint(), NewRegistryWithURL(target.URL))
+	r := grpcclient.NewResolver(cc, target.Endpoint(), BuildRegistryWithURL(target.URL))
 	go r.Start()
 	return r, nil
 }

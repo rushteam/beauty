@@ -137,6 +137,14 @@ func main() {
 			beauty.WithServiceName("helloworld.rpc"),
 			beauty.WithServiceMeta("version", "v1.0"),
 		),
+		beauty.WithGrpcServer(
+			":58090",
+			func(s *grpc.Server) {
+				v1.RegisterGreeterServer(s, &GreeterServer{})
+			},
+			beauty.WithServiceName("helloworld.rpc"),
+			beauty.WithServiceMeta("version", "v2.0"),
+		),
 	)
 	app.Hook(beauty.EventAfterRun, func(app *beauty.App) {
 		cancel()

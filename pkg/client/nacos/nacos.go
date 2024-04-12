@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"sync"
 
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
@@ -12,14 +11,7 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 )
 
-var instance = make(map[string]naming_client.INamingClient)
-var mu sync.Mutex
-
 func NewNamingClient(c *Config) (naming_client.INamingClient, error) {
-	key := c.String()
-	if v, ok := instance[key]; ok {
-		return v, nil
-	}
 	var serverConfigs []constant.ServerConfig
 	for _, addr := range c.Addr {
 		host, port, _ := net.SplitHostPort(addr)
@@ -27,6 +19,7 @@ func NewNamingClient(c *Config) (naming_client.INamingClient, error) {
 		serverConfigs = append(serverConfigs,
 			*constant.NewServerConfig(host, portUint,
 				constant.WithScheme("http"),
+				// constant.WithPort(c.GrpcPort), //todo 应该和add维度一样，不应该从config上获取
 			),
 		)
 	}
@@ -56,8 +49,5 @@ func NewNamingClient(c *Config) (naming_client.INamingClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nacos naming client: %v", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	instance[c.String()] = client
 	return client, nil
 }

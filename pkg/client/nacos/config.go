@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	Addr      []string `mapstructure:"addr"`
-	Namespace string   `mapstructure:"namespace" schema:"namespace"`
-	Weight    float64  `mapstructure:"weight" schema:"weight"`
-	Username  string   `mapstructure:"username"`
-	Password  string   `mapstructure:"password"`
-	AppName   string   `mapstructure:"app_name" schema:"app_name"`
+	Addr []string `mapstructure:"addr"`
+	// GrpcPort  uint64   `mapstructure:"grpc_port"`//todo 这里nacos 应该在adds 维度中不好设计
+	Namespace string  `mapstructure:"namespace" schema:"namespace"`
+	Weight    float64 `mapstructure:"weight" schema:"weight"`
+	Username  string  `mapstructure:"username"`
+	Password  string  `mapstructure:"password"`
+	AppName   string  `mapstructure:"app_name" schema:"app_name"`
 }
 
 func (c *Config) String() string {

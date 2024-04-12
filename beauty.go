@@ -131,7 +131,6 @@ func (s *App) Start(ctx context.Context) error {
 		go func(srv Service) {
 			defer wg.Done()
 			if v, ok := srv.(discover.Service); ok {
-				fmt.Println(">>>>", v)
 				for _, r := range s.registry {
 					// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
 					stop, err := r.Register(ctx, v)

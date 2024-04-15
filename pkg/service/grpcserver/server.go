@@ -42,7 +42,7 @@ func New(addr string, handler func(*grpc.Server), opts ...Options) *Server {
 	s := &Server{
 		id:       uuid.New(),
 		name:     "grpc-server",
-		metadata: make(map[string]string, 0),
+		metadata: map[string]string{"kind": "grpc"},
 		addr:     addr,
 		Server: grpc.NewServer(
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
@@ -111,7 +111,7 @@ func (s *Server) Kind() string {
 }
 
 func (s *Server) Addr() string {
-	return s.addr
+	return addr.ParseHostPort(s.addr)
 }
 
 func (s *Server) Metadata() map[string]string {

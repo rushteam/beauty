@@ -35,7 +35,7 @@ func New(addr string, mux http.Handler, opts ...Options) *Server {
 	s := &Server{
 		id:       uuid.New(),
 		name:     "http-server",
-		metadata: make(map[string]string),
+		metadata: map[string]string{"kind": "http"},
 		Server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
@@ -92,7 +92,7 @@ func (s *Server) Kind() string {
 }
 
 func (s *Server) Addr() string {
-	return s.Server.Addr
+	return addr.ParseHostPort(s.Server.Addr)
 }
 
 func (s *Server) Metadata() map[string]string {

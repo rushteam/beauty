@@ -159,6 +159,10 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 			logger.Warn("service weight<=0", slog.Any("v", v))
 			continue
 		}
+		if v.Metadata["kind"] != "grpc" {
+			logger.Warn("service metadata.kind != grpc", slog.Any("v", v))
+			continue
+		}
 		port := strconv.FormatUint(v.Port, 10)
 		ss = append(ss, discover.ServiceInfo{
 			ID:       v.InstanceId,

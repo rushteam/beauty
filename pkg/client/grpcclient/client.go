@@ -21,7 +21,7 @@ func WithAddr(addr string) Option {
 
 func WithBlock() Option {
 	return func(c *Client) {
-		c.DialOpts = append(c.DialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		c.DialOpts = append(c.DialOpts, grpc.WithBlock())
 	}
 }
 

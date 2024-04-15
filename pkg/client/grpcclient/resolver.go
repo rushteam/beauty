@@ -42,7 +42,7 @@ func (r *Resolver) Close() {
 
 func (r *Resolver) Start() {
 	updateState := func(services []discover.ServiceInfo) {
-		slog.Info("grpclient service update", slog.Int("service", len(services)))
+		slog.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
 		r.cc.UpdateState(buildState(services))
 	}
 	if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {

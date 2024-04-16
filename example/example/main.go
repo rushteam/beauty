@@ -56,7 +56,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(time.Second * 3)
+		// time.Sleep(time.Second * 3)
 		client, err := grpcclient.New(
 			context.Background(),
 			grpcclient.WithDefault(),
@@ -71,7 +71,7 @@ func main() {
 			return
 		}
 		defer client.Close()
-		t := time.NewTicker(time.Second)
+		t := time.NewTicker(time.Second * 2)
 		for {
 			select {
 			case <-ctx.Done():

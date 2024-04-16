@@ -43,7 +43,9 @@ func (r *Resolver) Close() {
 func (r *Resolver) Start() {
 	updateState := func(services []discover.ServiceInfo) {
 		slog.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
-		r.cc.UpdateState(buildState(services))
+		if err := r.cc.UpdateState(buildState(services)); err != nil {
+			logger.Error("discovery updateState failed", slog.Any("err", err))
+		}
 	}
 	if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
 		logger.Error("discovery watch failed", slog.Any("err", err))
@@ -59,7 +61,7 @@ func buildState(services []discover.ServiceInfo) resolver.State {
 			ServerName: s.Name,
 		})
 		for k, v := range s.Metadata {
-			attributes.WithValue(k, v)
+			attributes = attributes.WithValue(k, v)
 		}
 	}
 	return resolver.State{

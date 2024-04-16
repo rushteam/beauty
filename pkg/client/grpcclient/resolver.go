@@ -57,8 +57,8 @@ func buildState(services []discover.ServiceInfo) resolver.State {
 	attributes := &attributes.Attributes{}
 	for _, s := range services {
 		addrs = append(addrs, resolver.Address{
-			Addr:       s.Addr,
-			ServerName: s.Name,
+			Addr: s.Addr,
+			// ServerName: s.Name,
 		})
 		for k, v := range s.Metadata {
 			attributes = attributes.WithValue(k, v)

@@ -3,7 +3,9 @@ package logger
 import (
 	"context"
 	"log/slog"
+	"runtime"
 	"sync"
+	"time"
 )
 
 var logger *slog.Logger
@@ -18,25 +20,46 @@ func instance() {
 // Debug ..
 func Debug(msg string, args ...any) {
 	instance()
-	logger.Log(context.Background(), slog.LevelDebug, msg, args...)
+	// logger.Log(context.Background(), slog.LevelDebug, msg, args...)
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:]) // skip [Callers, Infof]
+	r := slog.NewRecord(time.Now(), slog.LevelDebug, msg, pcs[0])
+	r.Add(args...)
+	_ = logger.Handler().Handle(context.Background(), r)
 }
 
 // Info ..
 func Info(msg string, args ...any) {
 	instance()
-	logger.Log(context.Background(), slog.LevelInfo, msg, args...)
+	// logger.Log(context.Background(), slog.LevelInfo, msg, args...)
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:]) // skip [Callers, Infof]
+	r := slog.NewRecord(time.Now(), slog.LevelInfo, msg, pcs[0])
+	r.Add(args...)
+	_ = logger.Handler().Handle(context.Background(), r)
 }
 
 // Warn ..
 func Warn(msg string, args ...any) {
 	instance()
-	logger.Log(context.Background(), slog.LevelWarn, msg, args...)
+	// logger.Log(context.Background(), slog.LevelWarn, msg, args...)
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:]) // skip [Callers, Infof]
+	r := slog.NewRecord(time.Now(), slog.LevelError, msg, pcs[0])
+	r.Add(args...)
+	_ = logger.Handler().Handle(context.Background(), r)
+
 }
 
 // Error ..
 func Error(msg string, args ...any) {
 	instance()
-	logger.Log(context.Background(), slog.LevelError, msg, args...)
+	// logger.Log(context.Background(), slog.LevelError, msg, args...)
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:]) // skip [Callers, Infof]
+	r := slog.NewRecord(time.Now(), slog.LevelError, msg, pcs[0])
+	r.Add(args...)
+	_ = logger.Handler().Handle(context.Background(), r)
 }
 
 // Sync ..

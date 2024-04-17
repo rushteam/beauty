@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -62,7 +63,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.Server.Addr = ln.Addr().String()
 	go func() {
-		logger.Info("web server serve", "addr", s.Server.Addr)
+		logger.Info("web server serve", slog.String("addr", s.Server.Addr))
 		if err := s.Serve(ln); err != nil {
 			if err != http.ErrServerClosed {
 				log.Fatalf("web server listen failed: %s\n", err)

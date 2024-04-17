@@ -42,7 +42,7 @@ func (r *Resolver) Close() {
 
 func (r *Resolver) Start() {
 	updateState := func(services []discover.ServiceInfo) {
-		slog.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
+		logger.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
 		if err := r.cc.UpdateState(buildState(services)); err != nil {
 			logger.Error("discovery updateState failed", slog.Any("err", err))
 		}

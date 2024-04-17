@@ -3,7 +3,6 @@ package beauty
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -160,7 +159,7 @@ func Go(f func()) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error(fmt.Sprintf("panic recovered: %v", r))
+				logger.Error(fmt.Sprintf("panic recovered: %v", r))
 			}
 		}()
 		f()

@@ -55,12 +55,14 @@ func BuildRegistryWithURL(u url.URL) *Registry {
 func NewRegistry(c *Config) *Registry {
 	return &Registry{
 		c:       c,
+		mu:      &sync.Mutex{},
 		clients: make(map[string]naming_client.INamingClient),
 	}
 }
 
 type Registry struct {
 	c       *Config
+	mu      *sync.Mutex
 	clients map[string]naming_client.INamingClient
 }
 
@@ -80,7 +82,9 @@ func (r Registry) client(key string) naming_client.INamingClient {
 		logger.Error("nacos naming client error", slog.Any("err", err))
 		return nil
 	}
+	r.mu.Lock()
 	r.clients[key] = client
+	r.mu.Unlock()
 	return client
 }
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {

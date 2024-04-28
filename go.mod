@@ -54,6 +54,7 @@ require (
 	github.com/gofrs/uuid/v5 v5.0.0
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/gorilla/schema v1.3.0
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.19.0
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

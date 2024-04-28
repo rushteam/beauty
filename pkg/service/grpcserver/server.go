@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 
+	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
@@ -19,6 +20,12 @@ func WithGrpcServerOptions(opts ...grpc.ServerOption) Options {
 	return func(s *Server) {
 		s.grpcOpts = append(s.grpcOpts, opts...)
 	}
+}
+
+func WithGrpcServerUnaryInterceptor(interceptors ...grpc.UnaryServerInterceptor) Options {
+	return WithGrpcServerOptions(grpc.UnaryInterceptor(
+		middleware.ChainUnaryServer(interceptors...),
+	))
 }
 
 func WithServiceName(name string) Options {
@@ -44,9 +51,7 @@ func New(addr string, handler func(*grpc.Server), opts ...Options) *Server {
 		name:     "grpc-server",
 		metadata: map[string]string{"kind": "grpc"},
 		addr:     addr,
-		Server: grpc.NewServer(
-			grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		),
+		Server:   nil,
 	}
 	for _, o := range opts {
 		o(s)

@@ -13,6 +13,7 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/model"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+
 	"github.com/rushteam/beauty/pkg/addr"
 	"github.com/rushteam/beauty/pkg/client/nacos"
 	"github.com/rushteam/beauty/pkg/discover"
@@ -106,6 +107,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		logger.Error("nacos RegisterInstance failed", slog.Any("err", err), slog.String("svc.name", info.Name()))
 		return func() {}, nil
 	}
+	logger.Info("nacos RegisterInstance success", slog.String("svc.name", info.Name()))
 	return func() {
 		_, err := r.client(info.ID()).DeregisterInstance(vo.DeregisterInstanceParam{
 			Ip:          addr,
@@ -117,7 +119,9 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		})
 		if err != nil {
 			logger.Error("nacos DeregisterInstance failed", slog.Any("err", err), slog.String("svc.name", info.Name()))
+			return
 		}
+		logger.Info("nacos DeregisterInstance success", slog.String("svc.name ", info.Name()))
 	}, nil
 }
 
@@ -135,14 +139,17 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 			SubscribeCallback: func(services []model.Instance, err error) {},
 		})
 	}()
+
 	return r.client("watch").Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
 		Clusters:    []string{r.c.Cluster},
 		GroupName:   r.c.Group,
 		SubscribeCallback: func(services []model.Instance, err error) {
 			if err != nil {
+				logger.Warn("nacos service update error", slog.Any("err", err))
 				return
 			}
+			logger.Info("nacos service update", slog.Any("services", services))
 			update(buildService(services))
 		},
 	})

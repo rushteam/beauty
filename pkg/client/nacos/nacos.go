@@ -26,6 +26,7 @@ func NewNamingClient(c *Config) (naming_client.INamingClient, error) {
 	var clientOpts = []constant.ClientOption{
 		constant.WithNotLoadCacheAtStart(true),
 		constant.WithTimeoutMs(5000),
+		constant.WithUpdateCacheWhenEmpty(true),
 		// constant.WithLogDir("/tmp/nacos/log"),
 		// constant.WithCacheDir("/tmp/nacos/cache"),
 		// constant.WithLogLevel("info"),

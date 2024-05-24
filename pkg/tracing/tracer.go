@@ -80,6 +80,7 @@ func (c *traceComponent) Init() context.CancelFunc {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	// res, err := resource.Merge(
 	// 	resource.Environment(),
 	// 	resource.NewSchemaless(
@@ -91,20 +92,29 @@ func (c *traceComponent) Init() context.CancelFunc {
 	// 		// semconv.ServiceInstanceID(),
 	// 	),
 	// )
-	if err != nil {
-		log.Fatal(err)
-	}
+
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+
 	// sdktrace.WithBatcher(exporter),
-	// 	sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	// sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	// sdktrace.WithResource(res),
-	tp := sdktrace.NewTracerProvider(c.options...)
-	otel.SetTracerProvider(tp)
-	//otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	tracer = tp.Tracer("beauty")
-	return func() {
-		tp.Shutdown(context.Background())
-		_ = exporter.Shutdown(context.Background())
+
+	cancel := func() {}
+	if c.provider == nil {
+		tp := sdktrace.NewTracerProvider(c.options...)
+		c.provider = tp
+		cancel = func() {
+			tp.Shutdown(context.Background())
+			_ = exporter.Shutdown(context.Background())
+		}
 	}
+
+	otel.SetTracerProvider(c.provider)
+
+	tracer = c.provider.Tracer("beauty")
+	return cancel
 }
 
 func NewTracer(opts ...TraceOption) core.Component {

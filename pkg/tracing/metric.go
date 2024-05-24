@@ -62,6 +62,7 @@ func (c *metricComponent) Init() context.CancelFunc {
 	cancel := func() {}
 	if c.provider == nil {
 		meterProvider := sdkmetric.NewMeterProvider(c.options...)
+		c.provider = meterProvider
 		cancel = func() {
 			_ = meterProvider.Shutdown(context.Background())
 		}

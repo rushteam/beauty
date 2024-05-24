@@ -59,16 +59,18 @@ func (c *metricComponent) Name() string {
 }
 
 func (c *metricComponent) Init() context.CancelFunc {
-	cancel := func() {}
 	if c.provider == nil {
-		meterProvider := sdkmetric.NewMeterProvider(c.options...)
-		c.provider = meterProvider
-		cancel = func() {
-			_ = meterProvider.Shutdown(context.Background())
-		}
+		c.provider = sdkmetric.NewMeterProvider(c.options...)
 	}
 	otel.SetMeterProvider(c.provider)
-	return cancel
+	return func() {
+		type shutdown interface {
+			Shutdown(ctx context.Context) error
+		}
+		if p, ok := c.provider.(shutdown); ok {
+			_ = p.Shutdown(context.Background())
+		}
+	}
 }
 
 func NewMetric(opts ...MetricOption) core.Component {

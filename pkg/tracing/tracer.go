@@ -101,20 +101,22 @@ func (c *traceComponent) Init() context.CancelFunc {
 	// sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	// sdktrace.WithResource(res),
 
-	cancel := func() {}
 	if c.provider == nil {
-		tp := sdktrace.NewTracerProvider(c.options...)
-		c.provider = tp
-		cancel = func() {
-			tp.Shutdown(context.Background())
-			_ = exporter.Shutdown(context.Background())
-		}
+		c.provider = sdktrace.NewTracerProvider(c.options...)
 	}
 
 	otel.SetTracerProvider(c.provider)
 
 	tracer = c.provider.Tracer("beauty")
-	return cancel
+	return func() {
+		type shutdown interface {
+			Shutdown(ctx context.Context) error
+		}
+		if p, ok := c.provider.(shutdown); ok {
+			_ = p.Shutdown(context.Background())
+		}
+		_ = exporter.Shutdown(context.Background())
+	}
 }
 
 func NewTracer(opts ...TraceOption) core.Component {

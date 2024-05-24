@@ -5,9 +5,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/core"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
+
+	"github.com/rushteam/beauty/pkg/core"
 
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -58,18 +59,15 @@ func (c *metricComponent) Name() string {
 }
 
 func (c *metricComponent) Init() context.CancelFunc {
+	cancel := func() {}
 	if c.provider == nil {
-		meterProvider := sdkmetric.NewMeterProvider(
-			// metric.WithResource(res),
-			c.options...,
-		)
-		otel.SetMeterProvider(meterProvider)
-		return func() {
+		meterProvider := sdkmetric.NewMeterProvider(c.options...)
+		cancel = func() {
 			_ = meterProvider.Shutdown(context.Background())
 		}
 	}
 	otel.SetMeterProvider(c.provider)
-	return func() {}
+	return cancel
 }
 
 func NewMetric(opts ...MetricOption) core.Component {

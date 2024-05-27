@@ -6,15 +6,14 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
-	"go.opentelemetry.io/otel/propagation"
-
 	// "go.opentelemetry.io/otel/sdk/resource"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
+	"go.opentelemetry.io/otel/trace"
+
 	// semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"github.com/rushteam/beauty/pkg/core"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var tracer trace.Tracer
@@ -81,6 +80,7 @@ func (c *traceComponent) Init() context.CancelFunc {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	// res, err := resource.Merge(
 	// 	resource.Environment(),
 	// 	resource.NewSchemaless(
@@ -92,18 +92,29 @@ func (c *traceComponent) Init() context.CancelFunc {
 	// 		// semconv.ServiceInstanceID(),
 	// 	),
 	// )
-	if err != nil {
-		log.Fatal(err)
-	}
+
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+
 	// sdktrace.WithBatcher(exporter),
-	// 	sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	// sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	// sdktrace.WithResource(res),
-	tp := sdktrace.NewTracerProvider(c.options...)
-	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	tracer = tp.Tracer("beauty")
+
+	if c.provider == nil {
+		c.provider = sdktrace.NewTracerProvider(c.options...)
+	}
+
+	otel.SetTracerProvider(c.provider)
+
+	tracer = c.provider.Tracer("beauty")
 	return func() {
-		tp.Shutdown(context.Background())
+		type shutdown interface {
+			Shutdown(ctx context.Context) error
+		}
+		if p, ok := c.provider.(shutdown); ok {
+			_ = p.Shutdown(context.Background())
+		}
 		_ = exporter.Shutdown(context.Background())
 	}
 }

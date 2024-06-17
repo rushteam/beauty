@@ -118,10 +118,10 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 			Ephemeral:   true,
 		})
 		if err != nil {
-			logger.Error("nacos DeregisterInstance failed", slog.Any("err", err), slog.String("svc.name", info.Name()))
+			logger.Error("nacos DeregisterInstance failed", slog.Any("err", err), slog.String("svc.name", info.Name()),slog.Any("svc.meta", info.Metadata()))
 			return
 		}
-		logger.Info("nacos DeregisterInstance success", slog.String("svc.name ", info.Name()))
+		logger.Info("nacos DeregisterInstance success", slog.String("svc.name ", info.Name()),slog.Any("svc.meta", info.Metadata()))
 	}, nil
 }
 

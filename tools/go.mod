@@ -4,7 +4,6 @@ go 1.20
 
 require (
 	github.com/gobuffalo/here v0.6.7
-	github.com/urfave/cli v1.22.14
 	github.com/urfave/cli/v2 v2.25.7
 )
 

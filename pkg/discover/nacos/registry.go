@@ -104,10 +104,10 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		Ephemeral:   true,
 	})
 	if err != nil {
-		logger.Error("nacos RegisterInstance failed", slog.Any("err", err), slog.String("svc.id", info.ID()),slog.String("svc.name", info.Name()),slog.String("svc.addr", info.Addr()),slog.Any("svc.meta", info.Metadata()))
+		logger.Error("nacos RegisterInstance failed", slog.Any("err", err), slog.String("svc.id", info.ID()), slog.String("svc.name", info.Name()), slog.String("svc.addr", info.Addr()), slog.Any("svc.meta", info.Metadata()))
 		return func() {}, nil
 	}
-	logger.Info("nacos RegisterInstance success", slog.String("svc.id", info.ID()),slog.String("svc.name", info.Name()),slog.String("svc.addr", info.Addr()),slog.Any("svc.meta", info.Metadata()))
+	logger.Info("nacos RegisterInstance success", slog.String("svc.id", info.ID()), slog.String("svc.name", info.Name()), slog.String("svc.addr", info.Addr()), slog.Any("svc.meta", info.Metadata()))
 	return func() {
 		_, err := r.client(info.ID()).DeregisterInstance(vo.DeregisterInstanceParam{
 			Ip:          addr,
@@ -118,10 +118,10 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 			Ephemeral:   true,
 		})
 		if err != nil {
-			logger.Error("nacos DeregisterInstance failed", slog.Any("err", err), slog.String("svc.id", info.ID()),slog.String("svc.name", info.Name()),slog.String("svc.addr", info.Addr()),slog.Any("svc.meta", info.Metadata()))
+			logger.Error("nacos DeregisterInstance failed", slog.Any("err", err), slog.String("svc.id", info.ID()), slog.String("svc.name", info.Name()), slog.String("svc.addr", info.Addr()), slog.Any("svc.meta", info.Metadata()))
 			return
 		}
-		logger.Info("nacos DeregisterInstance success", slog.String("svc.id", info.ID()),slog.String("svc.name ", info.Name()),slog.String("svc.addr", info.Addr()),slog.Any("svc.meta", info.Metadata()))
+		logger.Info("nacos DeregisterInstance success", slog.String("svc.id", info.ID()), slog.String("svc.name ", info.Name()), slog.String("svc.addr", info.Addr()), slog.Any("svc.meta", info.Metadata()))
 	}, nil
 }
 

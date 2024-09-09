@@ -53,7 +53,7 @@ func (s *Cron) Start(ctx context.Context) error {
 					}
 				}()
 				if err := v.Handler(ctx); err != nil {
-					logger.Error("cron handler failed", slog.Any("handler", v.Handler))
+					logger.Error("cron handler failed", slog.Any("err", err))
 				}
 				logger.Debug("cron handler success", slog.String("date", time.Now().Format("20060102")))
 			})

@@ -126,35 +126,7 @@ func (s *App) Start(ctx context.Context) error {
 	s.runHooks(EventBeforeRun)
 	wg := sync.WaitGroup{}
 	for _, srv := range s.services {
-		wg.Add(1)
-		ctx, cancel := context.WithCancel(ctx)
-		go func(srv Service) {
-			defer wg.Done()
-			select {
-			case <-time.After(time.Microsecond * 10):
-				if v, ok := srv.(discover.Service); ok {
-					for _, r := range s.registry {
-						// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
-						stop, err := r.Register(ctx, v)
-						if err != nil {
-							logger.Error("service registry.Register error", "error", err)
-							return
-						}
-						defer stop()
-					}
-				}
-				<-ctx.Done()
-				return
-			case <-ctx.Done():
-				return
-			}
-		}(srv)
-		go func(srv Service) {
-			if err := srv.Start(ctx); err != nil {
-				logger.Error("service start error", "error", err)
-			}
-			cancel()
-		}(srv)
+		s.startService(ctx, &wg, srv)
 	}
 	wg.Wait()
 	<-ctx.Done()
@@ -164,6 +136,38 @@ func (s *App) Start(ctx context.Context) error {
 	logger.Info(fmt.Sprintf("stop after %s", sleep))
 	time.Sleep(sleep)
 	return nil
+}
+
+func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service) {
+	wg.Add(1)
+	ctx, cancel := context.WithCancel(ctx)
+	go func(srv Service) {
+		defer wg.Done()
+		select {
+		case <-time.After(time.Microsecond * 10):
+			if v, ok := srv.(discover.Service); ok {
+				for _, r := range s.registry {
+					// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
+					stop, err := r.Register(ctx, v)
+					if err != nil {
+						logger.Error("service registry.Register error", "error", err)
+						return
+					}
+					defer stop()
+				}
+			}
+			<-ctx.Done()
+			return
+		case <-ctx.Done():
+			return
+		}
+	}(srv)
+	go func(srv Service) {
+		if err := srv.Start(ctx); err != nil {
+			logger.Error("service start error", "error", err)
+		}
+		cancel()
+	}(srv)
 }
 
 func Go(f func()) {

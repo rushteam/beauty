@@ -2,8 +2,8 @@ package cron
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -45,11 +45,11 @@ func New(opts ...CronOptions) *Cron {
 func (s *Cron) Start(ctx context.Context) error {
 	for _, v := range s.handlers {
 		func(v cronHandler) {
-			logger.Info(fmt.Sprintf("register cron: %s", v.Spec))
+			logger.Info("register cron", slog.String("expr", v.Spec))
 			s.Cron.AddFunc(v.Spec, func() {
 				defer func() {
 					if r := recover(); r != nil {
-						logger.Error(fmt.Sprintf("panic recovered: %v", r))
+						logger.Error("panic recovered", slog.Any("panic", r), slog.String("stack", string(debug.Stack())))
 					}
 				}()
 				if err := v.Handler(ctx); err != nil {

@@ -1,0 +1,8 @@
+# ide
+.idea/
+.vscode/
+
+# go work
+go.work
+go.work.sum
+

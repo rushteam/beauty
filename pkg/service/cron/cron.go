@@ -7,28 +7,46 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/rushteam/beauty/pkg/logger"
 )
 
 type cronHandler struct {
+	Name    string
 	Spec    string
 	Handler func(ctx context.Context) error
 }
 
-type CronOptions func(c *Cron)
-
-func WithCronHandler(spec string, handler func(ctx context.Context) error) CronOptions {
-	return func(c *Cron) {
-		c.handlers = append(c.handlers, cronHandler{
-			Spec:    spec,
-			Handler: handler,
-		})
+func newCronHandler(cron *Cron, spec string, handler func(ctx context.Context) error, opts ...CronHandlerOptions) cronHandler {
+	var cfg cronHandlerCfg
+	for _, o := range opts {
+		o(&cfg)
 	}
+	c := cronHandler{
+		Name: cfg.name,
+		Spec: spec,
+	}
+	if c.Name == "" {
+		c.Name = getCallerShortInfo(3) // 因为没有其他更合适的名字，所以先取调用者的文件名和行号
+	}
+	c.Handler = wrapCronHandler(cron, c.Name, c.Spec, handler)
+	return c
 }
 
 type Cron struct {
 	*cron.Cron
-	handlers []cronHandler
+	traceProvider trace.TracerProvider
+	tracer        trace.Tracer
+
+	meterProvider metric.MeterProvider
+	meter         metric.Meter
+
+	metricsJobSpentDuration metric.Float64Histogram
+	handlers                []cronHandler
 }
 
 func New(opts ...CronOptions) *Cron {
@@ -39,6 +57,31 @@ func New(opts ...CronOptions) *Cron {
 	for _, o := range opts {
 		o(c)
 	}
+	if c.traceProvider == nil {
+		c.traceProvider = otel.GetTracerProvider()
+	}
+	c.tracer = c.traceProvider.Tracer(ScopeName)
+
+	if c.meterProvider == nil {
+		c.meterProvider = otel.GetMeterProvider()
+	}
+	c.meter = c.meterProvider.Meter(ScopeName)
+
+	var err error
+	c.metricsJobSpentDuration, err = c.meter.Float64Histogram(
+		"beauty.cron.job.spent.duration",
+		metric.WithExplicitBucketBoundaries(
+			0, 0.01, 0.1, 0.5, 1, 5, 10, 30, 60, 180, 300, 600, 1800),
+		metric.WithDescription("The cron job spent time duration (s)"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		otel.Handle(err)
+		if c.metricsJobSpentDuration == nil {
+			c.metricsJobSpentDuration = noop.Float64Histogram{}
+		}
+	}
+
 	return c
 }
 

@@ -56,7 +56,7 @@ func (bf *BloomFilter) getHashes(data string) []uint {
 }
 
 // 添加元素到布隆过滤器
-func (bf *BloomFilter) Add(data string) error {
+func (bf *BloomFilter) Add(ctx context.Context, data string) error {
 	hashes := bf.getHashes(data)
 	// 使用 Redis 的 SETBIT 操作将哈希索引位置的位设置为 1
 	for _, hash := range hashes {
@@ -69,9 +69,8 @@ func (bf *BloomFilter) Add(data string) error {
 }
 
 // 检查元素是否在布隆过滤器中
-func (bf *BloomFilter) Test(data string) (bool, error) {
+func (bf *BloomFilter) Test(ctx context.Context, data string) (bool, error) {
 	hashes := bf.getHashes(data)
-
 	// 使用 Redis 的 GETBIT 检查所有哈希索引位置的位是否都为 1
 	for _, hash := range hashes {
 		bit, err := bf.store.GetBit(ctx, bf.bitmapKey, int64(hash))

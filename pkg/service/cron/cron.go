@@ -31,7 +31,7 @@ func newCronHandler(cron *Cron, spec string, handler func(ctx context.Context) e
 		Spec: spec,
 	}
 	if c.Name == "" {
-		c.Name = getCallerShortInfo(3) // 因为没有其他更合适的名字，所以先取调用者的文件名和行号
+		c.Name = getFunctionName(handler)
 	}
 	c.Handler = wrapCronHandler(cron, c.Name, c.Spec, handler)
 	return c

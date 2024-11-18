@@ -2,7 +2,7 @@ package cron
 
 import (
 	"context"
-	"fmt"
+	"reflect"
 	"runtime"
 	"strings"
 
@@ -17,24 +17,23 @@ const (
 	ScopeName = "github.com/rushteam/beauty/pkg/service/cron/trace.go"
 )
 
-// getCallerShortInfo 获取调用者的文件名和行号
-func getCallerShortInfo(skip int) string {
-	_, file, line, ok := runtime.Caller(skip)
-	if !ok {
-		return "unknown"
+// getFunctionName 获取最后两级包路径的函数/方法名
+func getFunctionName(i interface{}) string {
+	fullName := runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
+
+	// 获取最后一级包名
+	parts := strings.Split(fullName, "/")
+	relevantPart := parts[len(parts)-1]
+
+	// 如果包含多个点号，说明是结构体方法
+	if strings.Count(relevantPart, ".") > 1 {
+		// 移除 -fm 后缀（如果存在）
+		if strings.HasSuffix(relevantPart, "-fm") {
+			relevantPart = relevantPart[:len(relevantPart)-3]
+		}
 	}
 
-	// 分割路径
-	parts := strings.Split(file, "/")
-
-	// 如果路径段数小于2，直接返回完整文件名
-	if len(parts) <= 2 {
-		return fmt.Sprintf("%s:%d", file, line)
-	}
-
-	// 获取最后两级
-	shortFile := strings.Join(parts[len(parts)-2:], "/")
-	return fmt.Sprintf("%s:%d", shortFile, line)
+	return relevantPart
 }
 
 func wrapCronHandler(cron *Cron, name string, spec string, handler func(ctx context.Context) error) func(ctx context.Context) error {

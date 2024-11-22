@@ -7,26 +7,24 @@ import (
 )
 
 type Store interface {
-	SetBit(ctx context.Context, key string, offset int64, value int) (int64, error)
-	GetBit(ctx context.Context, key string, offset int64) (int64, error)
+	SetBit(ctx context.Context, offset int64, value int) (int64, error)
+	BitField(ctx context.Context, offsets []uint) ([]int64, error)
 }
 
 // 布隆过滤器结构体
 type BloomFilter struct {
 	store     Store
-	bitmapKey string
 	size      uint
 	hashCount uint
 }
 
 // 初始化布隆过滤器
-func New(store Store, bitmapKey string, expectedElements uint, falsePositiveRate float64) *BloomFilter {
+func New(store Store, expectedElements uint, falsePositiveRate float64) *BloomFilter {
 	size := optimalSize(expectedElements, falsePositiveRate)
 	hashCount := optimalHashCount(expectedElements, size)
 
 	return &BloomFilter{
 		store:     store,
-		bitmapKey: bitmapKey,
 		size:      size,
 		hashCount: hashCount,
 	}
@@ -60,7 +58,7 @@ func (bf *BloomFilter) Add(ctx context.Context, data string) error {
 	hashes := bf.getHashes(data)
 	// 使用 Redis 的 SETBIT 操作将哈希索引位置的位设置为 1
 	for _, hash := range hashes {
-		_, err := bf.store.SetBit(ctx, bf.bitmapKey, int64(hash), 1)
+		_, err := bf.store.SetBit(ctx, int64(hash), 1)
 		if err != nil {
 			return err
 		}
@@ -71,12 +69,13 @@ func (bf *BloomFilter) Add(ctx context.Context, data string) error {
 // 检查元素是否在布隆过滤器中
 func (bf *BloomFilter) Test(ctx context.Context, data string) (bool, error) {
 	hashes := bf.getHashes(data)
-	// 使用 Redis 的 GETBIT 检查所有哈希索引位置的位是否都为 1
-	for _, hash := range hashes {
-		bit, err := bf.store.GetBit(ctx, bf.bitmapKey, int64(hash))
-		if err != nil {
-			return false, err
-		}
+	//使用 Redis 的  BitField 所有哈希索引位置的位是否都为 1
+	results, err := bf.store.BitField(ctx, hashes)
+	if err != nil {
+		return false, err
+	}
+	// 如果k个位置有一个为0，则一定不在集合中,如果k个位置全部为1，则可能在集合中
+	for _, bit := range results {
 		if bit == 0 {
 			return false, nil
 		}

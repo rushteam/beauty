@@ -119,7 +119,8 @@ func (app *App) runHooks(stage HookEvent) {
 // New ..
 func New(opts ...Option) *App {
 	s := &App{
-		hooks: make(map[HookEvent][]HookFunc),
+		hooks:      make(map[HookEvent][]HookFunc),
+		depManager: dependency.NewManager(),
 	}
 	for _, opt := range opts {
 		opt(s)

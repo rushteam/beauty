@@ -3,14 +3,19 @@ package beauty
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/core"
+	"github.com/rushteam/beauty/pkg/core/dependency"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/signals"
 	"github.com/rushteam/beauty/pkg/tracing"
+	"google.golang.org/grpc"
 )
 
 type HookEvent int
@@ -88,9 +93,14 @@ type ServiceKind interface {
 
 // App ..
 type App struct {
-	hooks    map[HookEvent][]HookFunc
-	services []Service
-	registry []discover.Registry
+	hooks      map[HookEvent][]HookFunc
+	services   []Service
+	registry   []discover.Registry
+	depManager *dependency.DependencyManager
+}
+
+func (app *App) RegisterDependency(name string, deps []string, readyFunc func() bool) {
+	app.depManager.Register(name, deps, readyFunc)
 }
 
 // Hook add a hook func to stage
@@ -123,6 +133,10 @@ func (s *App) Start(ctx context.Context) error {
 	signals.NotifyShutdownContext(ctx, func() {
 		cancel()
 	})
+	// 等待依赖就绪
+	if err := s.depManager.WaitForDependencies(ctx); err != nil {
+		return fmt.Errorf("dependency check failed: %w", err)
+	}
 	s.runHooks(EventBeforeRun)
 	wg := sync.WaitGroup{}
 	for _, srv := range s.services {
@@ -179,4 +193,19 @@ func Go(f func()) {
 		}()
 		f()
 	}()
+}
+
+// GRPC adds a gRPC server to the app
+func (app *App) GRPC(addr string, handler func(*grpc.Server), opts ...grpcserver.Options) *App {
+	srv := grpcserver.New(addr, handler, opts...)
+	app.services = append(app.services, srv)
+	return app
+}
+
+// HTTP adds an HTTP server to the app
+func (app *App) HTTP(addr string, mux http.Handler, opts ...webserver.Options) *App {
+	//handler func(*http.Server)
+	srv := webserver.New(addr, mux, opts...)
+	app.services = append(app.services, srv)
+	return app
 }

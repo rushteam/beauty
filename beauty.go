@@ -11,7 +11,14 @@ import (
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/signals"
 	"github.com/rushteam/beauty/pkg/tracing"
+	"github.com/rushteam/beauty/pkg/xgo"
 )
+
+var gpool xgo.Pool
+
+func init() {
+	gpool = xgo.New()
+}
 
 type HookEvent int
 
@@ -171,12 +178,5 @@ func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service)
 }
 
 func Go(f func()) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error(fmt.Sprintf("panic recovered: %v", r))
-			}
-		}()
-		f()
-	}()
+	gpool.Go(f)
 }

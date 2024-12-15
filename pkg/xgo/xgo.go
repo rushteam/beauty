@@ -15,8 +15,7 @@ type Pool interface {
 	Workers() int32
 }
 
-type pool struct {
-	name           string
+type wokerpool struct {
 	cap            int32
 	scaleThreshold int
 	workerNum      int32
@@ -28,26 +27,26 @@ type pool struct {
 }
 
 func WithSetCap(cap int32) Option {
-	return func(p *pool) {
+	return func(p *wokerpool) {
 		p.cap = cap
 	}
 }
 func WithPanicHandler(f func(any)) Option {
-	return func(p *pool) {
+	return func(p *wokerpool) {
 		p.panicHandler = f
 	}
 }
 
-type Option func(p *pool)
+type Option func(p *wokerpool)
 
 func New(opts ...Option) Pool {
-	p := &pool{
+	p := &wokerpool{
 		cap:            math.MaxInt32,
 		scaleThreshold: 1,
 		tasks:          new(list.List),
 	}
 	p.panicHandler = func(r any) {
-		logger.Error("XGO: panic in pool: %s: %v: %s", p.name, r, debug.Stack())
+		logger.Error("panic in woker pool: %s: %v: %s", r, debug.Stack())
 	}
 	for _, o := range opts {
 		o(p)
@@ -55,24 +54,24 @@ func New(opts ...Option) Pool {
 	return p
 }
 
-func (p *pool) Go(f func()) {
+func (p *wokerpool) Go(f func()) {
 	p.addTask(f)
 	if (p.taskNum() >= p.scaleThreshold && p.Workers() < atomic.LoadInt32(&p.cap)) || p.Workers() == 0 {
 		p.run()
 	}
 }
 
-func (p *pool) addTask(f func()) {
+func (p *wokerpool) addTask(f func()) {
 	p.taskLock.Lock()
 	defer p.taskLock.Unlock()
 	p.tasks.PushBack(f)
 }
 
-func (p *pool) taskNum() int {
+func (p *wokerpool) taskNum() int {
 	return p.tasks.Len()
 }
 
-func (p *pool) popTask() func() {
+func (p *wokerpool) popTask() func() {
 	p.taskLock.Lock()
 	defer p.taskLock.Unlock()
 	el := p.tasks.Front()
@@ -83,7 +82,7 @@ func (p *pool) popTask() func() {
 	return el.Value.(func())
 }
 
-func (p *pool) run() {
+func (p *wokerpool) run() {
 	atomic.AddInt32(&p.workerNum, 1)
 	go func() {
 		for {
@@ -105,6 +104,6 @@ func (p *pool) run() {
 	}()
 }
 
-func (p *pool) Workers() int32 {
+func (p *wokerpool) Workers() int32 {
 	return atomic.LoadInt32(&p.workerNum)
 }

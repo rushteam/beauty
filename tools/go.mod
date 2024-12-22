@@ -7,6 +7,8 @@ require (
 	github.com/urfave/cli/v2 v2.25.7
 )
 
+require github.com/urfave/cli/v3 v3.0.0-beta1 // indirect
+
 require (
 	// github.com/antlr4-go/antlr v0.0.0-20230518091524-98b52378c522 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.3 // indirect

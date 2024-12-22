@@ -1,6 +1,7 @@
 package new
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,11 +15,26 @@ import (
 	"github.com/rushteam/beauty/tools/internal/pkg"
 	"github.com/rushteam/beauty/tools/internal/project"
 	"github.com/rushteam/beauty/tools/tpls"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
-// Action ..
-func Action(c *cli.Context) error {
+func Command() *cli.Command {
+	return &cli.Command{
+		Name:   "new",
+		Usage:  "new a project with template",
+		Action: action,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "d",
+				Value:       "",
+				Usage:       "specify the directory of the project",
+				Destination: &project.Config.Path,
+			},
+		},
+	}
+}
+
+func action(ctx context.Context, c *cli.Command) error {
 	args := c.Args()
 	if args.Len() == 0 {
 		return cli.Exit(fmt.Errorf("missing project name"), 1)
@@ -26,8 +42,9 @@ func Action(c *cli.Context) error {
 	if n := args.Get(0); len(n) > 0 {
 		project.Config.Name = n
 	}
+	// fmt.Println("--", c.String("d"), "--", project.Config.Path)
 	//get abs path
-	if project.Config.Path == "" {
+	if len(project.Config.Path) == 0 {
 		pwd, err := os.Getwd()
 		if err != nil {
 			return err
@@ -51,9 +68,12 @@ func Action(c *cli.Context) error {
 			project.Config.ModPath = hi.ImportPath + "/"
 		}
 	}
-	log.Println("make project dir:", project.Config.Path)
+	log.Println("create project:", project.Config.Name)
+	log.Println("path:", project.Config.Path)
+	log.Println("package:", project.Config.ModPath)
+
 	tpl := tpls.Root()
-	fs.WalkDir(tpl, ".", func(path string, info os.DirEntry, err error) error {
+	err := fs.WalkDir(tpl, ".", func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -73,6 +93,7 @@ func Action(c *cli.Context) error {
 		filename := strings.TrimSuffix(path, ".tpl")
 		outputPath := filepath.Join(project.Config.Path, filename)
 		log.Println("create file:", outputPath)
+		//
 		tmpl, err := template.New(info.Name()).Parse(string(data))
 		if err != nil {
 			return err
@@ -85,5 +106,8 @@ func Action(c *cli.Context) error {
 		// log.Println("Project.ModPath", Project)
 		return tmpl.Execute(dst, project.Config)
 	})
+	if err != nil {
+		return err
+	}
 	return nil
 }

@@ -93,7 +93,7 @@ func action(ctx context.Context, c *cli.Command) error {
 		filename := strings.TrimSuffix(path, ".tpl")
 		outputPath := filepath.Join(project.Config.Path, filename)
 		log.Println("create file:", outputPath)
-		//
+
 		tmpl, err := template.New(info.Name()).Parse(string(data))
 		if err != nil {
 			return err

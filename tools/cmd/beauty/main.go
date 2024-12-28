@@ -25,14 +25,4 @@ func main() {
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		log.Fatalln("error:", err)
 	}
-
-	// app := cli.NewApp()
-	// app.Name = "beauty"
-	// app.Usage = "code generator for beauty projects"
-	// app.Version = Version
-	// app.Commands = cmd.Commands
-
-	// if err := app.Run(os.Args); err != nil {
-	// 	log.Fatalln("error:", err)
-	// }
 }

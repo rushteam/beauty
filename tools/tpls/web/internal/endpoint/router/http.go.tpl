@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type Route struct{
@@ -14,8 +15,9 @@ type Route struct{
 	Handler http.HandlerFunc
 }
 
-func NewRoutes() http.Handler{
+func NewRoutes(routes []Route) http.Handler{
 	r := chi.NewRouter()
+	r.Use(middleware.Logger)
 	for _, route := range routes {
 		r.Method(route.Method, route.URI, route.Handler)
 	}

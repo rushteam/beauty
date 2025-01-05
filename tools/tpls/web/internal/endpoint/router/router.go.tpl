@@ -6,12 +6,14 @@ import (
 	"net/http"
 )
 
-var routes = []Route{
-	{
-		Method: "GET",
-		URI: "/",
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Hi"))
+func routes() []Route{
+	return []Route{
+		{
+			Method: "GET",
+			URI: "/",
+			Handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("Hi"))
+			},
 		},
-	},
+	}
 }

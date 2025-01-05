@@ -1,10 +1,8 @@
 package pkg
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -41,25 +39,16 @@ func MkdirAll(dirs ...string) error {
 // 	return string(content), nil
 // }
 
-// GetModPath ..
-func GetModPath() string {
-	b, err := run("go", "env", "GOMOD")
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 // get a run result
-func run(n string, args ...string) ([]byte, error) {
-	c := exec.Command(n, args...)
-	bb := &bytes.Buffer{}
-	ebb := &bytes.Buffer{}
-	c.Stdout = bb
-	c.Stderr = ebb
-	err := c.Run()
-	if err != nil {
-		return nil, fmt.Errorf("%v %w: %s", c.Args, err, ebb)
-	}
-	return bb.Bytes(), nil
-}
+// func run(n string, args ...string) ([]byte, error) {
+// 	c := exec.Command(n, args...)
+// 	bb := &bytes.Buffer{}
+// 	ebb := &bytes.Buffer{}
+// 	c.Stdout = bb
+// 	c.Stderr = ebb
+// 	err := c.Run()
+// 	if err != nil {
+// 		return nil, fmt.Errorf("%v %w: %s", c.Args, err, ebb)
+// 	}
+// 	return bb.Bytes(), nil
+// }

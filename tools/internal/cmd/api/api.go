@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rushteam/beauty/tools/internal/project"
+	"github.com/rushteam/beauty/tools/internal/entity"
 	"github.com/urfave/cli/v2"
 )
 
@@ -16,23 +16,23 @@ func Action(c *cli.Context) error {
 		return cli.Exit(fmt.Errorf("missing project name"), 1)
 	}
 	if n := args.Get(0); len(n) > 0 {
-		project.Config.Name = n
+		entity.Config.Name = n
 	}
 	//get abs path
-	if project.Config.Path == "" {
+	if entity.Config.Path == "" {
 		pwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		project.Config.Path = filepath.Join(pwd, project.Config.Name)
+		entity.Config.Path = filepath.Join(pwd, entity.Config.Name)
 	} else {
-		path, err := filepath.Abs(project.Config.Path)
+		path, err := filepath.Abs(entity.Config.Path)
 		if err != nil {
 			return err
 		}
-		project.Config.Path = path
+		entity.Config.Path = path
 	}
-	spec, err := os.ReadFile(filepath.Join(project.Config.Path, "api.spec"))
+	spec, err := os.ReadFile(filepath.Join(entity.Config.Path, "api.spec"))
 	if err != nil {
 		return cli.Exit(fmt.Errorf("%w", err), 1)
 	}

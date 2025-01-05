@@ -1,5 +1,5 @@
 # new project
 
-{{.ModPath}}
+{{.Module}}
 
 This is a project gen by tool.

@@ -4,16 +4,14 @@ package router
 
 import (
 	"net/http"
-
-	"github.com/rushteam/beauty"
 )
 
-
-var Routes = []beauty.Route{
+var routes = []Route{
 	{
+		Method: "GET",
 		URI: "/",
 		Handler: func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Welcome"))
+			w.Write([]byte("Hi"))
 		},
 	},
 }

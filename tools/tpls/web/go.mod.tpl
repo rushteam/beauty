@@ -1,1 +1,1 @@
-module {{.ModPath}}
+module {{.Module}}

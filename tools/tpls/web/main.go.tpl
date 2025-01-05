@@ -5,7 +5,7 @@ import (
 	"flag"
 	"log"
 
-	"{{.ModPath}}internal/router"
+	"{{.ImportPath}}internal/router"
 
 	"github.com/rushteam/beauty"
 )
@@ -18,11 +18,12 @@ func main() {
 	app := beauty.New(
 		beauty.WithWebServer(
 			port,
-			router.Routes,
-			router.Middlewares,
+			router.NewRoutes(),
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {
 		log.Fatalln(err)
 	}
 }
+
+// router.Middlewares,

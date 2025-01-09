@@ -18,12 +18,10 @@ func main() {
 	app := beauty.New(
 		beauty.WithWebServer(
 			port,
-			router.NewRoutes(),
+			router.NewRouter(),
 		),
 	)
 	if err := app.Start(context.Background()); err != nil {
 		log.Fatalln(err)
 	}
 }
-
-// router.Middlewares,

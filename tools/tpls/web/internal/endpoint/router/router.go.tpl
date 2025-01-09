@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func routes() []Route{
+func routes() []Route {
 	return []Route{
 		{
 			Method: "GET",

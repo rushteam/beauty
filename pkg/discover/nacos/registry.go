@@ -62,9 +62,10 @@ func NewRegistry(c *Config) *Registry {
 }
 
 type Registry struct {
-	c       *Config
-	mu      *sync.Mutex
-	clients map[string]naming_client.INamingClient
+	c        *Config
+	mu       *sync.Mutex
+	clients  map[string]naming_client.INamingClient
+	services []discover.ServiceInfo
 }
 
 func (r Registry) client(key string) naming_client.INamingClient {
@@ -139,6 +140,9 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 			SubscribeCallback: func(services []model.Instance, err error) {},
 		})
 	}()
+	if len(r.services) > 0 {
+		update(r.services)
+	}
 
 	return r.client("watch").Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
@@ -150,7 +154,9 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 				return
 			}
 			logger.Info("nacos service update", slog.Any("services", services))
-			update(buildService(services))
+			serviceList := buildService(services)
+			update(serviceList)
+			r.services = serviceList
 		},
 	})
 }

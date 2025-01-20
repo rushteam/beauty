@@ -43,15 +43,15 @@ func BuildRegistryWithURL(u url.URL) *Registry {
 	}
 	decoder := schema.NewDecoder()
 	decoder.Decode(c, u.Query())
-	return NewRegistry(c)
-	// key := c.String()
-	// mu.Lock()
-	// defer mu.Unlock()
-	// if client, ok := instance[key]; ok {
-	// 	return client
-	// }
-	// instance[key] = NewRegistry(c)
-	// return instance[key]
+
+	key := c.String()
+	mu.Lock()
+	defer mu.Unlock()
+	if client, ok := instance[key]; ok {
+		return client
+	}
+	instance[key] = NewRegistry(c)
+	return instance[key]
 }
 
 func NewRegistry(c *Config) *Registry {
@@ -63,9 +63,10 @@ func NewRegistry(c *Config) *Registry {
 }
 
 type Registry struct {
-	c       *Config
-	mu      *sync.Mutex
-	clients map[string]naming_client.INamingClient
+	c        *Config
+	mu       *sync.Mutex
+	clients  map[string]naming_client.INamingClient
+	services []discover.ServiceInfo
 }
 
 func (r Registry) client(key string) naming_client.INamingClient {
@@ -151,7 +152,9 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 				return
 			}
 			logger.Info("nacos service update", slog.Any("services", services))
-			update(buildService(services))
+			serviceList := buildService(services)
+			r.services = serviceList
+			update(serviceList)
 		},
 	})
 }

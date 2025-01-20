@@ -25,8 +25,8 @@ var (
 	_ discover.Discovery = (*Registry)(nil)
 )
 
-var instance = make(map[string]*Registry)
-var mu sync.Mutex
+// var instance = make(map[string]*Registry)
+// var mu sync.Mutex
 
 func BuildRegistryWithURL(u url.URL) *Registry {
 	c := &Config{
@@ -44,14 +44,15 @@ func BuildRegistryWithURL(u url.URL) *Registry {
 	decoder := schema.NewDecoder()
 	decoder.Decode(c, u.Query())
 
-	key := c.String()
-	mu.Lock()
-	defer mu.Unlock()
-	if client, ok := instance[key]; ok {
-		return client
-	}
-	instance[key] = NewRegistry(c)
-	return instance[key]
+	return NewRegistry(c)
+	// key := c.String()
+	// mu.Lock()
+	// defer mu.Unlock()
+	// if client, ok := instance[key]; ok {
+	// 	return client
+	// }
+	// instance[key] = NewRegistry(c)
+	// return instance[key]
 }
 
 func NewRegistry(c *Config) *Registry {

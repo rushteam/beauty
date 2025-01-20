@@ -141,6 +141,10 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 			SubscribeCallback: func(services []model.Instance, err error) {},
 		})
 	}()
+	if len(r.services) > 0 {
+		logger.Info("nacos service update", slog.Any("services", r.services), slog.String("from", "cached"))
+		update(r.services)
+	}
 
 	return r.client("watch").Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,

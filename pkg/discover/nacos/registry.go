@@ -4,12 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"net"
-	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 
-	"github.com/gorilla/schema"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/model"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
@@ -27,33 +24,6 @@ var (
 
 // var instance = make(map[string]*Registry)
 // var mu sync.Mutex
-
-func BuildRegistryWithURL(u url.URL) *Registry {
-	c := &Config{
-		Addr:      strings.Split(u.Host, ","),
-		Cluster:   "", //from url schema
-		Namespace: "", //from url schema
-		Group:     "", //from url schema
-		Weight:    100,
-		AppName:   "beauty",
-	}
-	if u.User != nil {
-		c.Username = u.User.Username()
-		c.Password, _ = u.User.Password()
-	}
-	decoder := schema.NewDecoder()
-	decoder.Decode(c, u.Query())
-
-	return NewRegistry(c)
-	// key := c.String()
-	// mu.Lock()
-	// defer mu.Unlock()
-	// if client, ok := instance[key]; ok {
-	// 	return client
-	// }
-	// instance[key] = NewRegistry(c)
-	// return instance[key]
-}
 
 func NewRegistry(c *Config) *Registry {
 	return &Registry{

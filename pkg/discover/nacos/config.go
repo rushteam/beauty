@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/gorilla/schema"
 )
 
 type Config struct {
@@ -33,4 +35,23 @@ func (c *Config) String() string {
 		RawQuery: fmt.Sprintf("app_name=%s&weight=%v", c.AppName, c.Weight),
 	}
 	return u.String()
+}
+func (c *Config) ParseURL(u url.URL) error {
+	c.Addr = strings.Split(u.Host, ",")
+	c.Weight = 100
+	c.AppName = "beauty"
+	if u.User != nil {
+		c.Username = u.User.Username()
+		c.Password, _ = u.User.Password()
+	}
+	decoder := schema.NewDecoder()
+	return decoder.Decode(c, u.Query())
+}
+
+func NewRegistryWithURL(u url.URL) (*Registry, error) {
+	cfg := &Config{}
+	if err := cfg.ParseURL(u); err != nil {
+		return nil, err
+	}
+	return NewRegistry(cfg), nil
 }

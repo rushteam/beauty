@@ -1,8 +1,7 @@
 package nacos
 
 import (
-
-	// "github.com/ymcvalu/grpc-discovery/pkg/instance"
+	"fmt"
 
 	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"google.golang.org/grpc/resolver"
@@ -19,7 +18,11 @@ func (b *builder) Scheme() string {
 }
 
 func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	r := grpcclient.NewResolver(cc, target.Endpoint(), BuildRegistryWithURL(target.URL))
+	register, err := NewRegistryWithURL(target.URL)
+	if err != nil {
+		return nil, fmt.Errorf("nacos.resolver.Register: new config failed: %w", err)
+	}
+	r := grpcclient.NewResolver(cc, target.Endpoint(), register)
 	go r.Start()
 	return r, nil
 }

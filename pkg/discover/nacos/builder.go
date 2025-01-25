@@ -18,11 +18,11 @@ func (b *builder) Scheme() string {
 }
 
 func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
-	register, err := NewRegistryWithURL(target.URL)
+	reg, err := NewFromURL(target.URL)
 	if err != nil {
 		return nil, fmt.Errorf("nacos.resolver.Register: new config failed: %w", err)
 	}
-	r := grpcclient.NewResolver(cc, target.Endpoint(), register)
+	r := grpcclient.NewResolver(cc, target.Endpoint(), reg)
 	go r.Start()
 	return r, nil
 }

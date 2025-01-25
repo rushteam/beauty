@@ -48,7 +48,7 @@ func (c *Config) ParseURL(u url.URL) error {
 	return decoder.Decode(c, u.Query())
 }
 
-func NewRegistryWithURL(u url.URL) (*Registry, error) {
+func NewFromURL(u url.URL) (*Registry, error) {
 	cfg := &Config{}
 	if err := cfg.ParseURL(u); err != nil {
 		return nil, err

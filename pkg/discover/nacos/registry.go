@@ -147,11 +147,10 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 			logger.Warn("service metadata.kind != grpc", slog.Any("v", v))
 			continue
 		}
-		port := strconv.FormatUint(v.Port, 10)
 		ss = append(ss, discover.ServiceInfo{
 			ID:       v.InstanceId,
 			Name:     v.ServiceName,
-			Addr:     net.JoinHostPort(v.Ip, port),
+			Addr:     net.JoinHostPort(v.Ip, strconv.FormatUint(v.Port, 10)),
 			Metadata: v.Metadata,
 		})
 	}

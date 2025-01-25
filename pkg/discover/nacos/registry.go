@@ -60,6 +60,7 @@ func (r Registry) client(key string) naming_client.INamingClient {
 	r.mu.Unlock()
 	return client
 }
+
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	addr, port := addr.ParseHostAndPort(info.Addr())
 	portUint, _ := strconv.ParseUint(port, 10, 64)

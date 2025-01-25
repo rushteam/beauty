@@ -36,7 +36,9 @@ func (c *Config) String() string {
 	}
 	return u.String()
 }
-func (c *Config) ParseURL(u url.URL) error {
+
+func NewFromURL(u url.URL) (*Registry, error) {
+	c := &Config{}
 	c.Addr = strings.Split(u.Host, ",")
 	c.Weight = 100
 	c.AppName = "beauty"
@@ -45,13 +47,8 @@ func (c *Config) ParseURL(u url.URL) error {
 		c.Password, _ = u.User.Password()
 	}
 	decoder := schema.NewDecoder()
-	return decoder.Decode(c, u.Query())
-}
-
-func NewFromURL(u url.URL) (*Registry, error) {
-	cfg := &Config{}
-	if err := cfg.ParseURL(u); err != nil {
+	if err := decoder.Decode(c, u.Query()); err != nil {
 		return nil, err
 	}
-	return NewRegistry(cfg), nil
+	return NewRegistry(c), nil
 }

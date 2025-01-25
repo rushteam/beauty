@@ -65,7 +65,8 @@ func (r Registry) client(key string) naming_client.INamingClient {
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	addr, port := addr.ParseHostAndPort(info.Addr())
 	portUint, _ := strconv.ParseUint(port, 10, 64)
-	_, err := r.client(info.ID()).RegisterInstance(vo.RegisterInstanceParam{
+	registerClient := r.client(info.ID())
+	_, err := registerClient.RegisterInstance(vo.RegisterInstanceParam{
 		Ip:          addr,
 		Port:        portUint,
 		Weight:      r.c.Weight,
@@ -94,7 +95,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		slog.Any("svc.meta", info.Metadata()),
 	)
 	return func() {
-		_, err := r.client(info.ID()).DeregisterInstance(vo.DeregisterInstanceParam{
+		_, err := registerClient.DeregisterInstance(vo.DeregisterInstanceParam{
 			Ip:          addr,
 			Port:        portUint,
 			ServiceName: info.Name(),

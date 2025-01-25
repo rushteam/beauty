@@ -2,6 +2,7 @@ package nacos
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"strconv"
@@ -172,7 +173,7 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 		ss = append(ss, discover.ServiceInfo{
 			ID:       v.InstanceId,
 			Name:     v.ServiceName,
-			Addr:     net.JoinHostPort(v.Ip, strconv.FormatUint(v.Port, 10)),
+			Addr:     net.JoinHostPort(v.Ip, fmt.Sprintf("%d", v.Port)),
 			Metadata: v.Metadata,
 		})
 	}

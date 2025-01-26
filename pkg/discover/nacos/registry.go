@@ -40,9 +40,9 @@ type Registry struct {
 	clients map[string]naming_client.INamingClient
 }
 
-func (r Registry) client(key string) naming_client.INamingClient {
+func (r Registry) client(key string) (naming_client.INamingClient, error) {
 	if c, ok := r.clients[key]; ok {
-		return c
+		return c, nil
 	}
 	client, err := nacos.NewNamingClient(&nacos.Config{
 		Addr:      r.c.Addr,
@@ -53,20 +53,22 @@ func (r Registry) client(key string) naming_client.INamingClient {
 		AppName:   r.c.AppName,
 	})
 	if err != nil {
-		logger.Error("nacos naming client error", slog.Any("err", err))
-		return nil
+		return nil, fmt.Errorf("nacos naming client error: %w", err)
 	}
 	r.mu.Lock()
 	r.clients[key] = client
 	r.mu.Unlock()
-	return client
+	return client, nil
 }
 
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	addr, port := addr.ParseHostAndPort(info.Addr())
 	portUint, _ := strconv.ParseUint(port, 10, 64)
-	registerClient := r.client(info.ID())
-	_, err := registerClient.RegisterInstance(vo.RegisterInstanceParam{
+	registerClient, err := r.client(info.ID())
+	if err != nil {
+		return func() {}, err
+	}
+	if _, err := registerClient.RegisterInstance(vo.RegisterInstanceParam{
 		Ip:          addr,
 		Port:        portUint,
 		Weight:      r.c.Weight,
@@ -77,8 +79,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		ClusterName: r.c.Cluster,
 		GroupName:   r.c.Group,
 		Ephemeral:   true,
-	})
-	if err != nil {
+	}); err != nil {
 		logger.Error("nacos RegisterInstance failed",
 			slog.Any("err", err),
 			slog.String("svc.id", info.ID()),
@@ -127,17 +128,32 @@ func (r Registry) Find(ctx context.Context, serviceName string) ([]discover.Serv
 }
 
 func (r Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
+	registryClient, err := r.client("watch")
+	if err != nil {
+		return err
+	}
+	func() {
+		services, _ := registryClient.SelectInstances(vo.SelectInstancesParam{
+			ServiceName: serviceName,
+			Clusters:    []string{r.c.Cluster},
+			GroupName:   r.c.Group,
+			HealthyOnly: true,
+		})
+		if len(services) > 0 {
+			update(buildService(services))
+		}
+	}()
+
 	go func() {
 		<-ctx.Done()
-		r.client("watch").Unsubscribe(&vo.SubscribeParam{
+		registryClient.Unsubscribe(&vo.SubscribeParam{
 			ServiceName:       serviceName,
 			Clusters:          []string{r.c.Cluster},
 			GroupName:         r.c.Group,
 			SubscribeCallback: func(services []model.Instance, err error) {},
 		})
 	}()
-
-	return r.client("watch").Subscribe(&vo.SubscribeParam{
+	return registryClient.Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
 		Clusters:    []string{r.c.Cluster},
 		GroupName:   r.c.Group,
@@ -171,6 +187,10 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 			logger.Warn("service metadata.kind != grpc", slog.Any("v", v))
 			continue
 		}
+		if v.Metadata == nil {
+			v.Metadata = make(map[string]string)
+		}
+
 		ss = append(ss, discover.ServiceInfo{
 			ID:       v.InstanceId,
 			Name:     v.ServiceName,

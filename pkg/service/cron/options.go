@@ -37,3 +37,8 @@ func WithMeterProvider(m metric.MeterProvider) CronOptions {
 		c.meterProvider = m
 	}
 }
+func WithRecover(recoverHandler func(r any)) CronOptions {
+	return func(c *Cron) {
+		c.recoverHandler = recoverHandler
+	}
+}

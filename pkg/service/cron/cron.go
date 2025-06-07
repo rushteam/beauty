@@ -47,6 +47,8 @@ type Cron struct {
 
 	metricsJobSpentDuration metric.Float64Histogram
 	handlers                []cronHandler
+
+	recoverHandler func(r any)
 }
 
 func New(opts ...CronOptions) *Cron {
@@ -88,11 +90,15 @@ func New(opts ...CronOptions) *Cron {
 func (s *Cron) Start(ctx context.Context) error {
 	for _, v := range s.handlers {
 		func(v cronHandler) {
-			logger.Info("register cron", slog.String("expr", v.Spec))
+			logger.Info("register cron", slog.String("name", v.Name), slog.String("expr", v.Spec))
 			s.Cron.AddFunc(v.Spec, func() {
 				defer func() {
 					if r := recover(); r != nil {
-						logger.Error("panic recovered", slog.Any("panic", r), slog.String("stack", string(debug.Stack())))
+						if s.recoverHandler != nil {
+							s.recoverHandler(r)
+						} else {
+							logger.Error("panic recovered", slog.Any("name", v.Name), slog.Any("panic", r), slog.String("stack", string(debug.Stack())))
+						}
 					}
 				}()
 				if err := v.Handler(ctx); err != nil {

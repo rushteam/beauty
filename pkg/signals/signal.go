@@ -19,9 +19,12 @@ func NotifyShutdownContext(ctx context.Context, f func()) context.Context {
 		case <-ctx.Done():
 		case sig := <-c:
 			logger.Info("stoping with signal", "signal", sig.String())
-			f()
-			cancel()
+			go func() {
+				f()
+				cancel()
+			}()
 			<-c
+			logger.Info("second signal forced stop")
 			os.Exit(1) // second signal. Exit directly.
 		}
 	}()

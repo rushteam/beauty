@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/core"
@@ -95,6 +96,7 @@ type ServiceKind interface {
 
 // App ..
 type App struct {
+	ready    atomic.Int32
 	hooks    map[HookEvent][]HookFunc
 	services []Service
 	registry []discover.Registry
@@ -126,8 +128,12 @@ func New(opts ...Option) *App {
 
 // Start ..
 func (s *App) Start(ctx context.Context) error {
+	if s.ready.Load() == 1 {
+		return nil
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	signals.NotifyShutdownContext(ctx, func() {
+		s.ready.Swap(0)
 		cancel()
 	})
 	s.runHooks(EventBeforeRun)
@@ -135,6 +141,7 @@ func (s *App) Start(ctx context.Context) error {
 	for _, srv := range s.services {
 		s.startService(ctx, &wg, srv)
 	}
+	s.ready.Swap(1)
 	wg.Wait()
 	<-ctx.Done()
 	s.runHooks(EventAfterRun)
@@ -175,6 +182,10 @@ func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service)
 		}
 		cancel()
 	}(srv)
+}
+
+func (s *App) Ready() bool {
+	return s.ready.Load() == 1
 }
 
 func Go(f func()) {

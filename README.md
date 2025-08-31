@@ -196,6 +196,22 @@ func main() {
 }
 ```
 
+### Using DSN
+
+```go
+// etcd DSN
+a, _ := grpcclient.New(
+    context.Background(),
+    grpcclient.WithAddr("etcd://user:pass@127.0.0.1:2379/beauty?ttl=10&dial_ms=3000#helloworld.rpc"),
+)
+
+// nacos DSN (supports cluster/group/namespace/app_name/weight)
+a, _ := grpcclient.New(
+    context.Background(),
+    grpcclient.WithAddr("nacos://127.0.0.1:8848/helloworld.rpc?app_name=test&cluster=DEFAULT&group=DEFAULT_GROUP"),
+)
+```
+
 ## Tracing and Metrics
 
 Beauty provides built-in support for OpenTelemetry tracing and metrics:

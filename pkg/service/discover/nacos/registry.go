@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -198,5 +199,12 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 			Metadata: v.Metadata,
 		})
 	}
+	// 稳定排序（与 etcd 保持一致）
+	sort.Slice(ss, func(i, j int) bool {
+		if ss[i].Name == ss[j].Name {
+			return ss[i].ID < ss[j].ID
+		}
+		return ss[i].Name < ss[j].Name
+	})
 	return ss
 }

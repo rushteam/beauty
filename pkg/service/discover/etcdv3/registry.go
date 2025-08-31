@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,14 +27,21 @@ var (
 
 func NewRegistry(c *Config) *Registry {
 	key := c.String()
+	mu.Lock()
 	if v, ok := instance[key]; ok {
+		mu.Unlock()
 		return v
+	}
+	mu.Unlock()
+	dial := time.Second * 3
+	if c.DialMS > 0 {
+		dial = time.Duration(c.DialMS) * time.Millisecond
 	}
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   c.Endpoints,
 		Username:    c.Username,
 		Password:    c.Password,
-		DialTimeout: time.Second * 3,
+		DialTimeout: dial,
 	})
 	if err != nil {
 		logger.Error("etcdRegistry client error", slog.Any("err", err))
@@ -45,8 +53,13 @@ func NewRegistry(c *Config) *Registry {
 		config: c,
 	}
 	mu.Lock()
-	defer mu.Unlock()
+	if v, ok := instance[key]; ok {
+		mu.Unlock()
+		_ = client.Close()
+		return v
+	}
 	instance[key] = r
+	mu.Unlock()
 	return r
 }
 
@@ -60,13 +73,22 @@ type Registry struct {
 
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	value := discover.ServiceInfo{
+		ID:       info.ID(),
+		Kind:     info.Kind(),
 		Name:     info.Name(),
 		Addr:     info.Addr(),
 		Metadata: info.Metadata(),
 	}
 	key := buildServiceKey(r.prefix, info.Name(), info.ID())
-	ctx, stop := context.WithCancel(ctx)
-	go r.keepAlive(ctx, key, value.Marshal())
+
+	// 同步首次注册（带重试）
+	leaseID, err := r.registerWithRetry(ctx, key, value.Marshal())
+	if err != nil {
+		return func() {}, err
+	}
+
+	regCtx, stop := context.WithCancel(ctx)
+	go r.keepAliveLoop(regCtx, key, value.Marshal(), leaseID)
 	return func() {
 		stop()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
@@ -77,53 +99,91 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 	}, nil
 }
 
-func (r Registry) keepAlive(ctx context.Context, key, val string) {
+func (r Registry) registerWithRetry(ctx context.Context, key, val string) (clientv3.LeaseID, error) {
+	ttl := grantTTL
+	if r.config != nil && r.config.TTL > 0 {
+		ttl = r.config.TTL
+	}
+	backoff := time.Millisecond * 200
 	var leaseid clientv3.LeaseID
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*3)
-	if lease, err := r.client.Grant(timeoutCtx, grantTTL); err == nil {
-		leaseid = lease.ID
-	}
-	if _, err := r.client.Put(timeoutCtx, key, val, clientv3.WithLease(leaseid)); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			logger.Error("etcdRegistry.Register Put error", slog.Any("err", err))
-		}
-	}
-	cancel()
-	t := time.NewTicker(time.Second * time.Duration(grantTTL-2))
-	defer t.Stop()
 	for {
-		select {
-		case <-ctx.Done():
-			func() {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-				defer cancel()
-				if _, err := r.client.Revoke(ctx, leaseid); err != nil {
-					logger.Error("etcdRegistry.Register Revoke error", slog.Any("err", err))
-				}
-			}()
-			return
-		case <-t.C:
-			func() {
-				keepCtx, cancel := context.WithTimeout(ctx, time.Second*3)
-				defer cancel()
-				if _, err := r.client.KeepAliveOnce(keepCtx, leaseid); err != nil {
-					grantCtx, cancel := context.WithTimeout(ctx, time.Second*3)
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		// 申请租约
+		timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*3)
+		lease, err := r.client.Grant(timeoutCtx, ttl)
+		cancel()
+		if err != nil {
+			logger.Error("etcdRegistry.Register Grant error", slog.Any("err", err))
+			time.Sleep(backoff)
+			if backoff < time.Second*3 {
+				backoff *= 2
+			}
+			continue
+		}
+		leaseid = lease.ID
+		// 写入带租约的键
+		putCtx, cancel := context.WithTimeout(ctx, time.Second*3)
+		_, err = r.client.Put(putCtx, key, val, clientv3.WithLease(leaseid))
+		cancel()
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error("etcdRegistry.Register Put error", slog.Any("err", err))
+			}
+			time.Sleep(backoff)
+			if backoff < time.Second*3 {
+				backoff *= 2
+			}
+			continue
+		}
+		return leaseid, nil
+	}
+}
+
+func (r Registry) keepAliveLoop(ctx context.Context, key, val string, leaseid clientv3.LeaseID) {
+outer:
+	for {
+		kaCtx, kaCancel := context.WithCancel(ctx)
+		ch, err := r.client.KeepAlive(kaCtx, leaseid)
+		if err != nil {
+			kaCancel()
+			logger.Error("etcdRegistry.KeepAlive start error", slog.Any("err", err))
+			// 尝试重新注册
+			newLease, regErr := r.registerWithRetry(ctx, key, val)
+			if regErr != nil {
+				logger.Error("etcdRegistry.re-register failed", slog.Any("err", regErr))
+				return
+			}
+			leaseid = newLease
+			continue outer
+		}
+	inner:
+		for {
+			select {
+			case <-ctx.Done():
+				kaCancel()
+				func() {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 					defer cancel()
-					lease, err := r.client.Grant(grantCtx, grantTTL)
-					if err != nil {
-						logger.Error("etcdRegistry.Register Grant error", slog.Any("err", err))
+					if _, err := r.client.Revoke(ctx, leaseid); err != nil {
+						logger.Error("etcdRegistry.Register Revoke error", slog.Any("err", err))
+					}
+				}()
+				return
+			case _, ok := <-ch:
+				if !ok {
+					kaCancel()
+					// 断开，重新注册并重启 KeepAlive
+					newLease, regErr := r.registerWithRetry(ctx, key, val)
+					if regErr != nil {
+						logger.Error("etcdRegistry.re-register failed", slog.Any("err", regErr))
 						return
 					}
-					leaseid = lease.ID
-					putCtx, cancel := context.WithTimeout(ctx, time.Second*3)
-					defer cancel()
-					if _, err = r.client.Put(putCtx, key, val, clientv3.WithLease(leaseid)); err != nil {
-						if !errors.Is(err, context.Canceled) {
-							logger.Error("etcdRegistry.Register Put error", slog.Any("err", err))
-						}
-					}
+					leaseid = newLease
+					break inner
 				}
-			}()
+			}
 		}
 	}
 }
@@ -137,7 +197,49 @@ func buildServicePath(prefix, name string) string {
 }
 
 func getInstanceFromKey(key, prefix string) string {
-	return strings.TrimPrefix(strings.ReplaceAll(string(key), prefix, ""), "/")
+	return strings.TrimPrefix(strings.TrimPrefix(key, prefix), "/")
+}
+
+func isGrpcService(v discover.ServiceInfo) bool {
+	if v.Kind == "grpc" {
+		return true
+	}
+	if v.Metadata != nil && v.Metadata["kind"] == "grpc" {
+		return true
+	}
+	return false
+}
+
+func buildSortedServices(endpoints map[string]discover.ServiceInfo) []discover.ServiceInfo {
+	var services []discover.ServiceInfo
+	for _, v := range endpoints {
+		services = append(services, v)
+	}
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].Name == services[j].Name {
+			return services[i].ID < services[j].ID
+		}
+		return services[i].Name < services[j].Name
+	})
+	return services
+}
+
+func (r Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, path string, key string, val []byte) []discover.ServiceInfo {
+	v := discover.ServiceInfo{}
+	v.Unmarshal(val)
+	v.ID = getInstanceFromKey(key, path)
+	if isGrpcService(v) {
+		endpoints[v.ID] = v
+	} else {
+		delete(endpoints, v.ID)
+	}
+	return buildSortedServices(endpoints)
+}
+
+func (r Registry) applyDeleteEvent(endpoints map[string]discover.ServiceInfo, path string, key string) []discover.ServiceInfo {
+	id := getInstanceFromKey(key, path)
+	delete(endpoints, id)
+	return buildSortedServices(endpoints)
 }
 
 func (r Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo, error) {
@@ -153,8 +255,18 @@ func (r Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo
 		v := discover.ServiceInfo{}
 		v.Unmarshal(kv.Value)
 		v.ID = instanceID
+		if !isGrpcService(v) {
+			continue
+		}
 		services = append(services, v)
 	}
+	// 稳定排序
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].Name == services[j].Name {
+			return services[i].ID < services[j].ID
+		}
+		return services[i].Name < services[j].Name
+	})
 	return services, nil
 }
 
@@ -169,15 +281,14 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 		v := discover.ServiceInfo{}
 		v.Unmarshal(kv.Value)
 		v.ID = getInstanceFromKey(string(kv.Key), path)
+		if !isGrpcService(v) {
+			continue
+		}
 		endpoints[v.ID] = v
 	}
-	var services []discover.ServiceInfo
-	for _, v := range endpoints {
-		services = append(services, v)
-	}
-	update(services)
-	// fmt.Println("resp.Header.Revision", resp.Header.Revision, key)
+	update(buildSortedServices(endpoints))
 	w := clientv3.NewWatcher(r.client)
+	defer w.Close()
 	ch := w.Watch(ctx, path,
 		clientv3.WithPrefix(),
 		clientv3.WithRev(resp.Header.Revision),
@@ -198,30 +309,13 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 				logger.Error("watch event canceled", slog.Any("err", event.Err()))
 				return nil
 			}
-			// if event.IsProgressNotify() {
-			// 	fmt.Println("watch ProgressNotify")
-			// 	continue
-			// }
 			for _, ev := range event.Events {
 				key := string(ev.Kv.Key)
 				switch ev.Type {
 				case clientv3.EventTypePut:
-					v := discover.ServiceInfo{}
-					v.Unmarshal(ev.Kv.Value)
-					v.ID = getInstanceFromKey(key, path)
-					endpoints[key] = v
-					var services []discover.ServiceInfo
-					for _, v := range endpoints {
-						services = append(services, v)
-					}
-					update(services)
+					update(r.applyPutEvent(endpoints, path, key, ev.Kv.Value))
 				case clientv3.EventTypeDelete:
-					delete(endpoints, key)
-					var services []discover.ServiceInfo
-					for _, v := range endpoints {
-						services = append(services, v)
-					}
-					update(services)
+					update(r.applyDeleteEvent(endpoints, path, key))
 				}
 			}
 		}

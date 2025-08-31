@@ -1,9 +1,7 @@
 package etcdv3
 
 import (
-	"strings"
-
-	"github.com/rushteam/beauty/pkg/client/grpc"
+	grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -21,14 +19,11 @@ func (b *builder) Scheme() string {
 
 func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
 	serviceName := target.Endpoint()
-	password, _ := target.URL.User.Password()
-	registry := NewRegistry(&Config{
-		Endpoints: strings.Split(target.URL.Host, ","),
-		Username:  target.URL.User.Username(),
-		Password:  password,
-		Prefix:    "beauty",
-	})
-	r := grpcclient.NewResolver(cc, serviceName, registry)
+	reg, err := NewFromURL(target.URL)
+	if err != nil {
+		return nil, err
+	}
+	r := grpcclient.NewResolver(cc, serviceName, reg)
 	go r.Start()
 	return r, nil
 }

@@ -178,7 +178,7 @@ Beauty supports service registration and discovery using etcd or nacos:
 ```go
 import (
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/discover/etcdv3"
+    "github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 )
 
 func main() {
@@ -203,7 +203,7 @@ Beauty provides built-in support for OpenTelemetry tracing and metrics:
 ```go
 import (
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/tracing"
+    "github.com/rushteam/beauty/pkg/service/telemetry"
     "go.opentelemetry.io/otel/exporters/prometheus"
 )
 
@@ -277,8 +277,8 @@ import (
 
     "github.com/go-chi/chi/v5"
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/discover/etcdv3"
-    "github.com/rushteam/beauty/pkg/tracing"
+    "github.com/rushteam/beauty/pkg/service/discover/etcdv3"
+    "github.com/rushteam/beauty/pkg/service/telemetry"
     "google.golang.org/grpc"
     pb "your-project/api/v1"
 )

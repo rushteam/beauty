@@ -10,6 +10,7 @@ import (
 	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/timeout"
 	"github.com/rushteam/beauty/pkg/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
@@ -35,12 +36,31 @@ func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerIntercepto
 	))
 }
 
+// WithCircuitBreaker 添加熔断器拦截器
 func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
 	return func(s *Server) {
-		s.grpcOpts = append(s.grpcOpts,
-			grpc.UnaryInterceptor(circuitbreaker.UnaryServerInterceptor(cb)),
-			grpc.StreamInterceptor(circuitbreaker.StreamServerInterceptor(cb)),
-		)
+		if s.unaryInterceptors == nil {
+			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
+		}
+		if s.streamInterceptors == nil {
+			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
+		}
+		s.unaryInterceptors = append(s.unaryInterceptors, circuitbreaker.UnaryServerInterceptor(cb))
+		s.streamInterceptors = append(s.streamInterceptors, circuitbreaker.StreamServerInterceptor(cb))
+	}
+}
+
+// WithTimeout 添加超时控制拦截器
+func WithTimeout(tc *timeout.TimeoutController) Options {
+	return func(s *Server) {
+		if s.unaryInterceptors == nil {
+			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
+		}
+		if s.streamInterceptors == nil {
+			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
+		}
+		s.unaryInterceptors = append(s.unaryInterceptors, timeout.UnaryServerInterceptor(tc))
+		s.streamInterceptors = append(s.streamInterceptors, timeout.StreamServerInterceptor(tc))
 	}
 }
 
@@ -63,19 +83,39 @@ type Options func(*Server)
 // New create a grpc service with the name
 func New(addr string, handler func(*grpc.Server), opts ...Options) *Server {
 	s := &Server{
-		id:       uuid.New(),
-		name:     "grpc-server",
-		metadata: map[string]string{"kind": "grpc"},
-		addr:     addr,
-		Server:   nil,
+		id:                 uuid.New(),
+		name:               "grpc-server",
+		metadata:           map[string]string{"kind": "grpc"},
+		unaryInterceptors:  make([]grpc.UnaryServerInterceptor, 0),
+		streamInterceptors: make([]grpc.StreamServerInterceptor, 0),
+		addr:               addr,
+		Server:             nil,
 	}
+
+	// 应用选项
 	for _, o := range opts {
 		o(s)
 	}
-	s.grpcOpts = append(s.grpcOpts,
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-	)
-	s.Server = grpc.NewServer(s.grpcOpts...)
+
+	// 构建 gRPC 选项
+	grpcOpts := s.grpcOpts
+
+	// 添加拦截器链
+	if len(s.unaryInterceptors) > 0 {
+		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(
+			middleware.ChainUnaryServer(s.unaryInterceptors...),
+		))
+	}
+	if len(s.streamInterceptors) > 0 {
+		grpcOpts = append(grpcOpts, grpc.StreamInterceptor(
+			middleware.ChainStreamServer(s.streamInterceptors...),
+		))
+	}
+
+	// 添加默认选项
+	grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
+
+	s.Server = grpc.NewServer(grpcOpts...)
 	if handler != nil {
 		handler(s.Server)
 	}
@@ -84,9 +124,11 @@ func New(addr string, handler func(*grpc.Server), opts ...Options) *Server {
 
 // Server ..
 type Server struct {
-	id       string
-	name     string
-	metadata map[string]string
+	id                 string
+	name               string
+	metadata           map[string]string
+	unaryInterceptors  []grpc.UnaryServerInterceptor
+	streamInterceptors []grpc.StreamServerInterceptor
 
 	addr     string
 	grpcOpts []grpc.ServerOption

@@ -12,6 +12,7 @@ import (
 	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/timeout"
 	"github.com/rushteam/beauty/pkg/uuid"
 )
 
@@ -33,34 +34,58 @@ func WithMetadata(md map[string]string) Options {
 	}
 }
 
-func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
+// WithMiddleware 添加 HTTP 中间件
+func WithMiddleware(middlewares ...func(http.Handler) http.Handler) Options {
 	return func(s *Server) {
-		// 包装原有的 Handler
-		originalHandler := s.Server.Handler
-		s.Server.Handler = circuitbreaker.HTTPMiddleware(cb)(originalHandler)
+		if s.middlewares == nil {
+			s.middlewares = make([]func(http.Handler) http.Handler, 0)
+		}
+		s.middlewares = append(s.middlewares, middlewares...)
 	}
+}
+
+// WithCircuitBreaker 添加熔断器中间件
+func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
+	return WithMiddleware(circuitbreaker.HTTPMiddleware(cb))
+}
+
+// WithTimeout 添加超时控制中间件
+func WithTimeout(tc *timeout.TimeoutController) Options {
+	return WithMiddleware(timeout.HTTPMiddleware(tc))
 }
 
 func New(addr string, mux http.Handler, opts ...Options) *Server {
 	s := &Server{
-		id:       uuid.New(),
-		name:     "http-server",
-		metadata: map[string]string{"kind": "http"},
+		id:          uuid.New(),
+		name:        "http-server",
+		metadata:    map[string]string{"kind": "http"},
+		middlewares: make([]func(http.Handler) http.Handler, 0),
 		Server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
 		},
 	}
+
+	// 应用选项
 	for _, o := range opts {
 		o(s)
 	}
+
+	// 应用中间件（从外到内的顺序）
+	handler := mux
+	for i := len(s.middlewares) - 1; i >= 0; i-- {
+		handler = s.middlewares[i](handler)
+	}
+	s.Server.Handler = handler
+
 	return s
 }
 
 type Server struct {
-	id       string
-	name     string
-	metadata map[string]string
+	id          string
+	name        string
+	metadata    map[string]string
+	middlewares []func(http.Handler) http.Handler
 
 	*http.Server
 }

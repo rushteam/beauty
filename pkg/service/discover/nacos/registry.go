@@ -12,10 +12,10 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/v2/model"
 	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 
-	"github.com/rushteam/beauty/pkg/utils/addr"
 	"github.com/rushteam/beauty/pkg/client/nacos"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
+	"github.com/rushteam/beauty/pkg/utils/addr"
 )
 
 var (

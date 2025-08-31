@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 // Shutdown with fitst signal, second signal exit directly

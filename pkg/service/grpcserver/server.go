@@ -6,14 +6,14 @@ import (
 	"net"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	"github.com/rushteam/beauty/pkg/addr"
-	"github.com/rushteam/beauty/pkg/discover"
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/utils/addr"
+	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
-	"github.com/rushteam/beauty/pkg/uuid"
+	"github.com/rushteam/beauty/pkg/utils/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 )

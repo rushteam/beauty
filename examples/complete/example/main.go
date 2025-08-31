@@ -11,7 +11,7 @@ import (
 	// "github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/example/example/api/v1"
-	"github.com/rushteam/beauty/pkg/client/grpcclient"
+	"github.com/rushteam/beauty/pkg/client/grpc"
 
 	"github.com/rushteam/beauty/pkg/discover/etcdv3"
 	"github.com/rushteam/beauty/pkg/discover/nacos"
@@ -20,7 +20,7 @@ import (
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/tracing"
+	"github.com/rushteam/beauty/pkg/service/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"

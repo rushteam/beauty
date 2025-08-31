@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 // Manager 限流中间件管理器

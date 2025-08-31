@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"

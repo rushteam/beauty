@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 // Pool 协程池接口，提供安全的协程执行能力

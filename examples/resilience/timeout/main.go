@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"

@@ -3,7 +3,7 @@ package nacos
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/client/grpcclient"
+	"github.com/rushteam/beauty/pkg/client/grpc"
 	"google.golang.org/grpc/resolver"
 )
 

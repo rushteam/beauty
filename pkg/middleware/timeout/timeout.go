@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 var (

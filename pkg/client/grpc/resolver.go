@@ -7,8 +7,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/rushteam/beauty/pkg/discover"
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 )

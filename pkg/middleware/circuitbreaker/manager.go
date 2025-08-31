@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 // Manager 熔断器管理器，用于管理多个熔断器实例

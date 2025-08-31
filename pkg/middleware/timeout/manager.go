@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 // Manager 超时控制器管理器，用于管理多个超时控制器实例

@@ -3,7 +3,7 @@ package beauty
 import (
 	"net/http"
 
-	"github.com/rushteam/beauty/pkg/discover"
+	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"

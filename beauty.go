@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/core"
-	"github.com/rushteam/beauty/pkg/discover"
-	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/service/logger"
+	"github.com/rushteam/beauty/pkg/service/core"
 	"github.com/rushteam/beauty/pkg/signals"
-	"github.com/rushteam/beauty/pkg/tracing"
+	"github.com/rushteam/beauty/pkg/service/telemetry"
 	"github.com/rushteam/beauty/pkg/xgo"
 )
 

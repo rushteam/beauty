@@ -7,6 +7,7 @@ import (
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/rushteam/beauty/pkg/addr"
+	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/uuid"
@@ -26,6 +27,21 @@ func WithGrpcServerUnaryInterceptor(interceptors ...grpc.UnaryServerInterceptor)
 	return WithGrpcServerOptions(grpc.UnaryInterceptor(
 		middleware.ChainUnaryServer(interceptors...),
 	))
+}
+
+func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerInterceptor) Options {
+	return WithGrpcServerOptions(grpc.StreamInterceptor(
+		middleware.ChainStreamServer(interceptors...),
+	))
+}
+
+func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
+	return func(s *Server) {
+		s.grpcOpts = append(s.grpcOpts,
+			grpc.UnaryInterceptor(circuitbreaker.UnaryServerInterceptor(cb)),
+			grpc.StreamInterceptor(circuitbreaker.StreamServerInterceptor(cb)),
+		)
+	}
 }
 
 func WithServiceName(name string) Options {

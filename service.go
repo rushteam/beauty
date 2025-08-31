@@ -3,6 +3,7 @@ package beauty
 import (
 	"net/http"
 
+	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
@@ -42,6 +43,40 @@ func WithGrpcServer(addr string, handler func(*grpc.Server), opts ...ServiceOpti
 
 func WithCrontab(opts ...cron.CronOptions) Option {
 	return WithService(cron.New(opts...))
+}
+
+// WithWebServerCircuitBreaker 为 Web 服务器添加熔断器
+func WithWebServerCircuitBreaker(addr string, mux http.Handler, cb *circuitbreaker.CircuitBreaker, opts ...ServiceOption) Option {
+	si := &discover.ServiceInfo{
+		Metadata: make(map[string]string),
+	}
+	for _, o := range opts {
+		o(si)
+	}
+	return WithService(webserver.New(
+		addr,
+		mux,
+		webserver.WithServiceName(si.Name),
+		webserver.WithMetadata(si.Metadata),
+		webserver.WithCircuitBreaker(cb),
+	))
+}
+
+// WithGrpcServerCircuitBreaker 为 gRPC 服务器添加熔断器
+func WithGrpcServerCircuitBreaker(addr string, handler func(*grpc.Server), cb *circuitbreaker.CircuitBreaker, opts ...ServiceOption) Option {
+	si := &discover.ServiceInfo{
+		Metadata: make(map[string]string),
+	}
+	for _, o := range opts {
+		o(si)
+	}
+	return WithService(grpcserver.New(
+		addr,
+		handler,
+		grpcserver.WithServiceName(si.Name),
+		grpcserver.WithMetadata(si.Metadata),
+		grpcserver.WithCircuitBreaker(cb),
+	))
 }
 
 // var WebLogger = middleware.Logger

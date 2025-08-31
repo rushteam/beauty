@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/pkg/addr"
+	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
 	"github.com/rushteam/beauty/pkg/uuid"
@@ -29,6 +30,14 @@ func WithMetadata(md map[string]string) Options {
 		for k, v := range md {
 			s.metadata[k] = v
 		}
+	}
+}
+
+func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
+	return func(s *Server) {
+		// 包装原有的 Handler
+		originalHandler := s.Server.Handler
+		s.Server.Handler = circuitbreaker.HTTPMiddleware(cb)(originalHandler)
 	}
 }
 

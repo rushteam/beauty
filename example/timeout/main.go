@@ -10,6 +10,8 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/timeout"
 	"google.golang.org/grpc"
 )
@@ -46,15 +48,12 @@ func main() {
 		response := map[string]interface{}{
 			"name":             tc.Name(),
 			"timeout":          tc.Timeout().String(),
-			"slow_threshold":   tc.SlowThreshold().String(),
 			"total_requests":   stats.TotalRequests,
 			"timeout_requests": stats.TimeoutRequests,
 			"slow_requests":    stats.SlowRequests,
 			"timeout_rate":     fmt.Sprintf("%.2f%%", tc.TimeoutRate()*100),
 			"slow_rate":        fmt.Sprintf("%.2f%%", tc.SlowRate()*100),
 			"avg_duration":     stats.AvgDuration.String(),
-			"max_duration":     stats.MaxDuration.String(),
-			"min_duration":     stats.MinDuration.String(),
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -140,13 +139,18 @@ func main() {
 	// 创建应用
 	app := beauty.New(
 		// 使用带超时控制的 Web 服务器
-		beauty.WithWebServerTimeout(":8080", mux, tc,
-			beauty.WithServiceName("web-server")),
+		beauty.WithService(webserver.New(":8080", mux,
+			webserver.WithServiceName("web-server"),
+			webserver.WithTimeout(tc),
+		)),
 
 		// 使用带超时控制的 gRPC 服务器（简单示例）
-		beauty.WithGrpcServerTimeout(":9090", func(s *grpc.Server) {
+		beauty.WithService(grpcserver.New(":9090", func(s *grpc.Server) {
 			// 这里可以注册 gRPC 服务
-		}, tc, beauty.WithServiceName("grpc-server")),
+		},
+			grpcserver.WithServiceName("grpc-server"),
+			grpcserver.WithTimeout(tc),
+		)),
 	)
 
 	// 启动定时任务来模拟请求
@@ -215,8 +219,13 @@ func main() {
 				err := globalTC.Execute(context.Background(), func(ctx context.Context) error {
 					// 模拟处理时间
 					processingTime := time.Duration(rand.Intn(5000)) * time.Millisecond
-					time.Sleep(processingTime)
-					return nil
+
+					select {
+					case <-time.After(processingTime):
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				})
 
 				if err != nil {

@@ -12,6 +12,8 @@ import (
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 	"google.golang.org/grpc"
 )
 
@@ -108,13 +110,18 @@ func main() {
 	// 创建应用
 	app := beauty.New(
 		// 使用带熔断器的 Web 服务器
-		beauty.WithWebServerCircuitBreaker(":8080", mux, cb,
-			beauty.WithServiceName("web-server")),
+		beauty.WithService(webserver.New(":8080", mux,
+			webserver.WithServiceName("web-server"),
+			webserver.WithCircuitBreaker(cb),
+		)),
 
 		// 使用带熔断器的 gRPC 服务器（简单示例，不注册具体服务）
-		beauty.WithGrpcServerCircuitBreaker(":9090", func(s *grpc.Server) {
+		beauty.WithService(grpcserver.New(":9090", func(s *grpc.Server) {
 			// 这里可以注册 gRPC 服务
-		}, cb, beauty.WithServiceName("grpc-server")),
+		},
+			grpcserver.WithServiceName("grpc-server"),
+			grpcserver.WithCircuitBreaker(cb),
+		)),
 	)
 
 	// 启动定时任务来模拟请求

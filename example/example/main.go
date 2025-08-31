@@ -18,6 +18,8 @@ import (
 
 	// "github.com/rushteam/beauty/pkg/discover/nacos"
 	"github.com/rushteam/beauty/pkg/service/grpcgw"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/tracing"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -120,32 +122,32 @@ func main() {
 			Group:     "",
 			Weight:    100,
 		})),
-		beauty.WithWebServer(
+		beauty.WithService(webserver.New(
 			":8080",
 			gw,
-			beauty.WithServiceName("helloworld.gw"),
-		),
-		beauty.WithWebServer(
+			webserver.WithServiceName("helloworld.gw"),
+		)),
+		beauty.WithService(webserver.New(
 			":http",
 			r,
-			beauty.WithServiceName("helloworld.web"),
-		),
-		beauty.WithGrpcServer(
+			webserver.WithServiceName("helloworld.web"),
+		)),
+		beauty.WithService(grpcserver.New(
 			":58080",
 			func(s *grpc.Server) {
 				v1.RegisterGreeterServer(s, &GreeterServer{})
 			},
-			beauty.WithServiceName("helloworld.rpc"),
-			beauty.WithServiceMeta("version", "v1.0"),
-		),
-		beauty.WithGrpcServer(
+			grpcserver.WithServiceName("helloworld.rpc"),
+			grpcserver.WithMetadata(map[string]string{"version": "v1.0"}),
+		)),
+		beauty.WithService(grpcserver.New(
 			":58090",
 			func(s *grpc.Server) {
 				v1.RegisterGreeterServer(s, &GreeterServer{})
 			},
-			beauty.WithServiceName("helloworld.rpc"),
-			beauty.WithServiceMeta("version", "v2.0"),
-		),
+			grpcserver.WithServiceName("helloworld.rpc"),
+			grpcserver.WithMetadata(map[string]string{"version": "v2.0"}),
+		)),
 	)
 	app.Hook(beauty.EventAfterRun, func(app *beauty.App) {
 		cancel()

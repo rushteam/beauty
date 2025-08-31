@@ -7,9 +7,11 @@ import (
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/rushteam/beauty/pkg/addr"
+	"github.com/rushteam/beauty/pkg/auth"
 	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/ratelimit"
 	"github.com/rushteam/beauty/pkg/timeout"
 	"github.com/rushteam/beauty/pkg/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -61,6 +63,48 @@ func WithTimeout(tc *timeout.TimeoutController) Options {
 		}
 		s.unaryInterceptors = append(s.unaryInterceptors, timeout.UnaryServerInterceptor(tc))
 		s.streamInterceptors = append(s.streamInterceptors, timeout.StreamServerInterceptor(tc))
+	}
+}
+
+// WithAuth 添加认证拦截器
+func WithAuth(am *auth.AuthMiddleware) Options {
+	return func(s *Server) {
+		if s.unaryInterceptors == nil {
+			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
+		}
+		if s.streamInterceptors == nil {
+			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
+		}
+		s.unaryInterceptors = append(s.unaryInterceptors, auth.UnaryServerInterceptor(am))
+		s.streamInterceptors = append(s.streamInterceptors, auth.StreamServerInterceptor(am))
+	}
+}
+
+// WithRateLimit 添加限流拦截器
+func WithRateLimit(rl *ratelimit.RateLimitMiddleware) Options {
+	return func(s *Server) {
+		if s.unaryInterceptors == nil {
+			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
+		}
+		if s.streamInterceptors == nil {
+			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
+		}
+		s.unaryInterceptors = append(s.unaryInterceptors, ratelimit.UnaryServerInterceptor(rl))
+		s.streamInterceptors = append(s.streamInterceptors, ratelimit.StreamServerInterceptor(rl))
+	}
+}
+
+// WithRateLimitWait 添加等待型限流拦截器
+func WithRateLimitWait(rl *ratelimit.RateLimitMiddleware) Options {
+	return func(s *Server) {
+		if s.unaryInterceptors == nil {
+			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
+		}
+		if s.streamInterceptors == nil {
+			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
+		}
+		s.unaryInterceptors = append(s.unaryInterceptors, ratelimit.UnaryServerWaitInterceptor(rl))
+		s.streamInterceptors = append(s.streamInterceptors, ratelimit.StreamServerInterceptor(rl))
 	}
 }
 

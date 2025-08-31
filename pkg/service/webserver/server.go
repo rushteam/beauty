@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/pkg/addr"
+	"github.com/rushteam/beauty/pkg/auth"
 	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/ratelimit"
 	"github.com/rushteam/beauty/pkg/timeout"
 	"github.com/rushteam/beauty/pkg/uuid"
 )
@@ -52,6 +54,21 @@ func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
 // WithTimeout 添加超时控制中间件
 func WithTimeout(tc *timeout.TimeoutController) Options {
 	return WithMiddleware(timeout.HTTPMiddleware(tc))
+}
+
+// WithAuth 添加认证中间件
+func WithAuth(am *auth.AuthMiddleware) Options {
+	return WithMiddleware(auth.HTTPMiddleware(am))
+}
+
+// WithRateLimit 添加限流中间件
+func WithRateLimit(rl *ratelimit.RateLimitMiddleware) Options {
+	return WithMiddleware(ratelimit.HTTPMiddleware(rl))
+}
+
+// WithRateLimitWait 添加等待型限流中间件
+func WithRateLimitWait(rl *ratelimit.RateLimitMiddleware) Options {
+	return WithMiddleware(ratelimit.HTTPWaitMiddleware(rl))
 }
 
 func New(addr string, mux http.Handler, opts ...Options) *Server {

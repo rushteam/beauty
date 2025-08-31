@@ -21,7 +21,9 @@ func WithAddr(addr string) Option {
 
 func WithBlock() Option {
 	return func(c *Client) {
-		c.DialOpts = append(c.DialOpts, grpc.WithBlock())
+		// grpc.WithBlock() 已废弃，在 grpc.NewClient 中默认行为已改变
+		// 新版本默认是非阻塞的，如果需要阻塞行为，可以在连接后手动等待状态
+		// 这里保留函数以保持向后兼容性，但不添加任何选项
 	}
 }
 
@@ -67,8 +69,11 @@ type Client struct {
 	unaryInterceptors []grpc.UnaryClientInterceptor
 }
 
-func (c *Client) Close() {
-	c.ClientConn.Close()
+func (c *Client) Close() error {
+	if c.ClientConn != nil {
+		return c.ClientConn.Close()
+	}
+	return nil
 }
 
 func New(ctx context.Context, opts ...Option) (*Client, error) {
@@ -81,9 +86,11 @@ func New(ctx context.Context, opts ...Option) (*Client, error) {
 		opt(c)
 	}
 	c.DialOpts = append(c.DialOpts, grpc.WithChainUnaryInterceptor(c.unaryInterceptors...))
-	conn, err := grpc.DialContext(ctx, c.Addr, c.DialOpts...)
+
+	// 使用 grpc.NewClient 替代废弃的
+	conn, err := grpc.NewClient(c.Addr, c.DialOpts...)
 	if err != nil {
-		return &Client{}, err
+		return nil, err
 	}
 	c.ClientConn = conn
 	return c, nil

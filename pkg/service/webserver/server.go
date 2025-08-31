@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/pkg/addr"
-	"github.com/rushteam/beauty/pkg/auth"
-	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/discover"
 	"github.com/rushteam/beauty/pkg/logger"
-	"github.com/rushteam/beauty/pkg/ratelimit"
-	"github.com/rushteam/beauty/pkg/timeout"
+	"github.com/rushteam/beauty/pkg/middleware/auth"
+	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
+	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
+	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/uuid"
 )
 

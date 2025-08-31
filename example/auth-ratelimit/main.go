@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/auth"
-	"github.com/rushteam/beauty/pkg/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/logger"
-	"github.com/rushteam/beauty/pkg/ratelimit"
+	"github.com/rushteam/beauty/pkg/middleware/auth"
+	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
+	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
+	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/timeout"
 	"google.golang.org/grpc"
 )
 

@@ -10,9 +10,9 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/logger"
+	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/timeout"
 	"google.golang.org/grpc"
 )
 

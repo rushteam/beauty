@@ -6,7 +6,7 @@ import (
 
 // Config 应用配置
 type Config struct {
-	conf.Server `mapstructure:",squash"`
+	conf.Server `mapstructure:",squash"  yaml:",inline"`
 	Database    conf.Database    `mapstructure:"database" yaml:"database"`
 	Redis       conf.Redis       `mapstructure:"redis" yaml:"redis"`
 	Registry    conf.Registry    `mapstructure:"registry" yaml:"registry"`

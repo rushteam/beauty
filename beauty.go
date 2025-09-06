@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/service/core"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
-	"github.com/rushteam/beauty/pkg/service/core"
-	"github.com/rushteam/beauty/pkg/signals"
 	"github.com/rushteam/beauty/pkg/service/telemetry"
+	"github.com/rushteam/beauty/pkg/signals"
 	"github.com/rushteam/beauty/pkg/xgo"
 )
 
@@ -77,12 +77,12 @@ func WithComponent(c core.Component) Option {
 	}
 }
 
-func WithTrace(opts ...tracing.TraceOption) Option {
-	return WithComponent(tracing.NewTracer(opts...))
+func WithTrace(opts ...telemetry.TraceOption) Option {
+	return WithComponent(telemetry.NewTracer(opts...))
 }
 
-func WithMetric(opts ...tracing.MetricOption) Option {
-	return WithComponent(tracing.NewMetric(opts...))
+func WithMetric(opts ...telemetry.MetricOption) Option {
+	return WithComponent(telemetry.NewMetric(opts...))
 }
 
 // Service ..

@@ -4,31 +4,65 @@ package router
 
 import (
 	"net/http"
+	"time"
+
 	"{{.ImportPath}}internal/config"
+	"{{.ImportPath}}internal/endpoint/handlers"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/rushteam/beauty"
 )
 
-type Route struct{
-	Method string
-	URI string
+// Route 路由定义
+type Route struct {
+	Method  string
+	URI     string
 	Handler http.HandlerFunc
+	Name    string
 }
 
-func New(conf *config.Config) beauty.Option{
+// New 创建路由
+func New(cfg *config.Config) beauty.Option {
 	r := chi.NewRouter()
+
+	// 基础中间件
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Timeout(cfg.HTTP.ReadTimeout))
 
-	for _, route := range routes() {
-		r.Method(route.Method, route.URI, route.Handler)
-	}
+	// CORS中间件
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
+
+	// 健康检查
+	r.Get("/health", handlers.HealthCheck)
+	r.Get("/metrics", handlers.Metrics)
+
+	// API路由组
+	r.Route("/api/v1", func(r chi.Router) {
+		// 注册所有路由
+		for _, route := range routes() {
+			r.Method(route.Method, route.URI, route.Handler)
+		}
+	})
+
+	// 静态文件服务
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 
 	return beauty.WithWebServer(
-		conf.HTTP.Addr,
+		cfg.HTTP.Addr,
 		r,
-		beauty.WithServiceName(conf.App),
+		beauty.WithServiceName(cfg.App),
+		beauty.WithWebServerTimeout(cfg.HTTP.ReadTimeout, cfg.HTTP.WriteTimeout, cfg.HTTP.IdleTimeout),
 	)
 }

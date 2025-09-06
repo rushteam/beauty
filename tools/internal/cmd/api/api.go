@@ -14,11 +14,11 @@ import (
 	"github.com/rushteam/beauty/tools/internal/parser"
 	"github.com/rushteam/beauty/tools/internal/parser/ast"
 	"github.com/rushteam/beauty/tools/internal/parser/protobuf"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // Action 重构后的API命令，支持protobuf解析
-func Action(c *cli.Context) error {
+func Action(ctx context.Context, c *cli.Command) error {
 	args := c.Args()
 	if args.Len() == 0 {
 		return cli.Exit(fmt.Errorf("❌ 缺少项目名称\n\n使用示例:\n  beauty api my-project\n  beauty api /path/to/project"), 1)

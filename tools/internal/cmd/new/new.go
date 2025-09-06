@@ -1,6 +1,7 @@
 package new
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,11 +16,11 @@ import (
 	"github.com/rushteam/beauty/tools/internal/entity"
 	"github.com/rushteam/beauty/tools/internal/pkg"
 	"github.com/rushteam/beauty/tools/tpls"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // Action 创建新项目的命令处理函数
-func Action(c *cli.Context) error {
+func Action(ctx context.Context, c *cli.Command) error {
 	args := c.Args()
 	if args.Len() == 0 {
 		return cli.Exit(fmt.Errorf("❌ 缺少项目名称\n\n使用示例:\n  beauty new my-project\n  beauty new my-project --template grpc-service"), 1)
@@ -33,11 +34,23 @@ func Action(c *cli.Context) error {
 	withK8s := c.Bool("with-k8s")
 	verbose := c.Bool("verbose")
 
+	// 调试信息（仅在verbose模式下显示）
+	if verbose {
+		fmt.Printf("🔍 原始参数: %v\n", c.Args().Slice())
+		fmt.Printf("🔍 所有标志: %v\n", c.FlagNames())
+		fmt.Printf("🔍 模板标志值: %s\n", template)
+	}
+
 	// 设置项目配置
 	entity.Config.Name = projectName
 	entity.Config.Template = template
 	entity.Config.WithDocker = withDocker
 	entity.Config.WithK8s = withK8s
+
+	if verbose {
+		fmt.Printf("🔍 命令行模板类型: %s\n", template)
+		fmt.Printf("🔍 设置后模板类型: %s\n", entity.Config.Template)
+	}
 
 	// 设置项目路径
 	if projectPath == "" {
@@ -137,21 +150,18 @@ func createWebService(conf *entity.Project, verbose bool) error {
 // createGrpcService 创建gRPC微服务
 func createGrpcService(conf *entity.Project, verbose bool) error {
 	fmt.Println("🔌 创建gRPC微服务...")
-	// TODO: 实现gRPC服务模板
 	return buildProject(conf, verbose)
 }
 
 // createCronService 创建定时任务服务
 func createCronService(conf *entity.Project, verbose bool) error {
 	fmt.Println("⏰ 创建定时任务服务...")
-	// TODO: 实现定时任务服务模板
 	return buildProject(conf, verbose)
 }
 
 // createFullStack 创建完整微服务栈
 func createFullStack(conf *entity.Project, verbose bool) error {
 	fmt.Println("🏗️  创建完整微服务栈...")
-	// TODO: 实现完整微服务栈模板
 	return buildProject(conf, verbose)
 }
 
@@ -170,7 +180,11 @@ func hasExists(path string) error {
 
 // buildProject 构建项目文件
 func buildProject(conf *entity.Project, verbose bool) error {
-	tpl := tpls.Root()
+	// 使用模板类型（仅在verbose模式下显示）
+	if verbose {
+		fmt.Printf("🔍 使用模板类型: %s\n", conf.Template)
+	}
+	tpl := tpls.GetTemplateRoot(conf.Template)
 
 	return fs.WalkDir(tpl, ".", func(path string, info os.DirEntry, err error) error {
 		if err != nil {

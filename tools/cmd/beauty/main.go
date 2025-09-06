@@ -1,20 +1,21 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 
 	"github.com/rushteam/beauty/tools/internal/cmd/api"
 	"github.com/rushteam/beauty/tools/internal/cmd/new"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // Version ..
 var Version = "0.0.1"
 
 func main() {
-	app := &cli.App{
+	app := &cli.Command{
 		Name:    "beauty",
 		Usage:   "🚀 Beauty Framework - 微服务开发工具链",
 		Version: Version,
@@ -23,9 +24,9 @@ func main() {
    • 解析API定义（支持protobuf和传统格式）
    • 自动生成代码和文档
    • 集成服务发现、监控、中间件等`,
-		Authors: []*cli.Author{
-			{Name: "Beauty Team", Email: "team@beauty.dev"},
-		},
+		// Authors: []*cli.Author{
+		// 	{Name: "Beauty Team", Email: "team@beauty.dev"},
+		// },
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "verbose",
@@ -107,69 +108,72 @@ func main() {
 				Action: api.Action,
 			},
 			{
-				Name:    "dev",
-				Aliases: []string{"d", "serve"},
-				Usage:   "🔧 开发模式",
-				Description: `启动开发模式，提供：
-   • 文件监控和自动重载
-   • 实时API文档预览
-   • 集成测试运行
-   • 性能监控`,
+				Name:        "dev",
+				Aliases:     []string{"d", "run"},
+				Usage:       "🚀 开发模式运行服务",
+				Description: `在开发模式下运行服务，支持热重载和调试`,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:  "port",
-						Usage: "开发服务器端口",
-						Value: "8080",
+						Name:    "config",
+						Aliases: []string{"c"},
+						Usage:   "配置文件路径",
+						Value:   "config/dev/app.yaml",
 					},
 					&cli.BoolFlag{
 						Name:  "watch",
-						Usage: "监控文件变化",
+						Usage: "监听文件变化",
 					},
 					&cli.BoolFlag{
-						Name:  "docs",
-						Usage: "启动文档服务器",
+						Name:  "debug",
+						Usage: "启用调试模式",
 					},
 				},
-				Action: func(c *cli.Context) error {
-					fmt.Println("🔧 开发模式功能开发中...")
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					fmt.Println("🚀 开发模式功能开发中...")
 					return nil
 				},
 			},
 			{
-				Name:    "test",
-				Aliases: []string{"t"},
-				Usage:   "🧪 运行测试",
-				Description: `运行项目测试：
-   • 单元测试
-   • 集成测试
-   • 性能测试
-   • 覆盖率报告`,
-				Action: func(c *cli.Context) error {
-					fmt.Println("🧪 测试功能开发中...")
+				Name:        "build",
+				Aliases:     []string{"b"},
+				Usage:       "🔨 构建项目",
+				Description: `构建项目为可执行文件`,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "output",
+						Aliases: []string{"o"},
+						Usage:   "输出文件名",
+					},
+					&cli.StringFlag{
+						Name:    "platform",
+						Aliases: []string{"p"},
+						Usage:   "目标平台",
+						Value:   "linux/amd64",
+					},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					fmt.Println("🔨 构建功能开发中...")
 					return nil
 				},
 			},
 		},
-		Before: func(c *cli.Context) error {
-			if c.Bool("verbose") {
-				fmt.Println("🔍 详细模式已启用")
-			}
-			return nil
-		},
-		After: func(c *cli.Context) error {
-			if c.Bool("verbose") {
-				fmt.Println("✅ 命令执行完成")
-			}
-			return nil
-		},
-		OnUsageError: func(c *cli.Context, err error, isSubcommand bool) error {
-			fmt.Printf("❌ 使用错误: %v\n\n", err)
-			cli.ShowCommandHelp(c, c.Command.Name)
+		// Before: func(ctx context.Context, cmd *cli.Command) error {
+		// 	// 全局前置处理
+		// 	return nil
+		// },
+		// After: func(ctx context.Context, cmd *cli.Command) error {
+		// 	// 全局后置处理
+		// 	return nil
+		// },
+		OnUsageError: func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+			fmt.Fprintf(os.Stderr, "❌ 使用错误: %v\n", err)
+			cli.ShowCommandHelp(ctx, cmd, cmd.Name)
 			return nil
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
-		log.Fatalf("❌ 执行失败: %v", err)
+	err := app.Run(context.Background(), os.Args)
+	if err != nil {
+		log.Fatal(err)
 	}
 }

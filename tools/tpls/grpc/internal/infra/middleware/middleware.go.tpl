@@ -1,11 +1,11 @@
 package middleware
 
 import (
-	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"{{.ImportPath}}internal/config"
 )
 
@@ -19,47 +19,47 @@ func New(cfg *config.Config) *Middleware {
 	return &Middleware{cfg: cfg}
 }
 
-// GetOptions 获取Beauty选项
-func (m *Middleware) GetOptions() []beauty.Option {
-	var options []beauty.Option
+// GetGrpcServerOptions 获取gRPC服务器选项
+func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
+	var options []grpcserver.Options
 
-	// 认证中间件
+	// 认证拦截器
 	if m.cfg.IsAuthEnabled() {
 		authMiddleware := auth.NewAuthMiddleware(auth.Config{
 			TokenExtractor: auth.NewHeaderTokenExtractor("Authorization", "Bearer "),
 			Authenticator:  m.createAuthenticator(),
 			SkipPaths:     m.cfg.Middleware.Auth.SkipPaths,
 		})
-		options = append(options, beauty.WithWebMiddleware(auth.HTTPMiddleware(authMiddleware)))
+		options = append(options, grpcserver.WithAuth(authMiddleware))
 	}
 
-	// 限流中间件
+	// 限流拦截器
 	if m.cfg.IsRateLimitEnabled() {
 		rateLimitMiddleware := ratelimit.NewRateLimitMiddleware(ratelimit.Config{
 			Rate:         m.cfg.Middleware.RateLimit.Rate,
 			Burst:        m.cfg.Middleware.RateLimit.Burst,
 			KeyExtractor: ratelimit.NewIPKeyExtractor(),
 		})
-		options = append(options, beauty.WithWebMiddleware(ratelimit.HTTPMiddleware(rateLimitMiddleware)))
+		options = append(options, grpcserver.WithRateLimit(rateLimitMiddleware))
 	}
 
-	// 超时控制中间件
+	// 超时控制拦截器
 	if m.cfg.IsTimeoutEnabled() {
 		timeoutController := timeout.NewTimeoutController(timeout.Config{
 			Timeout:       m.cfg.Middleware.Timeout.Timeout,
 			SlowThreshold: m.cfg.Middleware.Timeout.SlowThreshold,
 		})
-		options = append(options, beauty.WithWebMiddleware(timeout.HTTPMiddleware(timeoutController)))
+		options = append(options, grpcserver.WithTimeout(timeoutController))
 	}
 
-	// 熔断器中间件
+	// 熔断器拦截器
 	if m.cfg.IsCircuitBreakerEnabled() {
 		circuitBreaker := circuitbreaker.NewCircuitBreaker(circuitbreaker.Config{
-			MaxRequests: m.cfg.Middleware.CircuitBreaker.MaxRequests,
+			MaxRequests: uint32(m.cfg.Middleware.CircuitBreaker.MaxRequests),
 			Interval:    m.cfg.Middleware.CircuitBreaker.Interval,
 			Timeout:     m.cfg.Middleware.CircuitBreaker.Timeout,
 		})
-		options = append(options, beauty.WithWebMiddleware(circuitbreaker.HTTPMiddleware(circuitBreaker)))
+		options = append(options, grpcserver.WithCircuitBreaker(circuitBreaker))
 	}
 
 	return options

@@ -5,16 +5,13 @@ import (
 	"flag"
 	"log"
 	"log/slog"
-	"time"
 
 	"{{.ImportPath}}internal/config"
 	"{{.ImportPath}}internal/infra/conf"
 	"{{.ImportPath}}internal/infra/logger"
-	"{{.ImportPath}}internal/infra/registry"
 	"{{.ImportPath}}internal/job"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 )
 

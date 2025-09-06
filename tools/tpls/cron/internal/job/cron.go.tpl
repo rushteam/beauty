@@ -3,7 +3,6 @@ package job
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"{{.ImportPath}}internal/config"
 	"github.com/rushteam/beauty/pkg/service/cron"
@@ -20,19 +19,19 @@ func NewCronJobs(cfg *config.Config) *CronJobs {
 }
 
 // GetOptions 获取定时任务选项
-func (c *CronJobs) GetOptions() []cron.Option {
-	return []cron.Option{
+func (c *CronJobs) GetOptions() []cron.CronOptions {
+	return []cron.CronOptions{
 		// 每分钟执行一次的任务
-		cron.WithJob("@every 1m", c.healthCheck),
+		cron.WithCronHandler("@every 1m", c.healthCheck),
 		
 		// 每小时执行一次的任务
-		cron.WithJob("@hourly", c.cleanup),
+		cron.WithCronHandler("@hourly", c.cleanup),
 		
 		// 每天凌晨2点执行的任务
-		cron.WithJob("0 2 * * *", c.dailyReport),
+		cron.WithCronHandler("0 2 * * *", c.dailyReport),
 		
 		// 每周一凌晨3点执行的任务
-		cron.WithJob("0 3 * * 1", c.weeklyReport),
+		cron.WithCronHandler("0 3 * * 1", c.weeklyReport),
 	}
 }
 

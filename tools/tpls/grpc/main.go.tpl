@@ -10,13 +10,13 @@ import (
 	"{{.ImportPath}}internal/endpoint/grpc"
 	"{{.ImportPath}}internal/infra/conf"
 	"{{.ImportPath}}internal/infra/logger"
-	"{{.ImportPath}}internal/infra/registry"
 	"{{.ImportPath}}internal/infra/middleware"
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/service/telemetry"
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
-	"google.golang.org/grpc"
+	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	grpcpkg "google.golang.org/grpc"
 )
 
 var (
@@ -49,26 +49,25 @@ func main() {
 		registryOption = beauty.WithRegistry(etcdv3.NewRegistry(&etcdv3.Config{
 			Endpoints: cfg.Registry.Endpoints,
 			Prefix:    cfg.Registry.Config["prefix"],
+			TTL:       10,
 		}))
 	}
 
 	// 创建中间件
 	middlewares := middleware.New(cfg)
 
-	// 创建gRPC服务器
-	grpcServer := grpc.NewServer()
-	grpc.RegisterServices(grpcServer, cfg)
-
 	// 创建应用
 	app := beauty.New(
 		// gRPC服务
-		beauty.WithGrpcServer(
-			cfg.HTTP.Addr,
-			func(s *grpc.Server) {
+		beauty.WithService(grpcserver.New(
+			cfg.GRPC.Addr,
+			func(s *grpcpkg.Server) {
 				grpc.RegisterServices(s, cfg)
 			},
-			beauty.WithServiceName(cfg.App),
-		),
+			append([]grpcserver.Options{
+				grpcserver.WithServiceName(cfg.App),
+			}, middlewares.GetGrpcServerOptions()...)...,
+		)),
 		
 		// 服务注册
 		registryOption,
@@ -77,14 +76,11 @@ func main() {
 		beauty.WithTrace(),
 		
 		// 指标监控
-		beauty.WithMetric(telemetry.WithMetricReader(telemetry.NewPrometheusReader())),
-		
-		// 中间件
-		middlewares.GetOptions()...,
+		beauty.WithMetric(telemetry.WithMetricStdoutReader()),
 	)
 
 	// 启动应用
-	slog.Info("gRPC服务启动中...", "addr", cfg.GetHTTPAddr())
+	slog.Info("gRPC服务启动中...", "addr", cfg.GetGRPCAddr())
 	if err := app.Start(context.Background()); err != nil {
 		slog.Error("gRPC服务启动失败", "error", err)
 		log.Fatalln(err)

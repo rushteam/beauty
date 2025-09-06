@@ -43,17 +43,17 @@ func main() {
 				Name:    "new",
 				Aliases: []string{"n", "create"},
 				Usage:   "🆕 创建新的Beauty项目",
-				Description: `快速创建新的Beauty项目，支持多种模板：
+				Description: `快速创建新的Beauty项目，支持多种服务类型组合：
    • web-service    - HTTP微服务
    • grpc-service   - gRPC微服务  
    • cron-service   - 定时任务服务
-   • full-stack     - 完整微服务栈`,
+   • unified        - 交互式选择服务类型（推荐）`,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:    "template",
 						Aliases: []string{"t"},
 						Usage:   "项目模板类型",
-						Value:   "web-service",
+						Value:   "unified",
 					},
 					&cli.StringFlag{
 						Name:    "path",
@@ -67,6 +67,18 @@ func main() {
 					&cli.BoolFlag{
 						Name:  "with-k8s",
 						Usage: "包含Kubernetes配置",
+					},
+					&cli.BoolFlag{
+						Name:  "web",
+						Usage: "启用HTTP服务",
+					},
+					&cli.BoolFlag{
+						Name:  "grpc",
+						Usage: "启用gRPC服务",
+					},
+					&cli.BoolFlag{
+						Name:  "cron",
+						Usage: "启用定时任务服务",
 					},
 				},
 				Action: new.Action,

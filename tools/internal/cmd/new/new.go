@@ -1,6 +1,7 @@
 package new
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -34,11 +35,41 @@ func Action(ctx context.Context, c *cli.Command) error {
 	withK8s := c.Bool("with-k8s")
 	verbose := c.Bool("verbose")
 
+	// 服务类型选择
+	enableWeb := c.Bool("web")
+	enableGrpc := c.Bool("grpc")
+	enableCron := c.Bool("cron")
+
 	// 调试信息（仅在verbose模式下显示）
 	if verbose {
 		fmt.Printf("🔍 原始参数: %v\n", c.Args().Slice())
 		fmt.Printf("🔍 所有标志: %v\n", c.FlagNames())
 		fmt.Printf("🔍 模板标志值: %s\n", template)
+	}
+
+	// 处理服务类型选择
+	if template == "unified" {
+		// 交互式选择服务类型
+		if !enableWeb && !enableGrpc && !enableCron {
+			// 如果没有通过命令行指定，则进行交互式选择
+			web, grpc, cron, err := interactiveServiceSelection()
+			if err != nil {
+				return fmt.Errorf("❌ 交互式选择失败: %w", err)
+			}
+			enableWeb = web
+			enableGrpc = grpc
+			enableCron = cron
+		}
+	} else {
+		// 根据模板类型设置服务类型
+		switch template {
+		case "web-service":
+			enableWeb = true
+		case "grpc-service":
+			enableGrpc = true
+		case "cron-service":
+			enableCron = true
+		}
 	}
 
 	// 设置项目配置
@@ -47,6 +78,9 @@ func Action(ctx context.Context, c *cli.Command) error {
 	entity.Config.Template = template
 	entity.Config.WithDocker = withDocker
 	entity.Config.WithK8s = withK8s
+	entity.Config.EnableWeb = enableWeb
+	entity.Config.EnableGrpc = enableGrpc
+	entity.Config.EnableCron = enableCron
 
 	if verbose {
 		fmt.Printf("🔍 命令行模板类型: %s\n", template)
@@ -115,13 +149,13 @@ func createProject(conf *entity.Project, verbose bool) error {
 		return fmt.Errorf("创建项目目录失败: %w", err)
 	}
 
-	// 获取模块信息
+	// 设置模块信息
+	conf.Module = conf.Name // 使用项目名称作为模块名
+	conf.ImportPath = conf.Module + "/"
+
+	// 获取模块信息（用于其他用途）
 	if hi, err := here.Dir(conf.Path); err == nil {
 		conf.Info = hi
-		if len(hi.ImportPath) > 0 {
-			conf.Module = hi.ImportPath
-		}
-		conf.ImportPath = conf.Module + "/"
 	}
 
 	if verbose {
@@ -135,8 +169,8 @@ func createProject(conf *entity.Project, verbose bool) error {
 		return createGrpcService(conf, verbose)
 	case "cron-service":
 		return createCronService(conf, verbose)
-	case "full-stack":
-		return createFullStack(conf, verbose)
+	case "unified":
+		return createUnifiedService(conf, verbose)
 	default: // web-service
 		return createWebService(conf, verbose)
 	}
@@ -160,9 +194,22 @@ func createCronService(conf *entity.Project, verbose bool) error {
 	return buildProject(conf, verbose)
 }
 
-// createFullStack 创建完整微服务栈
-func createFullStack(conf *entity.Project, verbose bool) error {
-	fmt.Println("🏗️  创建完整微服务栈...")
+// createUnifiedService 创建统一微服务
+func createUnifiedService(conf *entity.Project, verbose bool) error {
+	// 根据启用的服务类型显示不同的消息
+	var services []string
+	if conf.EnableWeb {
+		services = append(services, "HTTP")
+	}
+	if conf.EnableGrpc {
+		services = append(services, "gRPC")
+	}
+	if conf.EnableCron {
+		services = append(services, "Cron")
+	}
+
+	serviceStr := strings.Join(services, "+")
+	fmt.Printf("🚀 创建微服务 (%s)...\n", serviceStr)
 	return buildProject(conf, verbose)
 }
 
@@ -251,6 +298,23 @@ func buildProject(conf *entity.Project, verbose bool) error {
 
 // shouldSkipFile 判断是否应该跳过某个文件
 func shouldSkipFile(path string, conf *entity.Project) bool {
+	// 对于统一模板，根据启用的服务类型决定是否跳过文件
+	if conf.Template == "unified" {
+		// 如果未启用 Web 服务，跳过 HTTP 相关文件
+		if !conf.EnableWeb && (strings.Contains(path, "http") || strings.Contains(path, "web")) {
+			return true
+		}
+		// 如果未启用 gRPC 服务，跳过 gRPC 相关文件
+		if !conf.EnableGrpc && strings.Contains(path, "grpc") {
+			return true
+		}
+		// 如果未启用 Cron 服务，跳过 Cron 相关文件
+		if !conf.EnableCron && strings.Contains(path, "cron") {
+			return true
+		}
+		return false
+	}
+
 	// 根据模板类型跳过不需要的文件
 	switch conf.Template {
 	case "grpc-service":
@@ -264,4 +328,110 @@ func shouldSkipFile(path string, conf *entity.Project) bool {
 		return strings.Contains(path, "grpc")
 	}
 	return false
+}
+
+// interactiveServiceSelection 交互式服务类型选择
+func interactiveServiceSelection() (web, grpc, cron bool, err error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("\n🎯 请选择要启用的服务类型:")
+	fmt.Println("   1. HTTP 服务 (REST API)")
+	fmt.Println("   2. gRPC 服务 (高性能 RPC)")
+	fmt.Println("   3. 定时任务服务 (Cron Jobs)")
+	fmt.Println("   4. 全栈服务 (HTTP + gRPC + Cron)")
+	fmt.Println("   5. 自定义组合")
+	fmt.Print("\n请输入选项 (多个选项用逗号分隔，如: 1,2,3): ")
+
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false, false, false, err
+	}
+
+	input = strings.TrimSpace(input)
+	options := strings.Split(input, ",")
+
+	for _, opt := range options {
+		opt = strings.TrimSpace(opt)
+		switch opt {
+		case "1":
+			web = true
+		case "2":
+			grpc = true
+		case "3":
+			cron = true
+		case "4":
+			web = true
+			grpc = true
+			cron = true
+		case "5":
+			// 自定义组合
+			return customServiceSelection()
+		default:
+			fmt.Printf("⚠️  无效选项: %s，已忽略\n", opt)
+		}
+	}
+
+	// 至少选择一个服务
+	if !web && !grpc && !cron {
+		fmt.Println("❌ 至少需要选择一个服务类型")
+		return interactiveServiceSelection()
+	}
+
+	// 显示选择结果
+	fmt.Printf("\n✅ 已选择服务类型:")
+	if web {
+		fmt.Print(" HTTP")
+	}
+	if grpc {
+		fmt.Print(" gRPC")
+	}
+	if cron {
+		fmt.Print(" Cron")
+	}
+	fmt.Println()
+
+	return web, grpc, cron, nil
+}
+
+// customServiceSelection 自定义服务组合选择
+func customServiceSelection() (web, grpc, cron bool, err error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("\n🔧 自定义服务组合:")
+
+	// HTTP 服务
+	fmt.Print("是否启用 HTTP 服务? (y/N): ")
+	webInput, _ := reader.ReadString('\n')
+	web = strings.ToLower(strings.TrimSpace(webInput)) == "y"
+
+	// gRPC 服务
+	fmt.Print("是否启用 gRPC 服务? (y/N): ")
+	grpcInput, _ := reader.ReadString('\n')
+	grpc = strings.ToLower(strings.TrimSpace(grpcInput)) == "y"
+
+	// 定时任务服务
+	fmt.Print("是否启用定时任务服务? (y/N): ")
+	cronInput, _ := reader.ReadString('\n')
+	cron = strings.ToLower(strings.TrimSpace(cronInput)) == "y"
+
+	// 至少选择一个服务
+	if !web && !grpc && !cron {
+		fmt.Println("❌ 至少需要选择一个服务类型")
+		return customServiceSelection()
+	}
+
+	// 显示选择结果
+	fmt.Printf("\n✅ 已选择服务类型:")
+	if web {
+		fmt.Print(" HTTP")
+	}
+	if grpc {
+		fmt.Print(" gRPC")
+	}
+	if cron {
+		fmt.Print(" Cron")
+	}
+	fmt.Println()
+
+	return web, grpc, cron, nil
 }

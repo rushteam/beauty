@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed all:web all:grpc all:cron
+//go:embed all:web all:grpc all:cron all:unified
 var files embed.FS
 
 // Root 获取web模板
@@ -26,6 +26,12 @@ func CronRoot() fs.FS {
 	return f
 }
 
+// UnifiedRoot 获取统一模板
+func UnifiedRoot() fs.FS {
+	f, _ := fs.Sub(files, "unified")
+	return f
+}
+
 // GetTemplateRoot 根据模板类型获取模板根目录
 func GetTemplateRoot(templateType string) fs.FS {
 	switch templateType {
@@ -33,6 +39,8 @@ func GetTemplateRoot(templateType string) fs.FS {
 		return GrpcRoot()
 	case "cron-service":
 		return CronRoot()
+	case "unified":
+		return UnifiedRoot()
 	default: // web-service
 		return Root()
 	}

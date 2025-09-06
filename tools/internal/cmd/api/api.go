@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -150,12 +151,23 @@ func parseProtobufFiles(projectPath string, generate bool, outDir string, openap
 	// 非交互式生成
 	if generate {
 		fmt.Println("\n🔨 开始生成代码...")
-		parser := protobuf.NewGrpcGatewayParser(projectPath)
-		parser.SetOffline(offline)
-		if !filepath.IsAbs(outDir) {
-			outDir = filepath.Join(projectPath, outDir)
+
+		// 使用新的代码生成系统
+		genService := NewCodeGenerationService()
+		genOptions := NewGenerateOptions().
+			SetOutputDir(outDir).
+			SetModuleName(entity.Config.Name).
+			SetVerbose(verbose)
+
+		// 设置生成类型
+		generateTypes := []string{"api", "service"}
+		if openapi {
+			generateTypes = append(generateTypes, "docs")
 		}
-		if err := parser.GenerateCode(outDir, openapi); err != nil {
+		genOptions.SetGenerateTypes(generateTypes)
+
+		// 生成代码
+		if err := genService.GenerateFromProtobuf(context.Background(), protobufFiles, genOptions); err != nil {
 			return nil, fmt.Errorf("❌ 代码生成失败: %w", err)
 		}
 		fmt.Println("✅ 代码生成完成!")
@@ -236,7 +248,23 @@ func parseProtobufDirectly(projectPath string, generate bool, outDir string, ope
 			outDir = filepath.Join(projectPath, outDir)
 		}
 		fmt.Printf("🔨 正在生成代码到目录: %s\n", outDir)
-		if err := parser.GenerateCode(outDir, openapi); err != nil {
+
+		// 使用新的代码生成系统
+		genService := NewCodeGenerationService()
+		genOptions := NewGenerateOptions().
+			SetOutputDir(outDir).
+			SetModuleName(entity.Config.Name).
+			SetVerbose(verbose)
+
+		// 设置生成类型
+		generateTypes := []string{"api", "service"}
+		if openapi {
+			generateTypes = append(generateTypes, "docs")
+		}
+		genOptions.SetGenerateTypes(generateTypes)
+
+		// 生成代码
+		if err := genService.GenerateFromProtobuf(context.Background(), files, genOptions); err != nil {
 			return nil, fmt.Errorf("❌ 生成代码失败: %w", err)
 		}
 		fmt.Println("✅ 代码生成完成!")

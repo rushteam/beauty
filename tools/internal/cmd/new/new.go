@@ -43,6 +43,7 @@ func Action(ctx context.Context, c *cli.Command) error {
 
 	// 设置项目配置
 	entity.Config.Name = projectName
+	entity.Config.Module = projectName // 设置模块名
 	entity.Config.Template = template
 	entity.Config.WithDocker = withDocker
 	entity.Config.WithK8s = withK8s

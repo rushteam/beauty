@@ -14,14 +14,15 @@ func New(cfg *config.Config) discover.Registry {
 		return etcdv3.NewRegistry(&etcdv3.Config{
 			Endpoints: cfg.Registry.Endpoints,
 			Prefix:    cfg.Registry.Config["prefix"],
+			TTL:       10,
 		})
 	case "nacos":
 		return nacos.NewRegistry(&nacos.Config{
-			Endpoints: cfg.Registry.Endpoints,
+			Addr:      cfg.Registry.Endpoints,
 			Namespace: cfg.Registry.Config["namespace"],
 			Group:     cfg.Registry.Config["group"],
 		})
 	default:
-		return discover.NewNoopRegistry()
+		return nil
 	}
 }

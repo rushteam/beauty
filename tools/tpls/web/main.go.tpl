@@ -10,8 +10,6 @@ import (
 	"{{.ImportPath}}internal/endpoint/router"
 	"{{.ImportPath}}internal/infra/conf"
 	"{{.ImportPath}}internal/infra/logger"
-	"{{.ImportPath}}internal/infra/registry"
-	"{{.ImportPath}}internal/infra/middleware"
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/service/telemetry"
@@ -48,11 +46,9 @@ func main() {
 		registryOption = beauty.WithRegistry(etcdv3.NewRegistry(&etcdv3.Config{
 			Endpoints: cfg.Registry.Endpoints,
 			Prefix:    cfg.Registry.Config["prefix"],
+			TTL:       10,
 		}))
 	}
-
-	// 创建中间件
-	middlewares := middleware.New(cfg)
 
 	// 创建应用
 	app := beauty.New(
@@ -66,10 +62,7 @@ func main() {
 		beauty.WithTrace(),
 		
 		// 指标监控
-		beauty.WithMetric(telemetry.WithMetricReader(telemetry.NewPrometheusReader())),
-		
-		// 中间件
-		middlewares.GetOptions()...,
+		beauty.WithMetric(telemetry.WithMetricStdoutReader()),
 	)
 
 	// 启动应用

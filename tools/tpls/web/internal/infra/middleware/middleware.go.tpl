@@ -1,11 +1,11 @@
 package middleware
 
 import (
-	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 	"{{.ImportPath}}internal/config"
 )
 
@@ -19,9 +19,9 @@ func New(cfg *config.Config) *Middleware {
 	return &Middleware{cfg: cfg}
 }
 
-// GetOptions 获取Beauty选项
-func (m *Middleware) GetOptions() []beauty.Option {
-	var options []beauty.Option
+// GetWebServerOptions 获取Web服务器选项
+func (m *Middleware) GetWebServerOptions() []webserver.Options {
+	var options []webserver.Options
 
 	// 认证中间件
 	if m.cfg.IsAuthEnabled() {
@@ -30,7 +30,7 @@ func (m *Middleware) GetOptions() []beauty.Option {
 			Authenticator:  m.createAuthenticator(),
 			SkipPaths:     m.cfg.Middleware.Auth.SkipPaths,
 		})
-		options = append(options, beauty.WithWebMiddleware(auth.HTTPMiddleware(authMiddleware)))
+		options = append(options, webserver.WithAuth(authMiddleware))
 	}
 
 	// 限流中间件
@@ -40,7 +40,7 @@ func (m *Middleware) GetOptions() []beauty.Option {
 			Burst:        m.cfg.Middleware.RateLimit.Burst,
 			KeyExtractor: ratelimit.NewIPKeyExtractor(),
 		})
-		options = append(options, beauty.WithWebMiddleware(ratelimit.HTTPMiddleware(rateLimitMiddleware)))
+		options = append(options, webserver.WithRateLimit(rateLimitMiddleware))
 	}
 
 	// 超时控制中间件
@@ -49,17 +49,17 @@ func (m *Middleware) GetOptions() []beauty.Option {
 			Timeout:       m.cfg.Middleware.Timeout.Timeout,
 			SlowThreshold: m.cfg.Middleware.Timeout.SlowThreshold,
 		})
-		options = append(options, beauty.WithWebMiddleware(timeout.HTTPMiddleware(timeoutController)))
+		options = append(options, webserver.WithTimeout(timeoutController))
 	}
 
 	// 熔断器中间件
 	if m.cfg.IsCircuitBreakerEnabled() {
 		circuitBreaker := circuitbreaker.NewCircuitBreaker(circuitbreaker.Config{
-			MaxRequests: m.cfg.Middleware.CircuitBreaker.MaxRequests,
+			MaxRequests: uint32(m.cfg.Middleware.CircuitBreaker.MaxRequests),
 			Interval:    m.cfg.Middleware.CircuitBreaker.Interval,
 			Timeout:     m.cfg.Middleware.CircuitBreaker.Timeout,
 		})
-		options = append(options, beauty.WithWebMiddleware(circuitbreaker.HTTPMiddleware(circuitBreaker)))
+		options = append(options, webserver.WithCircuitBreaker(circuitBreaker))
 	}
 
 	return options
@@ -69,14 +69,16 @@ func (m *Middleware) GetOptions() []beauty.Option {
 func (m *Middleware) createAuthenticator() auth.Authenticator {
 	switch m.cfg.Middleware.Auth.Type {
 	case "jwt":
-		return auth.NewJWTAuthenticator(m.cfg.Middleware.Auth.Secret)
+		return auth.NewSimpleJWTAuthenticator(m.cfg.Middleware.Auth.Secret)
 	case "static":
-		return auth.NewStaticTokenAuthenticator(map[string]string{
-			"test-token": "test-user",
-		})
+		authenticator := auth.NewStaticTokenAuthenticator()
+		// 添加测试令牌
+		authenticator.AddToken("test-token", auth.NewUser("test-user", "Test User", []string{"user"}))
+		return authenticator
 	default:
-		return auth.NewStaticTokenAuthenticator(map[string]string{
-			"test-token": "test-user",
-		})
+		authenticator := auth.NewStaticTokenAuthenticator()
+		// 添加测试令牌
+		authenticator.AddToken("test-token", auth.NewUser("test-user", "Test User", []string{"user"}))
+		return authenticator
 	}
 }

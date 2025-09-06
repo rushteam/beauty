@@ -4,15 +4,16 @@ package router
 
 import (
 	"net/http"
-	"time"
 
 	"{{.ImportPath}}internal/config"
 	"{{.ImportPath}}internal/endpoint/handlers"
+	"{{.ImportPath}}internal/infra/middleware"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 
 // Route 路由定义
@@ -28,11 +29,11 @@ func New(cfg *config.Config) beauty.Option {
 	r := chi.NewRouter()
 
 	// 基础中间件
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Timeout(cfg.HTTP.ReadTimeout))
+	r.Use(chimiddleware.Logger)
+	r.Use(chimiddleware.Recoverer)
+	r.Use(chimiddleware.RequestID)
+	r.Use(chimiddleware.RealIP)
+	r.Use(chimiddleware.Timeout(cfg.HTTP.ReadTimeout))
 
 	// CORS中间件
 	r.Use(cors.Handler(cors.Options{
@@ -59,10 +60,12 @@ func New(cfg *config.Config) beauty.Option {
 	// 静态文件服务
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 
-	return beauty.WithWebServer(
-		cfg.HTTP.Addr,
-		r,
-		beauty.WithServiceName(cfg.App),
-		beauty.WithWebServerTimeout(cfg.HTTP.ReadTimeout, cfg.HTTP.WriteTimeout, cfg.HTTP.IdleTimeout),
-	)
+	// 创建中间件管理器
+	middlewareManager := middleware.New(cfg)
+	webServerOptions := middlewareManager.GetWebServerOptions()
+
+	// 添加服务名选项
+	webServerOptions = append(webServerOptions, webserver.WithServiceName(cfg.App))
+
+	return beauty.WithService(webserver.New(cfg.HTTP.Addr, r, webServerOptions...))
 }

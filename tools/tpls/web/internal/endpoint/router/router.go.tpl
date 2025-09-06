@@ -3,7 +3,6 @@
 package router
 
 import (
-	"net/http"
 	"{{.ImportPath}}internal/endpoint/handlers"
 )
 

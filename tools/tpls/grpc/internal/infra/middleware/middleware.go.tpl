@@ -69,14 +69,16 @@ func (m *Middleware) GetOptions() []beauty.Option {
 func (m *Middleware) createAuthenticator() auth.Authenticator {
 	switch m.cfg.Middleware.Auth.Type {
 	case "jwt":
-		return auth.NewJWTAuthenticator(m.cfg.Middleware.Auth.Secret)
+		return auth.NewSimpleJWTAuthenticator(m.cfg.Middleware.Auth.Secret)
 	case "static":
-		return auth.NewStaticTokenAuthenticator(map[string]string{
-			"test-token": "test-user",
-		})
+		authenticator := auth.NewStaticTokenAuthenticator()
+		// 添加测试令牌
+		authenticator.AddToken("test-token", auth.NewUser("test-user", "Test User", []string{"user"}))
+		return authenticator
 	default:
-		return auth.NewStaticTokenAuthenticator(map[string]string{
-			"test-token": "test-user",
-		})
+		authenticator := auth.NewStaticTokenAuthenticator()
+		// 添加测试令牌
+		authenticator.AddToken("test-token", auth.NewUser("test-user", "Test User", []string{"user"}))
+		return authenticator
 	}
 }

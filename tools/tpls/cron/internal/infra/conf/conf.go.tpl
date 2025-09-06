@@ -1,7 +1,11 @@
 package conf
 
 import (
+	"fmt"
+	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Server 服务器配置
@@ -88,4 +92,25 @@ type CircuitBreaker struct {
 	MaxRequests int           `mapstructure:"max_requests" yaml:"max_requests"`
 	Interval    time.Duration `mapstructure:"interval" yaml:"interval"`
 	Timeout     time.Duration `mapstructure:"timeout" yaml:"timeout"`
+}
+
+// Load 从YAML文件加载配置
+func Load(configPath string, cfg interface{}) error {
+	// 检查配置文件是否存在
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return fmt.Errorf("配置文件不存在: %s", configPath)
+	}
+
+	// 读取配置文件
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("读取配置文件失败: %w", err)
+	}
+
+	// 解析YAML
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return fmt.Errorf("解析配置文件失败: %w", err)
+	}
+
+	return nil
 }

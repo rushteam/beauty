@@ -309,7 +309,7 @@ func shouldSkipFile(path string, conf *entity.Project) bool {
 			return true
 		}
 		// 如果未启用 Cron 服务，跳过 Cron 相关文件
-		if !conf.EnableCron && strings.Contains(path, "cron") {
+		if !conf.EnableCron && (strings.Contains(path, "cron") || strings.Contains(path, "endpoint/job")) {
 			return true
 		}
 		return false

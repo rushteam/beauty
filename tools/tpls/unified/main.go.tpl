@@ -12,7 +12,7 @@ import (
 	{{if .EnableWeb}}"{{.ImportPath}}internal/endpoint/router"
 	{{end}}{{if .EnableGrpc}}"{{.ImportPath}}internal/endpoint/grpc"
 	"{{.ImportPath}}internal/infra/middleware"
-	{{end}}{{if .EnableCron}}"{{.ImportPath}}internal/job"
+	{{end}}	{{if .EnableCron}}"{{.ImportPath}}internal/endpoint/job"
 	{{end}}
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/service/telemetry"

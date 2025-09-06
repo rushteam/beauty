@@ -1,4 +1,4 @@
-package job
+{{if .EnableCron}}package job
 
 import (
 	"context"
@@ -74,3 +74,4 @@ func (c *CronJobs) weeklyReport(ctx context.Context) error {
 	
 	return nil
 }
+{{end}}

@@ -232,7 +232,7 @@ func main() {
     app := beauty.New(
         // Your services here...
         beauty.WithTrace(), // Enable tracing
-        beauty.WithMetric(tracing.WithMetricReader(metricExporter)), // Enable metrics
+        beauty.WithMetric(telemetry.WithMetricReader(metricExporter)), // Enable metrics
     )
 
     if err := app.Start(context.Background()); err != nil {

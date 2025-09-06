@@ -8,6 +8,9 @@ type Project struct {
 	Path       string
 	ImportPath string
 	Web        string
+	Template   string
+	WithDocker bool
+	WithK8s    bool
 	Info       here.Info
 }
 

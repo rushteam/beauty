@@ -1,0 +1,132 @@
+// 示例protobuf服务定义
+syntax = "proto3";
+
+package v1alpha;
+
+option go_package = "api/v1";
+
+import "google/api/annotations.proto";
+
+// 用户服务
+service UserService {
+  // 创建用户
+  rpc CreateUser (CreateUserRequest) returns (CreateUserResponse) {
+    option (google.api.http) = {
+      post: "/v1/users"
+      body: "*"
+    };
+  }
+
+  // 获取用户
+  rpc GetUser (GetUserRequest) returns (GetUserResponse) {
+    option (google.api.http) = {
+      get: "/v1/users/{id}"
+    };
+  }
+
+  // 更新用户
+  rpc UpdateUser (UpdateUserRequest) returns (UpdateUserResponse) {
+    option (google.api.http) = {
+      put: "/v1/users/{id}"
+      body: "*"
+    };
+  }
+
+  // 删除用户
+  rpc DeleteUser (DeleteUserRequest) returns (DeleteUserResponse) {
+    option (google.api.http) = {
+      delete: "/v1/users/{id}"
+    };
+  }
+
+  // 列出用户
+  rpc ListUsers (ListUsersRequest) returns (ListUsersResponse) {
+    option (google.api.http) = {
+      get: "/v1/users"
+    };
+  }
+}
+
+// 创建用户请求
+message CreateUserRequest {
+  string name = 1;
+  string email = 2;
+  int32 age = 3;
+}
+
+// 创建用户响应
+message CreateUserResponse {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  int32 age = 4;
+  string created_at = 5;
+}
+
+// 获取用户请求
+message GetUserRequest {
+  string id = 1;
+}
+
+// 获取用户响应
+message GetUserResponse {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  int32 age = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}
+
+// 更新用户请求
+message UpdateUserRequest {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  int32 age = 4;
+}
+
+// 更新用户响应
+message UpdateUserResponse {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  int32 age = 4;
+  string updated_at = 5;
+}
+
+// 删除用户请求
+message DeleteUserRequest {
+  string id = 1;
+}
+
+// 删除用户响应
+message DeleteUserResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// 列出用户请求
+message ListUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string search = 3;
+}
+
+// 列出用户响应
+message ListUsersResponse {
+  repeated User users = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+// 用户信息
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  int32 age = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}

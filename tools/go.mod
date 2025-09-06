@@ -1,8 +1,6 @@
 module github.com/rushteam/beauty/tools
 
-go 1.21
-
-toolchain go1.22.2
+go 1.24.0
 
 require (
 	github.com/gobuffalo/here v0.6.7
@@ -12,6 +10,8 @@ require (
 require (
 	github.com/charmbracelet/huh v0.6.0
 	github.com/urfave/cli/v3 v3.0.0-beta1
+	google.golang.org/genproto/googleapis/api v0.0.0-20250826171959-ef028d996bc1
+	google.golang.org/protobuf v1.36.8
 )
 
 require (
@@ -35,9 +35,9 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
-	golang.org/x/text v0.18.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 )
 
 require (

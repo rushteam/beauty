@@ -7,6 +7,7 @@ import (
 
 	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
+	"github.com/rushteam/beauty/pkg/utils/selector"
 )
 
 func main() {
@@ -70,8 +71,8 @@ func demonstrateAdvancedFiltering(factory *grpcclient.ClientFactory) {
 	inFilterClient := factory.GetClient("v1alpha.Greeter",
 		grpcclient.WithDiscoveryLabelFilter(
 			grpcclient.NewLabelFilter().
-				WithExpression("tier", grpcclient.FilterOpIn, "frontend", "api").
-				WithExpression("version", grpcclient.FilterOpIn, "v1.0", "v1.1"),
+				WithExpression("tier", selector.FilterOpIn, "frontend", "api").
+				WithExpression("version", selector.FilterOpIn, "v1.0", "v1.1"),
 		),
 	)
 
@@ -79,7 +80,7 @@ func demonstrateAdvancedFiltering(factory *grpcclient.ClientFactory) {
 	notInFilterClient := factory.GetClient("v1alpha.Greeter",
 		grpcclient.WithDiscoveryLabelFilter(
 			grpcclient.NewLabelFilter().
-				WithExpression("tier", grpcclient.FilterOpNotIn, "deprecated", "legacy").
+				WithExpression("tier", selector.FilterOpNotIn, "deprecated", "legacy").
 				WithMatchLabel("status", "healthy"),
 		),
 	)
@@ -88,9 +89,9 @@ func demonstrateAdvancedFiltering(factory *grpcclient.ClientFactory) {
 	existsFilterClient := factory.GetClient("v1alpha.Greeter",
 		grpcclient.WithDiscoveryLabelFilter(
 			grpcclient.NewLabelFilter().
-				WithExpression("canary", grpcclient.FilterOpExists).       // 必须有 canary 标签
-				WithExpression("deprecated", grpcclient.FilterOpNotExist). // 不能有 deprecated 标签
-				WithRegionIn("us-west-1"),                                 // 便捷方法
+				WithExpression("canary", selector.FilterOpExists).       // 必须有 canary 标签
+				WithExpression("deprecated", selector.FilterOpNotExist). // 不能有 deprecated 标签
+				WithRegionIn("us-west-1"),                               // 便捷方法
 		),
 	)
 
@@ -113,10 +114,10 @@ func demonstrateComplexFiltering(factory *grpcclient.ClientFactory) {
 		WithRegionIn("us-west-1", "us-west-2").
 		WithEnvironmentIn("production").
 		// 高级表达式
-		WithExpression("version", grpcclient.FilterOpIn, "v2.0", "v2.1", "v2.2").
-		WithExpression("tier", grpcclient.FilterOpNotIn, "deprecated").
-		WithExpression("feature-flag", grpcclient.FilterOpExists).
-		WithExpression("maintenance", grpcclient.FilterOpNotExist)
+		WithExpression("version", selector.FilterOpIn, "v2.0", "v2.1", "v2.2").
+		WithExpression("tier", selector.FilterOpNotIn, "deprecated").
+		WithExpression("feature-flag", selector.FilterOpExists).
+		WithExpression("maintenance", selector.FilterOpNotExist)
 
 	complexClient := factory.GetClient("v1alpha.UserService",
 		grpcclient.WithDiscoveryLabelFilter(complexFilter),
@@ -128,9 +129,9 @@ func demonstrateComplexFiltering(factory *grpcclient.ClientFactory) {
 			"service":     "order-service",
 			"environment": "production",
 		}).
-		WithExpression("region", grpcclient.FilterOpIn, "us-west-1", "us-east-1").
-		WithExpression("load", grpcclient.FilterOpNotEquals, "high").
-		WithExpression("healthy", grpcclient.FilterOpExists)
+		WithExpression("region", selector.FilterOpIn, "us-west-1", "us-east-1").
+		WithExpression("load", selector.FilterOpNotEquals, "high").
+		WithExpression("healthy", selector.FilterOpExists)
 
 	manager := grpcclient.NewClientManager(factory.GetDiscovery(), "v1alpha.OrderService",
 		grpcclient.WithLoadBalanceStrategy(grpcclient.WeightedRoundRobin),

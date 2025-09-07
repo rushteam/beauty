@@ -131,14 +131,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (*grpc.
 		opt(config)
 	}
 
-	// 如果没有设置注册中心且使用的是默认 beauty 协议，返回错误
-	if config.registry == nil && registry == nil {
+	// 如果没有设置注册中心，返回错误
+	if config.registry == nil {
 		return nil, fmt.Errorf("no registry provided, use WithRegistry() option or provide explicit registry URL")
-	}
-
-	// 优先使用配置中的注册中心
-	if config.registry != nil {
-		registry = config.registry
 	}
 
 	// 从 URL 参数构建过滤器

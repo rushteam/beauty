@@ -14,6 +14,33 @@
 
 ## 使用方法
 
+### 地域信息配置
+
+为了兼容Polaris等注册中心，框架提供了地域信息配置选项：
+
+```go
+grpcServer := grpcserver.New(
+    ":58080",
+    func(s *grpc.Server) {
+        v1.RegisterGreeterServer(s, &GreeterServer{})
+    },
+    grpcserver.WithServiceName("my-grpc-server"),
+    // 设置地域信息，兼容Polaris
+    grpcserver.WithRegionInfo("us-west-1", "us-west-1a", "campus-1"),
+    grpcserver.WithEnvironment("production"),
+    grpcserver.WithWeight(100),
+    grpcserver.WithPriority(0),
+    grpcserver.WithAutoServiceDiscovery(registries...),
+)
+```
+
+#### 地域信息选项说明
+
+- `WithRegionInfo(region, zone, campus)`: 设置地域、可用区、园区信息
+- `WithEnvironment(env)`: 设置环境信息（如：production、staging、development）
+- `WithWeight(weight)`: 设置服务权重（用于负载均衡）
+- `WithPriority(priority)`: 设置服务优先级（用于故障转移）
+
 ### 基本用法
 
 ```go
@@ -41,8 +68,12 @@ func main() {
         grpcserver.WithServiceName("my-grpc-server"),
         grpcserver.WithMetadata(map[string]string{
             "version": "v1.0",
-            "environment": "production",
         }),
+        // 设置地域信息，兼容Polaris
+        grpcserver.WithRegionInfo("us-west-1", "us-west-1a", "campus-1"),
+        grpcserver.WithEnvironment("production"),
+        grpcserver.WithWeight(100),
+        grpcserver.WithPriority(0),
         // 启用自动服务发现
         grpcserver.WithAutoServiceDiscovery(
             etcdv3.NewRegistry(&etcdv3.Config{
@@ -106,6 +137,12 @@ grpcServer := grpcserver.New(
 - `kind`: "grpc"
 - `methods`: 方法列表，如 `["SayHello"]`
 - `proto_file`: proto文件信息，如 `"greeter.proto"`
+- `region`: 地域信息，如 `"us-west-1"`
+- `zone`: 可用区信息，如 `"us-west-1a"`
+- `campus`: 园区信息，如 `"campus-1"`
+- `environment`: 环境信息，如 `"production"`
+- `weight`: 服务权重，如 `"100"`
+- `priority`: 服务优先级，如 `"0"`
 - 用户自定义元数据（通过WithMetadata设置）
 
 ## 实现原理

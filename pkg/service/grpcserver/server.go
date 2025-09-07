@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 
@@ -127,6 +128,48 @@ func WithAutoServiceDiscovery(registries ...discover.Registry) Options {
 	return func(s *Server) {
 		s.autoDiscover = true
 		s.serviceDiscovery = NewServiceDiscovery(s.Server, registries...)
+	}
+}
+
+// WithRegionInfo 设置地域信息，兼容Polaris
+func WithRegionInfo(region, zone, campus string) Options {
+	return func(s *Server) {
+		if s.metadata == nil {
+			s.metadata = make(map[string]string)
+		}
+		s.metadata["region"] = region
+		s.metadata["zone"] = zone
+		s.metadata["campus"] = campus
+	}
+}
+
+// WithEnvironment 设置环境信息
+func WithEnvironment(env string) Options {
+	return func(s *Server) {
+		if s.metadata == nil {
+			s.metadata = make(map[string]string)
+		}
+		s.metadata["environment"] = env
+	}
+}
+
+// WithWeight 设置服务权重
+func WithWeight(weight int) Options {
+	return func(s *Server) {
+		if s.metadata == nil {
+			s.metadata = make(map[string]string)
+		}
+		s.metadata["weight"] = fmt.Sprintf("%d", weight)
+	}
+}
+
+// WithPriority 设置服务优先级
+func WithPriority(priority int) Options {
+	return func(s *Server) {
+		if s.metadata == nil {
+			s.metadata = make(map[string]string)
+		}
+		s.metadata["priority"] = fmt.Sprintf("%d", priority)
 	}
 }
 

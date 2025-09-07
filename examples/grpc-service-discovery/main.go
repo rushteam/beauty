@@ -14,7 +14,7 @@ import (
 
 // 模拟protobuf生成的服务
 type GreeterServer struct {
-	grpcpkg.UnimplementedGreeterServer
+	// 实际使用中会嵌入 UnimplementedGreeterServer
 }
 
 func (s *GreeterServer) SayHello(ctx context.Context, req *HelloRequest) (*HelloReply, error) {
@@ -22,7 +22,7 @@ func (s *GreeterServer) SayHello(ctx context.Context, req *HelloRequest) (*Hello
 }
 
 type UserServiceServer struct {
-	grpcpkg.UnimplementedUserServiceServer
+	// 实际使用中会嵌入 UnimplementedUserServiceServer
 }
 
 func (s *UserServiceServer) CreateUser(ctx context.Context, req *CreateUserRequest) (*CreateUserResponse, error) {
@@ -64,10 +64,29 @@ type GetUserResponse struct {
 }
 
 func main() {
+	slog.Info("正在启动gRPC服务发现演示...")
+
+	// 创建服务注册中心
+	etcdRegistry := etcdv3.NewRegistry(&etcdv3.Config{
+		Endpoints: []string{"127.0.0.1:2379"},
+		Prefix:    "/beauty",
+		TTL:       10,
+	})
+
+	nacosRegistry := nacos.NewRegistry(&nacos.Config{
+		Addr:      []string{"127.0.0.1:8848"},
+		Cluster:   "",
+		Namespace: "",
+		Group:     "",
+		Weight:    100,
+	})
+
 	// 创建gRPC服务器，启用自动服务发现
 	grpcServer := grpcserver.New(
 		":58080",
 		func(s *grpcpkg.Server) {
+			slog.Info("注册gRPC服务...")
+
 			// 注册多个protobuf服务
 			// 注意：这里需要实际的protobuf生成的Register函数
 			// RegisterGreeterServer(s, &GreeterServer{})
@@ -86,7 +105,7 @@ func main() {
 				},
 				Streams:  []grpcpkg.StreamDesc{},
 				Metadata: "greeter.proto",
-			})
+			}, &GreeterServer{})
 
 			s.RegisterService(&grpcpkg.ServiceDesc{
 				ServiceName: "v1alpha.UserService",
@@ -103,29 +122,31 @@ func main() {
 				},
 				Streams:  []grpcpkg.StreamDesc{},
 				Metadata: "user.proto",
-			})
+			}, &UserServiceServer{})
+
+			slog.Info("已注册服务", "services", []string{"v1alpha.Greeter", "v1alpha.UserService"})
 		},
 		grpcserver.WithServiceName("my-grpc-server"),
 		grpcserver.WithMetadata(map[string]string{
-			"version":     "v1.0",
-			"environment": "production",
+			"version": "v1.0",
 		}),
+		// 设置地域信息，兼容Polaris
+		grpcserver.WithRegionInfo("us-west-1", "us-west-1a", "campus-1"),
+		grpcserver.WithEnvironment("production"),
+		grpcserver.WithWeight(100),
+		grpcserver.WithPriority(0),
 		// 启用自动服务发现，会自动读取已注册的protobuf服务
-		grpcserver.WithAutoServiceDiscovery(
-			etcdv3.NewRegistry(&etcdv3.Config{
-				Endpoints: []string{"127.0.0.1:2379"},
-				Prefix:    "/beauty",
-				TTL:       10,
-			}),
-			nacos.NewRegistry(&nacos.Config{
-				Addr:      []string{"127.0.0.1:8848"},
-				Cluster:   "",
-				Namespace: "",
-				Group:     "",
-				Weight:    100,
-			}),
-		),
+		grpcserver.WithAutoServiceDiscovery(etcdRegistry, nacosRegistry),
 	)
+
+	slog.Info("配置完成",
+		"server_addr", ":58080",
+		"region", "us-west-1",
+		"zone", "us-west-1a",
+		"campus", "campus-1",
+		"environment", "production",
+		"weight", 100,
+		"priority", 0)
 
 	// 创建应用
 	app := beauty.New(
@@ -135,8 +156,18 @@ func main() {
 
 	slog.Info("启动gRPC服务，启用自动服务发现...")
 	slog.Info("每个protobuf服务将作为独立服务注册到注册中心")
+	slog.Info("服务发现支持以下功能:")
+	slog.Info("  - 自动读取已注册的protobuf服务")
+	slog.Info("  - 每个服务独立注册到注册中心")
+	slog.Info("  - 支持地域信息和Polaris兼容")
+	slog.Info("  - 支持多种注册中心（etcd、nacos）")
 
-	if err := app.Start(context.Background()); err != nil {
+	// 启动应用，包含错误处理
+	ctx := context.Background()
+	if err := app.Start(ctx); err != nil {
+		slog.Error("启动应用失败", "error", err)
 		log.Fatalln(err)
 	}
+
+	slog.Info("应用启动成功，服务已注册到注册中心")
 }

@@ -45,15 +45,37 @@ func (sd *ServiceDiscovery) DiscoverServices(serverAddr string, baseMetadata map
 			methods = append(methods, method.Name)
 		}
 
-		// 合并元数据
+		// 合并元数据，确保地域信息被正确传递
 		metadata := make(map[string]string)
 		for k, v := range baseMetadata {
 			metadata[k] = v
 		}
+
+		// 设置基础元数据
 		metadata["kind"] = "grpc"
 		metadata["methods"] = fmt.Sprintf("%v", methods)
 		if serviceInfo.Metadata != nil {
 			metadata["proto_file"] = serviceInfo.Metadata.(string) // 包含proto文件信息
+		}
+
+		// 确保Polaris兼容的地域信息
+		if metadata["region"] == "" {
+			metadata["region"] = "default"
+		}
+		if metadata["zone"] == "" {
+			metadata["zone"] = "default"
+		}
+		if metadata["campus"] == "" {
+			metadata["campus"] = "default"
+		}
+		if metadata["environment"] == "" {
+			metadata["environment"] = "production"
+		}
+		if metadata["weight"] == "" {
+			metadata["weight"] = "100"
+		}
+		if metadata["priority"] == "" {
+			metadata["priority"] = "0"
 		}
 
 		protoService := &ProtoServiceInfo{
@@ -68,6 +90,10 @@ func (sd *ServiceDiscovery) DiscoverServices(serverAddr string, baseMetadata map
 		logger.Info("discovered gRPC service",
 			"service", serviceName,
 			"methods", methods,
+			"region", metadata["region"],
+			"zone", metadata["zone"],
+			"environment", metadata["environment"],
+			"weight", metadata["weight"],
 			"proto_file", serviceInfo.Metadata)
 	}
 

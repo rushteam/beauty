@@ -41,29 +41,80 @@ The CLI will prompt you to enter:
 - Project module name (Go module path)
 - Web framework choice (chi or gin)
 
+### 快速开始
+
+```bash
+# 创建新项目
+beauty new my-service
+
+# 进入项目目录
+cd my-service
+
+# 安装依赖
+go mod tidy
+
+# 生成 gRPC 代码（如果有 .proto 文件）
+make generate
+
+# 运行项目
+go run main.go
+```
+
 ## Project Structure
 
-A typical Beauty project has the following structure:
+Beauty 框架采用统一的项目结构，支持 HTTP、gRPC 和 Cron 三种服务类型：
 
 ```
 my-service/
-├── config/
+├── api/                    # Protocol Buffers 定义
+│   ├── user.proto
+│   └── v1/
+│       ├── user.pb.go
+│       ├── user_grpc.pb.go
+│       └── user.pb.gw.go
+├── buf.gen.yaml           # buf 代码生成配置
+├── buf.yaml               # buf 项目配置
+├── config/                # 配置文件
 │   └── dev/
 │       └── app.yaml
 ├── go.mod
-├── main.go
-└── internal/
-    ├── config/
+├── main.go                # 应用入口
+├── Makefile               # 构建脚本
+├── scripts/               # 工具脚本
+│   └── generate.sh
+└── internal/              # 内部代码
+    ├── config/            # 配置管理
     │   └── config.go
-    ├── endpoint/
-    │   └── router/
+    ├── endpoint/          # 服务端点
+    │   ├── grpc/          # gRPC 服务
+    │   │   └── server.go
+    │   ├── handlers/      # HTTP 处理器
+    │   │   ├── user.go
+    │   │   └── health.go
+    │   ├── job/           # 定时任务
+    │   │   └── cron.go
+    │   └── router/        # HTTP 路由
     │       ├── http.go
     │       ├── middleware.go
     │       └── router.go
-    └── infra/
-        ├── conf/
-        └── logger/
+    └── infra/             # 基础设施
+        ├── conf/          # 配置加载
+        │   └── conf.go
+        ├── logger/        # 日志
+        │   └── logger.go
+        ├── middleware/    # 中间件
+        │   └── middleware.go
+        └── registry/      # 服务注册
+            └── registry.go
 ```
+
+**核心特性**：
+- **多协议支持**: HTTP、gRPC、Cron 三种服务类型
+- **代码生成**: 基于 Protocol Buffers 自动生成 gRPC 代码
+- **服务发现**: 支持多种注册中心（etcd/nacos/polaris/k8s）
+- **统一配置**: 集中式配置管理
+- **中间件**: 完整的中间件支持
+- **监控**: 内置链路追踪和指标收集
 
 ## Configuration
 

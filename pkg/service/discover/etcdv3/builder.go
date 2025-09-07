@@ -5,8 +5,6 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
-// "github.com/ymcvalu/grpc-discovery/pkg/instance"
-
 func init() {
 	resolver.Register(&builder{})
 }

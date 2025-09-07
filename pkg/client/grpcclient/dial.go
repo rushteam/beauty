@@ -210,16 +210,10 @@ func parseTarget(target string) (serviceName string, registry discover.Discovery
 		}
 	}
 
-	// 根据 scheme 创建注册中心
-	switch u.Scheme {
-	case "beauty":
-		// 使用默认注册中心或从环境变量获取
-		registry = getDefaultRegistry()
-	case "etcd", "nacos":
-		// 对于 etcd 和 nacos，需要用户提供注册中心实例
-		return "", nil, nil, fmt.Errorf("scheme %s requires explicit registry via WithRegistry option", u.Scheme)
-	default:
-		return "", nil, nil, fmt.Errorf("unsupported scheme: %s", u.Scheme)
+	// 使用插件机制创建注册中心
+	registry, err = createRegistryFromScheme(u.Scheme, u)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed to create registry for scheme %s: %w", u.Scheme, err)
 	}
 
 	return serviceName, registry, params, nil
@@ -298,4 +292,17 @@ func getDefaultRegistry() discover.Discovery {
 // Dial 简化版本，不需要 context
 func Dial(target string, opts ...DialOption) (*grpc.ClientConn, error) {
 	return DialContext(context.Background(), target, opts...)
+}
+
+// createRegistryFromScheme 使用插件机制创建注册中心
+func createRegistryFromScheme(scheme string, targetURL *url.URL) (discover.Discovery, error) {
+	switch scheme {
+	case "beauty":
+		// 使用默认注册中心或从环境变量获取
+		return getDefaultRegistry(), nil
+	default:
+		// 使用插件机制创建注册中心
+		manager := discover.GetManager()
+		return manager.CreateRegistryFromURL(targetURL)
+	}
 }

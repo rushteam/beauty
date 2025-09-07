@@ -12,7 +12,7 @@ import (
 )
 
 // Version ..
-var Version = "0.0.1"
+var Version = "0.0.3"
 
 func main() {
 	app := &cli.Command{
@@ -42,12 +42,12 @@ func main() {
 			{
 				Name:    "new",
 				Aliases: []string{"n", "create"},
-				Usage:   "🆕 创建新的Beauty项目",
-				Description: `快速创建新的Beauty项目，支持多种服务类型组合：
-   • web-service    - HTTP微服务
-   • grpc-service   - gRPC微服务  
-   • cron-service   - 定时任务服务
-   • unified        - 交互式选择服务类型（推荐）`,
+				Usage:   "🆕 创建新项目或向现有项目添加服务",
+				Description: `创建新的Beauty项目或向现有项目添加服务：
+   • 支持创建新项目：beauty new my-project
+   • 支持向现有项目添加服务：beauty new . --grpc
+   • 智能检测现有项目结构
+   • 支持多种服务类型组合`,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:    "template",

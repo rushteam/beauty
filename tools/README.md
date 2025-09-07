@@ -94,13 +94,17 @@ go run main.go
 
 ## 📋 命令列表
 
-### 1. 创建新项目 (`new`)
+### 1. 创建新项目或添加服务 (`new`)
 
-快速创建新的Beauty项目，支持多种服务模板。
+创建新的Beauty项目或向现有项目添加服务，支持智能检测和补充。
 
 ```bash
-# 基本用法
-./beauty new <项目名称>
+# 创建新项目
+./beauty new my-project
+
+# 向现有项目添加服务
+./beauty new . --grpc
+./beauty new /path/to/project --web --cron
 
 # 指定模板类型
 ./beauty new my-service --template grpc-service
@@ -122,6 +126,13 @@ go run main.go
 - **cron-service** - 定时任务服务
 - **full-stack** - 完整微服务栈
 
+#### 功能特性
+
+- **智能检测** - 自动检测现有项目结构，识别已包含的服务类型
+- **安全补充** - 智能跳过已存在的文件，避免覆盖现有代码
+- **交互式选择** - 支持交互式选择要添加的服务类型
+- **保持配置** - 保持现有项目配置不变，只添加缺失的服务文件
+
 #### 示例
 
 ```bash
@@ -133,6 +144,15 @@ go run main.go
 
 # 创建定时任务服务
 ./beauty new cleanup-job --template cron-service
+
+# 向现有web项目添加gRPC服务
+./beauty new user-service --grpc
+
+# 向现有项目添加多种服务
+./beauty new my-project --web --grpc --cron
+
+# 在当前目录添加服务
+./beauty new . --grpc
 ```
 
 ### 2. API解析 (`api`)
@@ -468,24 +488,36 @@ my-microservice/
    ./beauty new my-service --template web-service
    ```
 
-2. **定义API**
+2. **添加服务类型** (可选)
+   ```bash
+   # 向现有项目添加gRPC服务
+   ./beauty new my-service --grpc
+   
+   # 添加定时任务服务
+   ./beauty new my-service --cron
+   
+   # 在当前目录添加服务
+   ./beauty new . --grpc
+   ```
+
+3. **定义API**
    ```bash
    # 创建protobuf文件
    vim api/proto/service.proto
    ```
 
-3. **生成代码**
+4. **生成代码**
    ```bash
    ./beauty api api/proto --generate --openapi
    ```
 
-4. **开发业务逻辑**
+5. **开发业务逻辑**
    ```bash
    # 实现处理器
    vim internal/endpoint/handlers/handlers.go
    ```
 
-5. **测试和部署**
+6. **测试和部署**
    ```bash
    go test ./...
    go build -o my-service
@@ -540,6 +572,24 @@ A: 目前支持：
 ### Q: 如何添加新的中间件？
 
 A: 在生成的 `internal/infra/middleware/middleware.go` 文件中添加新的中间件配置。
+
+### Q: 如何向现有项目添加新的服务类型？
+
+A: 使用 `new` 命令：
+```bash
+# 向现有web项目添加gRPC服务
+./beauty new my-project --grpc
+
+# 在当前目录添加服务
+./beauty new . --grpc
+
+# 交互式选择要添加的服务
+./beauty new my-project
+```
+
+### Q: new 命令会覆盖现有文件吗？
+
+A: 不会。当在现有项目中使用 `new` 命令时，会智能跳过已存在的文件，只添加缺失的服务文件，确保不会覆盖现有代码。
 
 ## 🐛 故障排除
 
@@ -596,6 +646,21 @@ cat config/dev/app.yaml
 - [服务发现配置](../../docs/directory-upgrade.md)
 
 ## 📝 更新日志
+
+### v0.0.3 (2024-12-19)
+
+#### ✨ 新功能
+- **统一 new 命令** - 将 add-service 功能合并到 new 命令中
+- **智能项目检测** - 自动检测现有项目结构，识别已包含的服务
+- **安全文件补充** - 智能跳过已存在的文件，避免覆盖现有代码
+- **交互式服务选择** - 支持交互式选择要添加的服务类型
+- **现有项目支持** - 支持在当前目录或现有项目中添加服务
+
+#### 🔧 改进
+- 优化项目结构检测算法
+- 增强模板文件处理逻辑
+- 完善错误处理和用户提示
+- 简化命令结构，提供更统一的用户体验
 
 ### v0.0.1 (2024-09-06)
 

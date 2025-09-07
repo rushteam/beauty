@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
+	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 	"github.com/rushteam/beauty/pkg/utils/selector"
 	"google.golang.org/grpc"

@@ -11,7 +11,7 @@ import (
 	// "github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rushteam/beauty"
 	v1 "github.com/rushteam/beauty/examples/complete/example/api/v1"
-	grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
+	"github.com/rushteam/beauty/pkg/client/grpcclient"
 
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 	"github.com/rushteam/beauty/pkg/service/discover/nacos"

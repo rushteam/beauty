@@ -2,22 +2,18 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"time"
 
-	grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
+	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 )
 
 func main() {
 	// 创建服务发现
-	discovery, err := etcdv3.NewEtcdV3Discovery(etcdv3.Config{
+	discovery := etcdv3.NewRegistry(&etcdv3.Config{
 		Endpoints: []string{"localhost:2379"},
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// 创建客户端工厂
 	factory := grpcclient.NewClientFactory(discovery)

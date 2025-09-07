@@ -24,7 +24,7 @@ import (
     "context"
     "log"
     
-    "github.com/rushteam/beauty/pkg/client/grpc"
+    "github.com/rushteam/beauty/pkg/client/grpcclient"
     "github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 )
 
@@ -245,7 +245,7 @@ import (
     "log"
     "time"
     
-    "github.com/rushteam/beauty/pkg/client/grpc"
+    "github.com/rushteam/beauty/pkg/client/grpcclient"
     "github.com/rushteam/beauty/pkg/service/discover/etcdv3"
     "google.golang.org/grpc"
     "google.golang.org/grpc/keepalive"

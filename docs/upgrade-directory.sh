@@ -52,7 +52,7 @@ find . -type f -name "*.go" -exec sed -i '' \
     -e 's|"github.com/rushteam/beauty/pkg/logger"|"github.com/rushteam/beauty/pkg/service/logger"|g' \
     -e 's|"github.com/rushteam/beauty/pkg/discover"|"github.com/rushteam/beauty/pkg/service/discover"|g' \
     -e 's|"github.com/rushteam/beauty/pkg/core"|"github.com/rushteam/beauty/pkg/service/core"|g' \
-    -e 's|"github.com/rushteam/beauty/pkg/client/grpcclient"|"github.com/rushteam/beauty/pkg/client/grpc"|g' \
+    -e 's|"github.com/rushteam/beauty/pkg/client/grpcclient"|"github.com/rushteam/beauty/pkg/client/grpcclient"|g' \
     -e 's|"github.com/rushteam/beauty/pkg/client/resty"|"github.com/rushteam/beauty/pkg/client/http"|g' \
     -e 's|"github.com/rushteam/beauty/example/example/api/v1"|"github.com/rushteam/beauty/examples/complete/example/api/v1"|g' \
     {} +

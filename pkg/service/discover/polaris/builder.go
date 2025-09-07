@@ -3,7 +3,7 @@ package polaris
 import (
 	"fmt"
 
-	grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
+	"github.com/rushteam/beauty/pkg/client/grpcclient"
 	"google.golang.org/grpc/resolver"
 )
 

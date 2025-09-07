@@ -52,7 +52,7 @@ conn, err := grpcclient.DialContext(ctx, "beauty://v1alpha.Greeter?env=productio
 ### 最简单的使用方式
 
 ```go
-import grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
+import "github.com/rushteam/beauty/pkg/client/grpcclient"
 
 // 最简单的拨号
 conn, err := grpcclient.DialContext(ctx, "beauty://v1alpha.UserService")
@@ -248,7 +248,7 @@ import (
     "log"
     "time"
 
-    grpcclient "github.com/rushteam/beauty/pkg/client/grpc"
+    "github.com/rushteam/beauty/pkg/client/grpcclient"
     pb "your-project/api/v1"
 )
 

@@ -225,6 +225,7 @@ type wokerpool struct {
 
 	taskLock sync.RWMutex
 	tasks    *list.List
+	taskCh   chan struct{} // signals workers that a new task is available
 
 	panicHandler func(taskName string, panicValue any, stack []byte)
 
@@ -260,14 +261,15 @@ func New(opts ...Option) Pool {
 		cap:            math.MaxInt32,
 		scaleThreshold: 1,
 		tasks:          new(list.List),
+		taskCh:         make(chan struct{}, 1),
 		closeCh:        make(chan struct{}),
 	}
 	// 默认的 panic 处理函数
 	p.panicHandler = func(taskName string, panicValue any, stack []byte) {
 		if taskName != "" {
-			logger.Error("panic in worker pool task [%s]: %v\nstack: %s", taskName, panicValue, string(stack))
+			logger.Error("panic in worker pool task", "task", taskName, "panic", panicValue, "stack", string(stack))
 		} else {
-			logger.Error("panic in worker pool: %v\nstack: %s", panicValue, string(stack))
+			logger.Error("panic in worker pool", "panic", panicValue, "stack", string(stack))
 		}
 	}
 	for _, o := range opts {
@@ -337,6 +339,11 @@ func (p *wokerpool) addTask(task *Task) {
 	p.taskLock.Lock()
 	defer p.taskLock.Unlock()
 	p.tasks.PushBack(task)
+	// non-blocking signal: if taskCh already has a pending signal, skip
+	select {
+	case p.taskCh <- struct{}{}:
+	default:
+	}
 }
 
 func (p *wokerpool) taskNum() int {
@@ -371,34 +378,29 @@ func (p *wokerpool) run() {
 		}()
 
 		for {
-			select {
-			case <-p.closeCh:
-				// 收到关闭信号，退出 worker
-				return
-			default:
+			// drain all available tasks before waiting for the next signal
+			for {
 				task := p.popTask()
 				if task == nil {
-					// 没有任务，检查是否应该退出
-					if atomic.LoadInt32(&p.closed) == 1 {
-						return
-					}
-					// 暂时没有任务，继续等待
-					time.Sleep(time.Millisecond * 10)
-					continue
+					break
 				}
-
 				// 检查任务上下文是否已取消
 				if task.ctx != nil {
 					select {
 					case <-task.ctx.Done():
-						// 任务已取消，跳过执行
 						continue
 					default:
 					}
 				}
-
-				// 执行任务
 				p.executeTask(task)
+			}
+
+			// no tasks left: wait for a new task signal or close
+			select {
+			case <-p.closeCh:
+				return
+			case <-p.taskCh:
+				// a new task was enqueued, loop back to drain
 			}
 		}
 	}()

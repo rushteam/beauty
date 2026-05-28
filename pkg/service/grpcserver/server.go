@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -42,12 +43,6 @@ func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerIntercepto
 // WithCircuitBreaker 添加熔断器拦截器
 func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
 	return func(s *Server) {
-		if s.unaryInterceptors == nil {
-			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
-		}
-		if s.streamInterceptors == nil {
-			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
-		}
 		s.unaryInterceptors = append(s.unaryInterceptors, circuitbreaker.UnaryServerInterceptor(cb))
 		s.streamInterceptors = append(s.streamInterceptors, circuitbreaker.StreamServerInterceptor(cb))
 	}
@@ -56,12 +51,6 @@ func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
 // WithTimeout 添加超时控制拦截器
 func WithTimeout(tc *timeout.TimeoutController) Options {
 	return func(s *Server) {
-		if s.unaryInterceptors == nil {
-			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
-		}
-		if s.streamInterceptors == nil {
-			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
-		}
 		s.unaryInterceptors = append(s.unaryInterceptors, timeout.UnaryServerInterceptor(tc))
 		s.streamInterceptors = append(s.streamInterceptors, timeout.StreamServerInterceptor(tc))
 	}
@@ -70,12 +59,6 @@ func WithTimeout(tc *timeout.TimeoutController) Options {
 // WithAuth 添加认证拦截器
 func WithAuth(am *auth.AuthMiddleware) Options {
 	return func(s *Server) {
-		if s.unaryInterceptors == nil {
-			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
-		}
-		if s.streamInterceptors == nil {
-			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
-		}
 		s.unaryInterceptors = append(s.unaryInterceptors, auth.UnaryServerInterceptor(am))
 		s.streamInterceptors = append(s.streamInterceptors, auth.StreamServerInterceptor(am))
 	}
@@ -84,12 +67,6 @@ func WithAuth(am *auth.AuthMiddleware) Options {
 // WithRateLimit 添加限流拦截器
 func WithRateLimit(rl *ratelimit.RateLimitMiddleware) Options {
 	return func(s *Server) {
-		if s.unaryInterceptors == nil {
-			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
-		}
-		if s.streamInterceptors == nil {
-			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
-		}
 		s.unaryInterceptors = append(s.unaryInterceptors, ratelimit.UnaryServerInterceptor(rl))
 		s.streamInterceptors = append(s.streamInterceptors, ratelimit.StreamServerInterceptor(rl))
 	}
@@ -98,12 +75,6 @@ func WithRateLimit(rl *ratelimit.RateLimitMiddleware) Options {
 // WithRateLimitWait 添加等待型限流拦截器
 func WithRateLimitWait(rl *ratelimit.RateLimitMiddleware) Options {
 	return func(s *Server) {
-		if s.unaryInterceptors == nil {
-			s.unaryInterceptors = make([]grpc.UnaryServerInterceptor, 0)
-		}
-		if s.streamInterceptors == nil {
-			s.streamInterceptors = make([]grpc.StreamServerInterceptor, 0)
-		}
 		s.unaryInterceptors = append(s.unaryInterceptors, ratelimit.UnaryServerWaitInterceptor(rl))
 		s.streamInterceptors = append(s.streamInterceptors, ratelimit.StreamServerInterceptor(rl))
 	}
@@ -117,9 +88,7 @@ func WithServiceName(name string) Options {
 
 func WithMetadata(md map[string]string) Options {
 	return func(s *Server) {
-		for k, v := range md {
-			s.metadata[k] = v
-		}
+		maps.Copy(s.metadata, md)
 	}
 }
 
@@ -184,6 +153,7 @@ func New(addr string, handler func(*grpc.Server), opts ...Options) *Server {
 		unaryInterceptors:  make([]grpc.UnaryServerInterceptor, 0),
 		streamInterceptors: make([]grpc.StreamServerInterceptor, 0),
 		addr:               addr,
+		ready:              make(chan struct{}),
 		Server:             nil,
 	}
 
@@ -226,6 +196,7 @@ type Server struct {
 	streamInterceptors []grpc.StreamServerInterceptor
 
 	addr     string
+	ready    chan struct{}
 	grpcOpts []grpc.ServerOption
 	Server   *grpc.Server
 
@@ -241,6 +212,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.addr = ln.Addr().String() //确保随机端口时候 s.addr 值的正确性
+	close(s.ready)
 
 	// 如果启用了自动服务发现
 	if s.autoDiscover && s.serviceDiscovery != nil {
@@ -270,6 +242,10 @@ func (s *Server) Start(ctx context.Context) error {
 	logger.Info("grpc server stopped...")
 	s.Server.GracefulStop()
 	return nil
+}
+
+func (s *Server) Ready() <-chan struct{} {
+	return s.ready
 }
 
 // String ..

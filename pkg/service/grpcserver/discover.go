@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
@@ -47,15 +48,13 @@ func (sd *ServiceDiscovery) DiscoverServices(serverAddr string, baseMetadata map
 
 		// 合并元数据，确保地域信息被正确传递
 		metadata := make(map[string]string)
-		for k, v := range baseMetadata {
-			metadata[k] = v
-		}
+		maps.Copy(metadata, baseMetadata)
 
 		// 设置基础元数据
 		metadata["kind"] = "grpc"
 		metadata["methods"] = fmt.Sprintf("%v", methods)
-		if serviceInfo.Metadata != nil {
-			metadata["proto_file"] = serviceInfo.Metadata.(string) // 包含proto文件信息
+		if s, ok := serviceInfo.Metadata.(string); ok {
+			metadata["proto_file"] = s
 		}
 
 		// 确保Polaris兼容的地域信息
@@ -103,31 +102,26 @@ func (sd *ServiceDiscovery) DiscoverServices(serverAddr string, baseMetadata map
 // RegisterAllServices 注册所有发现的服务
 func (sd *ServiceDiscovery) RegisterAllServices(ctx context.Context) error {
 	for serviceName, serviceInfo := range sd.services {
-		go func(name string, info *ProtoServiceInfo) {
-			// 为每个protobuf服务创建独立的注册实例
-			serviceWrapper := &ProtoServiceWrapper{
-				id:          uuid.New(),
-				serviceName: name,
-				methods:     info.Methods,
-				addr:        info.ServerAddr,
-				metadata:    info.Metadata,
-			}
-
-			// 注册到所有注册中心
-			for _, registry := range sd.registries {
-				go func(r discover.Registry) {
-					stop, err := r.Register(ctx, serviceWrapper)
-					if err != nil {
-						logger.Error("proto service register error",
-							"service", name,
-							"error", err)
-						return
-					}
-					defer stop()
-					<-ctx.Done()
-				}(registry)
-			}
-		}(serviceName, serviceInfo)
+		serviceWrapper := &ProtoServiceWrapper{
+			id:          uuid.New(),
+			serviceName: serviceName,
+			methods:     serviceInfo.Methods,
+			addr:        serviceInfo.ServerAddr,
+			metadata:    serviceInfo.Metadata,
+		}
+		for _, registry := range sd.registries {
+			go func(r discover.Registry) {
+				stop, err := r.Register(ctx, serviceWrapper)
+				if err != nil {
+					logger.Error("proto service register error",
+						"service", serviceName,
+						"error", err)
+					return
+				}
+				defer stop()
+				<-ctx.Done()
+			}(registry)
+		}
 	}
 	return nil
 }

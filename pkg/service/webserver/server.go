@@ -77,6 +77,7 @@ func New(addr string, mux http.Handler, opts ...Options) *Server {
 		name:        "http-server",
 		metadata:    map[string]string{"kind": "http"},
 		middlewares: make([]func(http.Handler) http.Handler, 0),
+		ready:       make(chan struct{}),
 		Server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
@@ -103,6 +104,7 @@ type Server struct {
 	name        string
 	metadata    map[string]string
 	middlewares []func(http.Handler) http.Handler
+	ready       chan struct{}
 
 	*http.Server
 }
@@ -113,6 +115,7 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.Server.Addr = ln.Addr().String()
+	close(s.ready)
 	go func() {
 		logger.Info("web server serve", slog.String("addr", s.Server.Addr))
 		if err := s.Serve(ln); err != nil {
@@ -126,6 +129,10 @@ func (s *Server) Start(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 	return s.Shutdown(ctx)
+}
+
+func (s *Server) Ready() <-chan struct{} {
+	return s.ready
 }
 
 func (s *Server) String() string {

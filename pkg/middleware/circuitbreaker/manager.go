@@ -143,8 +143,8 @@ func (m *Manager) Stats() map[string]CircuitBreakerStats {
 
 // Reset 重置所有熔断器
 func (m *Manager) Reset() {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
 	for _, cb := range m.breakers {
 		cb.Reset()
@@ -157,8 +157,8 @@ func (m *Manager) Reset() {
 
 // ResetByName 重置指定名称的熔断器
 func (m *Manager) ResetByName(name string) bool {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 
 	if cb, exists := m.breakers[name]; exists {
 		cb.Reset()

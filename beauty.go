@@ -90,6 +90,13 @@ type Service interface {
 	Start(ctx context.Context) error
 	String() string
 }
+
+// ReadyNotifier is an optional interface a Service can implement to signal
+// that it is ready to accept traffic (e.g. port is listening).
+// startService waits for this signal before registering with the registry.
+type ReadyNotifier interface {
+	Ready() <-chan struct{}
+}
 type ServiceKind interface {
 	Kind() string
 }
@@ -157,24 +164,28 @@ func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service)
 	ctx, cancel := context.WithCancel(ctx)
 	go func(srv Service) {
 		defer wg.Done()
-		select {
-		case <-time.After(time.Microsecond * 10):
-			if v, ok := srv.(discover.Service); ok {
-				for _, r := range s.registry {
-					// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
-					stop, err := r.Register(ctx, v)
-					if err != nil {
-						logger.Error("service registry.Register error", "error", err)
-						return
-					}
-					defer stop()
-				}
+		// Wait until the service signals it is ready (port listening) before
+		// registering with the registry. Fall through immediately for services
+		// that do not implement ReadyNotifier.
+		if n, ok := srv.(ReadyNotifier); ok {
+			select {
+			case <-n.Ready():
+			case <-ctx.Done():
+				return
 			}
-			<-ctx.Done()
-			return
-		case <-ctx.Done():
-			return
 		}
+		if v, ok := srv.(discover.Service); ok {
+			for _, r := range s.registry {
+				// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
+				stop, err := r.Register(ctx, v)
+				if err != nil {
+					logger.Error("service registry.Register error", "error", err)
+					return
+				}
+				defer stop()
+			}
+		}
+		<-ctx.Done()
 	}(srv)
 	go func(srv Service) {
 		if err := srv.Start(ctx); err != nil {

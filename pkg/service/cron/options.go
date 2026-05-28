@@ -26,7 +26,7 @@ func WithCronHandler(spec string, handler func(ctx context.Context) error, opts 
 
 type CronOptions func(c *Cron)
 
-func WitchTraceProvider(t trace.TracerProvider) CronOptions {
+func WithTraceProvider(t trace.TracerProvider) CronOptions {
 	return func(c *Cron) {
 		c.traceProvider = t
 	}

@@ -47,34 +47,29 @@ func HTTPMiddleware(auth *AuthMiddleware) func(http.Handler) http.Handler {
 	}
 }
 
-// buildHTTPMetadata 构建 HTTP 请求元数据
+// buildHTTPMetadata 构建 HTTP 请求元数据。
+// headers/query 直接引用请求原始对象，避免拷贝；cookies 因需要 name→value 映射仍需构建。
 func buildHTTPMetadata(r *http.Request) map[string]interface{} {
-	metadata := make(map[string]interface{})
+	md := make(map[string]interface{}, 7)
 
-	// 添加 headers
-	headers := make(map[string][]string)
-	for name, values := range r.Header {
-		headers[name] = values
+	md["headers"] = r.Header      // http.Header 即 map[string][]string，直接引用
+	md["query"] = r.URL.RawQuery  // 原始 query string，避免 ParseQuery 的 map 分配
+	md["method"] = r.Method
+	md["path"] = r.URL.Path
+	md["remote_addr"] = r.RemoteAddr
+	md["user_agent"] = r.UserAgent()
+
+	// cookies 需要 name→value 映射，无法直接复用
+	cookies := r.Cookies()
+	if len(cookies) > 0 {
+		cookieMap := make(map[string]string, len(cookies))
+		for _, cookie := range cookies {
+			cookieMap[cookie.Name] = cookie.Value
+		}
+		md["cookies"] = cookieMap
 	}
-	metadata["headers"] = headers
 
-	// 添加查询参数
-	metadata["query"] = r.URL.Query()
-
-	// 添加 cookies
-	cookies := make(map[string]string)
-	for _, cookie := range r.Cookies() {
-		cookies[cookie.Name] = cookie.Value
-	}
-	metadata["cookies"] = cookies
-
-	// 添加其他信息
-	metadata["method"] = r.Method
-	metadata["path"] = r.URL.Path
-	metadata["remote_addr"] = r.RemoteAddr
-	metadata["user_agent"] = r.UserAgent()
-
-	return metadata
+	return md
 }
 
 // handleAuthError 处理认证错误

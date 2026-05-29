@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"google.golang.org/grpc"
 )
@@ -208,11 +208,13 @@ func main() {
 		beauty.WithService(webserver.New(":8080", mux,
 			webserver.WithServiceName("web-server"),
 			// 中间件执行顺序（从外到内）：
-			webserver.WithMiddleware(loggingMiddleware),  // 1. 日志中间件（最外层）
-			webserver.WithAuth(authMiddleware),           // 2. 认证中间件
-			webserver.WithRateLimit(rateLimitMiddleware), // 3. 限流中间件
-			webserver.WithTimeout(timeoutController),     // 4. 超时控制中间件
-			webserver.WithCircuitBreaker(circuitBreaker), // 5. 熔断器中间件（最内层）
+			webserver.WithMiddleware(
+				loggingMiddleware,                       // 1. 日志中间件（最外层）
+				auth.HTTPMiddleware(authMiddleware),      // 2. 认证中间件
+				ratelimit.HTTPMiddleware(rateLimitMiddleware), // 3. 限流中间件
+				timeout.HTTPMiddleware(timeoutController),     // 4. 超时控制中间件
+				circuitbreaker.HTTPMiddleware(circuitBreaker), // 5. 熔断器中间件（最内层）
+			),
 		)),
 
 		// gRPC 服务器 - 组合使用所有拦截器
@@ -221,10 +223,18 @@ func main() {
 		},
 			grpcserver.WithServiceName("grpc-server"),
 			// 拦截器执行顺序：
-			grpcserver.WithAuth(authMiddleware),           // 1. 认证拦截器
-			grpcserver.WithRateLimit(rateLimitMiddleware), // 2. 限流拦截器
-			grpcserver.WithTimeout(timeoutController),     // 3. 超时控制拦截器
-			grpcserver.WithCircuitBreaker(circuitBreaker), // 4. 熔断器拦截器
+			grpcserver.WithGrpcServerUnaryInterceptor(
+				auth.UnaryServerInterceptor(authMiddleware),           // 1. 认证拦截器
+				ratelimit.UnaryServerInterceptor(rateLimitMiddleware), // 2. 限流拦截器
+				timeout.UnaryServerInterceptor(timeoutController),     // 3. 超时控制拦截器
+				circuitbreaker.UnaryServerInterceptor(circuitBreaker), // 4. 熔断器拦截器
+			),
+			grpcserver.WithGrpcServerStreamInterceptor(
+				auth.StreamServerInterceptor(authMiddleware),
+				ratelimit.StreamServerInterceptor(rateLimitMiddleware),
+				timeout.StreamServerInterceptor(timeoutController),
+				circuitbreaker.StreamServerInterceptor(circuitBreaker),
+			),
 		)),
 	)
 

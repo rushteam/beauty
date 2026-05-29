@@ -7,10 +7,6 @@ import (
 	"net"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	"github.com/rushteam/beauty/pkg/middleware/auth"
-	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
-	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
-	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/addr"
@@ -37,46 +33,6 @@ func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerIntercepto
 	return WithGrpcServerOptions(grpc.StreamInterceptor(
 		middleware.ChainStreamServer(interceptors...),
 	))
-}
-
-// WithCircuitBreaker 添加熔断器拦截器
-func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
-	return func(s *Server) {
-		s.unaryInterceptors = append(s.unaryInterceptors, circuitbreaker.UnaryServerInterceptor(cb))
-		s.streamInterceptors = append(s.streamInterceptors, circuitbreaker.StreamServerInterceptor(cb))
-	}
-}
-
-// WithTimeout 添加超时控制拦截器
-func WithTimeout(tc *timeout.TimeoutController) Options {
-	return func(s *Server) {
-		s.unaryInterceptors = append(s.unaryInterceptors, timeout.UnaryServerInterceptor(tc))
-		s.streamInterceptors = append(s.streamInterceptors, timeout.StreamServerInterceptor(tc))
-	}
-}
-
-// WithAuth 添加认证拦截器
-func WithAuth(am *auth.AuthMiddleware) Options {
-	return func(s *Server) {
-		s.unaryInterceptors = append(s.unaryInterceptors, auth.UnaryServerInterceptor(am))
-		s.streamInterceptors = append(s.streamInterceptors, auth.StreamServerInterceptor(am))
-	}
-}
-
-// WithRateLimit 添加限流拦截器
-func WithRateLimit(rl *ratelimit.RateLimitMiddleware) Options {
-	return func(s *Server) {
-		s.unaryInterceptors = append(s.unaryInterceptors, ratelimit.UnaryServerInterceptor(rl))
-		s.streamInterceptors = append(s.streamInterceptors, ratelimit.StreamServerInterceptor(rl))
-	}
-}
-
-// WithRateLimitWait 添加等待型限流拦截器
-func WithRateLimitWait(rl *ratelimit.RateLimitMiddleware) Options {
-	return func(s *Server) {
-		s.unaryInterceptors = append(s.unaryInterceptors, ratelimit.UnaryServerWaitInterceptor(rl))
-		s.streamInterceptors = append(s.streamInterceptors, ratelimit.StreamServerInterceptor(rl))
-	}
 }
 
 func WithServiceName(name string) Options {

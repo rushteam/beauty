@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"google.golang.org/grpc"
 )
@@ -141,7 +141,7 @@ func main() {
 		// 使用带超时控制的 Web 服务器
 		beauty.WithService(webserver.New(":8080", mux,
 			webserver.WithServiceName("web-server"),
-			webserver.WithTimeout(tc),
+			webserver.WithMiddleware(timeout.HTTPMiddleware(tc)),
 		)),
 
 		// 使用带超时控制的 gRPC 服务器（简单示例）
@@ -149,7 +149,8 @@ func main() {
 			// 这里可以注册 gRPC 服务
 		},
 			grpcserver.WithServiceName("grpc-server"),
-			grpcserver.WithTimeout(tc),
+			grpcserver.WithGrpcServerUnaryInterceptor(timeout.UnaryServerInterceptor(tc)),
+			grpcserver.WithGrpcServerStreamInterceptor(timeout.StreamServerInterceptor(tc)),
 		)),
 	)
 

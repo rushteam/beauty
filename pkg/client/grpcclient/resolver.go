@@ -8,7 +8,6 @@ import (
 	"log/slog"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
-	"github.com/rushteam/beauty/pkg/service/logger"
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 )
@@ -42,13 +41,13 @@ func (r *Resolver) Close() {
 
 func (r *Resolver) Start() {
 	updateState := func(services []discover.ServiceInfo) {
-		logger.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
+		slog.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
 		if err := r.cc.UpdateState(buildState(services)); err != nil {
-			logger.Error("discovery updateState failed", slog.Any("err", err))
+			slog.Error("discovery updateState failed", slog.Any("err", err))
 		}
 	}
 	if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
-		logger.Error("discovery watch failed", slog.Any("err", err))
+		slog.Error("discovery watch failed", slog.Any("err", err))
 	}
 }
 

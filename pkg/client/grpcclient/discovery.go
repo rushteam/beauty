@@ -9,8 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"log/slog"
+
 	"github.com/rushteam/beauty/pkg/service/discover"
-	"github.com/rushteam/beauty/pkg/service/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -366,7 +367,7 @@ func (c *ServiceDiscoveryClient) getOrCreateConn(service *discover.ServiceInfo) 
 		return nil, fmt.Errorf("failed to connect to %s: %w", service.Addr, err)
 	}
 	c.clients[service.Addr] = conn
-	logger.Info("connected to service",
+	slog.Info("connected to service",
 		"service", c.serviceName,
 		"addr", service.Addr,
 		"region", service.Metadata["region"],
@@ -410,7 +411,7 @@ func (c *ServiceDiscoveryClient) WatchServices(ctx context.Context) error {
 		}
 		for addr, conn := range c.clients {
 			if !activeAddrs[addr] {
-				logger.Info("closing connection to removed service",
+				slog.Info("closing connection to removed service",
 					"service", c.serviceName,
 					"addr", addr)
 				conn.Close()
@@ -419,7 +420,7 @@ func (c *ServiceDiscoveryClient) WatchServices(ctx context.Context) error {
 		}
 		c.mu.Unlock()
 
-		logger.Info("service instances updated",
+		slog.Info("service instances updated",
 			"service", c.serviceName,
 			"instances", len(filtered))
 	})
@@ -437,7 +438,7 @@ func (c *ServiceDiscoveryClient) healthCheckLoop(ctx context.Context) {
 			c.mu.Lock()
 			for addr, conn := range c.clients {
 				if conn.GetState() == connectivity.Shutdown {
-					logger.Warn("unhealthy connection detected, removing",
+					slog.Warn("unhealthy connection detected, removing",
 						"service", c.serviceName,
 						"addr", addr)
 					conn.Close()
@@ -463,7 +464,7 @@ func (c *ServiceDiscoveryClient) Close() error {
 	var lastErr error
 	for addr, conn := range c.clients {
 		if err := conn.Close(); err != nil {
-			logger.Error("failed to close connection",
+			slog.Error("failed to close connection",
 				"service", c.serviceName,
 				"addr", addr,
 				"error", err)

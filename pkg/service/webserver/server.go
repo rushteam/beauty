@@ -8,13 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/utils/addr"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
-	"github.com/rushteam/beauty/pkg/middleware/auth"
-	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
-	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
-	"github.com/rushteam/beauty/pkg/middleware/timeout"
+	"github.com/rushteam/beauty/pkg/utils/addr"
 	"github.com/rushteam/beauty/pkg/utils/uuid"
 )
 
@@ -44,31 +40,6 @@ func WithMiddleware(middlewares ...func(http.Handler) http.Handler) Options {
 		}
 		s.middlewares = append(s.middlewares, middlewares...)
 	}
-}
-
-// WithCircuitBreaker 添加熔断器中间件
-func WithCircuitBreaker(cb *circuitbreaker.CircuitBreaker) Options {
-	return WithMiddleware(circuitbreaker.HTTPMiddleware(cb))
-}
-
-// WithTimeout 添加超时控制中间件
-func WithTimeout(tc *timeout.TimeoutController) Options {
-	return WithMiddleware(timeout.HTTPMiddleware(tc))
-}
-
-// WithAuth 添加认证中间件
-func WithAuth(am *auth.AuthMiddleware) Options {
-	return WithMiddleware(auth.HTTPMiddleware(am))
-}
-
-// WithRateLimit 添加限流中间件
-func WithRateLimit(rl *ratelimit.RateLimitMiddleware) Options {
-	return WithMiddleware(ratelimit.HTTPMiddleware(rl))
-}
-
-// WithRateLimitWait 添加等待型限流中间件
-func WithRateLimitWait(rl *ratelimit.RateLimitMiddleware) Options {
-	return WithMiddleware(ratelimit.HTTPWaitMiddleware(rl))
 }
 
 func New(addr string, mux http.Handler, opts ...Options) *Server {

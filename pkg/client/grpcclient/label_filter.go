@@ -1,8 +1,9 @@
 package grpcclient
 
 import (
+	"log/slog"
+
 	"github.com/rushteam/beauty/pkg/service/discover"
-	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/selector"
 )
 
@@ -75,7 +76,7 @@ func (f *ServiceLabelFilter) Filter(services []discover.ServiceInfo) []discover.
 
 	// 如果没有匹配的实例，返回所有实例（容错机制）
 	if len(filtered) == 0 {
-		logger.Warn("no services match label selector, using all available services",
+		slog.Warn("no services match label selector, using all available services",
 			"selector", f.String())
 		return services
 	}

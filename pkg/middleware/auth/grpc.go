@@ -133,30 +133,24 @@ func (s *authServerStream) Context() context.Context {
 	return s.ctx
 }
 
-// buildGRPCMetadata 构建 gRPC 请求元数据
+// buildGRPCMetadata 构建 gRPC 请求元数据。
+// grpc_metadata 直接引用 incoming metadata 原始对象，避免整个 map 的拷贝。
 func buildGRPCMetadata(ctx context.Context, method string) map[string]interface{} {
-	md := make(map[string]interface{})
+	md := make(map[string]interface{}, 6)
 
-	// 添加方法名
 	md["method"] = method
 	md["path"] = method
 
-	// 添加 gRPC metadata
+	// 直接引用原始 metadata，不额外拷贝
 	if grpcMD, ok := metadata.FromIncomingContext(ctx); ok {
-		grpcMetadata := make(map[string][]string)
-		for k, v := range grpcMD {
-			grpcMetadata[k] = v
-		}
-		md["grpc_metadata"] = grpcMetadata
+		md["grpc_metadata"] = grpcMD
 	}
 
-	// 添加 peer 信息
 	if p, ok := peer.FromContext(ctx); ok {
 		md["peer_addr"] = p.Addr.String()
 		md["remote_addr"] = p.Addr.String()
 	}
 
-	// 添加用户信息（如果存在）
 	if user := ctx.Value(userContextKey); user != nil {
 		md["user"] = user
 	}

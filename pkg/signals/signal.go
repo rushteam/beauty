@@ -20,8 +20,13 @@ func NotifyShutdownContext(ctx context.Context, f func()) context.Context {
 		case sig := <-c:
 			logger.Info("stoping with signal", "signal", sig.String())
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("panic in shutdown hook", "panic", r)
+					}
+					cancel()
+				}()
 				f()
-				cancel()
 			}()
 			<-c
 			logger.Info("second signal forced stop")

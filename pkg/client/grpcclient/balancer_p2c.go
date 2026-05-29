@@ -2,7 +2,7 @@ package grpcclient
 
 import (
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,15 +79,11 @@ func (b *p2cEwmaPickerBuilder) Build(buildInfo base.PickerBuildInfo) balancer.Pi
 		})
 	}
 
-	return &picker{
-		conns: allConn,
-		rand:  rand.New(rand.NewSource(time.Now().UnixNano())),
-	}
+	return &picker{conns: allConn}
 }
 
 type picker struct {
 	conns []*conn
-	rand  *rand.Rand
 	lock  sync.Mutex
 }
 
@@ -106,8 +102,8 @@ func (p *picker) Pick(info balancer.PickInfo) (result balancer.PickResult, err e
 	default:
 		var node1, node2 *conn
 		for i := 0; i < 3; i++ {
-			a := p.rand.Intn(len(p.conns))
-			b := p.rand.Intn(len(p.conns) - 1)
+			a := rand.IntN(len(p.conns))
+			b := rand.IntN(len(p.conns) - 1)
 			if b > a { // 说明选择的范围比较小
 				b++
 			}

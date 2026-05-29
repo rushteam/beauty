@@ -13,13 +13,18 @@ import (
 
 func NewNamingClient(c *Config) (naming_client.INamingClient, error) {
 	var serverConfigs []constant.ServerConfig
-	for _, addr := range c.Addr {
-		host, port, _ := net.SplitHostPort(addr)
-		portUint, _ := strconv.ParseUint(port, 10, 64)
+	for _, address := range c.Addr {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("nacos: invalid address %q: %w", address, err)
+		}
+		portUint, err := strconv.ParseUint(port, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("nacos: invalid port in address %q: %w", address, err)
+		}
 		serverConfigs = append(serverConfigs,
 			*constant.NewServerConfig(host, portUint,
 				constant.WithScheme("http"),
-				// constant.WithPort(c.GrpcPort), //todo 应该和add维度一样，不应该从config上获取
 			),
 		)
 	}

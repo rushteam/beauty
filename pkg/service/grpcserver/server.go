@@ -2,9 +2,11 @@ package grpcserver
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"maps"
 	"net"
+	"time"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/rushteam/beauty/pkg/service/discover"
@@ -13,6 +15,9 @@ import (
 	"github.com/rushteam/beauty/pkg/utils/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 var _ discover.Service = (*Server)(nil)
@@ -47,11 +52,12 @@ func WithMetadata(md map[string]string) Option {
 	}
 }
 
-// WithAutoServiceDiscovery 启用自动服务发现，为每个protobuf服务单独注册
-func WithAutoServiceDiscovery(registries ...discover.Registry) Option {
+// WithAutoServiceDiscovery 启用自动服务发现，为每个protobuf服务单独注册。
+// 可通过 sdOpts 传入 WithInternalServices() 等服务发现选项。
+func WithAutoServiceDiscovery(registries []discover.Registry, sdOpts ...ServiceDiscoveryOption) Option {
 	return func(s *Server) {
 		s.autoDiscover = true
-		s.serviceDiscovery = NewServiceDiscovery(s.Server, registries...)
+		s.serviceDiscovery = NewServiceDiscovery(s.Server, registries, sdOpts...)
 	}
 }
 
@@ -99,17 +105,45 @@ func WithPriority(priority int) Option {
 
 type Option func(*Server)
 
+// WithTLS 通过证书文件启用 TLS。certFile 和 keyFile 为 PEM 格式文件路径。
+func WithTLS(certFile, keyFile string) Option {
+	return func(s *Server) {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			panic(fmt.Sprintf("grpcserver: failed to load TLS key pair: %v", err))
+		}
+		creds := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}})
+		s.grpcOpts = append(s.grpcOpts, grpc.Creds(creds))
+	}
+}
+
+// WithTLSConfig 通过自定义 tls.Config 启用 TLS，适合需要 mTLS 或自定义 CA 的场景。
+func WithTLSConfig(cfg *tls.Config) Option {
+	return func(s *Server) {
+		s.grpcOpts = append(s.grpcOpts, grpc.Creds(credentials.NewTLS(cfg)))
+	}
+}
+
+// WithGracefulStopTimeout 设置 GracefulStop 的最长等待时间，超时后强制 Stop。
+// 默认 30s。
+func WithGracefulStopTimeout(d time.Duration) Option {
+	return func(s *Server) {
+		s.gracefulStopTimeout = d
+	}
+}
+
 // New create a grpc service with the name
 func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 	s := &Server{
-		id:                 uuid.New(),
-		name:               "grpc-server",
-		metadata:           map[string]string{"kind": "grpc"},
-		unaryInterceptors:  make([]grpc.UnaryServerInterceptor, 0),
-		streamInterceptors: make([]grpc.StreamServerInterceptor, 0),
-		addr:               addr,
-		ready:              make(chan struct{}),
-		Server:             nil,
+		id:                  uuid.New(),
+		name:                "grpc-server",
+		metadata:            map[string]string{"kind": "grpc"},
+		unaryInterceptors:   make([]grpc.UnaryServerInterceptor, 0),
+		streamInterceptors:  make([]grpc.StreamServerInterceptor, 0),
+		addr:                addr,
+		ready:               make(chan struct{}),
+		gracefulStopTimeout: 30 * time.Second,
+		Server:              nil,
 	}
 
 	// 应用选项
@@ -136,6 +170,12 @@ func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 	grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
 
 	s.Server = grpc.NewServer(grpcOpts...)
+
+	// 自动注册 gRPC Health Check 服务
+	s.healthServer = health.NewServer()
+	healthpb.RegisterHealthServer(s.Server, s.healthServer)
+	s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+
 	if handler != nil {
 		handler(s.Server)
 	}
@@ -150,12 +190,14 @@ type Server struct {
 	unaryInterceptors  []grpc.UnaryServerInterceptor
 	streamInterceptors []grpc.StreamServerInterceptor
 
-	addr     string
-	ready    chan struct{}
-	grpcOpts []grpc.ServerOption
-	Server   *grpc.Server
+	addr                string
+	ready               chan struct{}
+	grpcOpts            []grpc.ServerOption
+	gracefulStopTimeout time.Duration
+	Server              *grpc.Server
+	healthServer        *health.Server
 
-	// 新增：服务发现相关字段
+	// 服务发现相关字段
 	serviceDiscovery *ServiceDiscovery
 	autoDiscover     bool
 }
@@ -170,17 +212,17 @@ func (s *Server) Start(ctx context.Context) error {
 	close(s.ready)
 
 	// 如果启用了自动服务发现
+	var waitRegistrations func()
 	if s.autoDiscover && s.serviceDiscovery != nil {
-		// 发现已注册的服务
 		if err := s.serviceDiscovery.DiscoverServices(s.addr, s.metadata); err != nil {
 			logger.Error("service discovery failed", "error", err)
 		} else {
-			// 注册所有发现的服务
-			go func() {
-				if err := s.serviceDiscovery.RegisterAllServices(ctx); err != nil {
-					logger.Error("register discovered services failed", "error", err)
-				}
-			}()
+			wait, err := s.serviceDiscovery.RegisterAllServices(ctx)
+			if err != nil {
+				logger.Error("register discovered services failed", "error", err)
+			} else {
+				waitRegistrations = wait
+			}
 		}
 	}
 
@@ -191,8 +233,25 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 	<-ctx.Done()
-	logger.Info("grpc server stopped...")
-	s.Server.GracefulStop()
+	logger.Info("grpc server stopping...")
+	s.healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+	stopped := make(chan struct{})
+	go func() {
+		s.Server.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(s.gracefulStopTimeout):
+		logger.Warn("grpc graceful stop timeout, forcing stop",
+			"timeout", s.gracefulStopTimeout)
+		s.Server.Stop()
+		<-stopped
+	}
+	logger.Info("grpc server stopped")
+	if waitRegistrations != nil {
+		waitRegistrations()
+	}
 	return nil
 }
 

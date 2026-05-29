@@ -5,74 +5,12 @@ import (
 	"net/http"
 )
 
-// HTTPMiddleware 返回一个 HTTP 中间件，用于超时控制
+// HTTPMiddleware 返回一个 HTTP 中间件，用于超时控制。
+// 使用标准库 http.TimeoutHandler 实现，避免 goroutine 泄漏和超时后写入已关闭 ResponseWriter 的数据竞争。
 func HTTPMiddleware(tc *TimeoutController) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			err := tc.Execute(r.Context(), func(ctx context.Context) error {
-				// 创建一个新的请求，使用超时上下文
-				newReq := r.WithContext(ctx)
-
-				// 创建响应写入器来捕获错误
-				rw := &timeoutResponseWriter{ResponseWriter: w}
-				next.ServeHTTP(rw, newReq)
-
-				// 如果有错误状态码，返回错误
-				if rw.statusCode >= 500 {
-					return &HTTPTimeoutError{StatusCode: rw.statusCode}
-				}
-				return nil
-			})
-
-			if err != nil {
-				if err == ErrTimeout {
-					http.Error(w, "Request Timeout", http.StatusRequestTimeout)
-					return
-				}
-				if err == ErrTimeoutCanceled {
-					http.Error(w, "Request Canceled", http.StatusRequestTimeout)
-					return
-				}
-				// 如果是 HTTPTimeoutError，说明已经处理过了
-				if _, ok := err.(*HTTPTimeoutError); ok {
-					return
-				}
-				// 其他错误
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			}
-		})
+		return http.TimeoutHandler(next, tc.timeout, "Request Timeout")
 	}
-}
-
-// HTTPTimeoutError HTTP 超时错误类型
-type HTTPTimeoutError struct {
-	StatusCode int
-}
-
-func (e *HTTPTimeoutError) Error() string {
-	return http.StatusText(e.StatusCode)
-}
-
-// timeoutResponseWriter 包装 http.ResponseWriter 以捕获状态码
-type timeoutResponseWriter struct {
-	http.ResponseWriter
-	statusCode int
-	written    bool
-}
-
-func (rw *timeoutResponseWriter) WriteHeader(code int) {
-	if !rw.written {
-		rw.statusCode = code
-		rw.written = true
-		rw.ResponseWriter.WriteHeader(code)
-	}
-}
-
-func (rw *timeoutResponseWriter) Write(data []byte) (int, error) {
-	if !rw.written {
-		rw.WriteHeader(http.StatusOK)
-	}
-	return rw.ResponseWriter.Write(data)
 }
 
 // HTTPClientMiddleware 返回一个 HTTP 客户端中间件，用于超时控制
@@ -125,6 +63,15 @@ func (t *timeoutTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 
 	return resp, nil
+}
+
+// HTTPTimeoutError 标识 HTTP 响应状态码层面的错误（非超时，用于客户端 Transport）
+type HTTPTimeoutError struct {
+	StatusCode int
+}
+
+func (e *HTTPTimeoutError) Error() string {
+	return http.StatusText(e.StatusCode)
 }
 
 // IsHTTPTimeoutError 检查错误是否为 HTTP 超时错误

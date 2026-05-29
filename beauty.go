@@ -15,10 +15,14 @@ import (
 	"github.com/rushteam/beauty/pkg/xgo"
 )
 
-var gpool xgo.Pool
+var (
+	gpoolOnce sync.Once
+	gpool     xgo.Pool
+)
 
-func init() {
-	gpool = xgo.New()
+func getPool() xgo.Pool {
+	gpoolOnce.Do(func() { gpool = xgo.New() })
+	return gpool
 }
 
 type HookEvent int
@@ -200,5 +204,5 @@ func (s *App) Ready() bool {
 }
 
 func Go(f func()) {
-	gpool.Go(f)
+	getPool().Go(f)
 }

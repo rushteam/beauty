@@ -30,18 +30,17 @@ var (
 func NewRegistry(c *Config) *Registry {
 	return &Registry{
 		c:       c,
-		mu:      &sync.Mutex{},
 		clients: make(map[string]naming_client.INamingClient),
 	}
 }
 
 type Registry struct {
 	c       *Config
-	mu      *sync.Mutex
+	mu      sync.Mutex
 	clients map[string]naming_client.INamingClient
 }
 
-func (r Registry) client(key string) (naming_client.INamingClient, error) {
+func (r *Registry) client(key string) (naming_client.INamingClient, error) {
 	r.mu.Lock()
 	if c, ok := r.clients[key]; ok {
 		r.mu.Unlock()
@@ -69,7 +68,7 @@ func (r Registry) client(key string) (naming_client.INamingClient, error) {
 	return client, nil
 }
 
-func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
+func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	host, port := addr.ParseHostAndPort(info.Addr())
 	portUint, err := strconv.ParseUint(port, 10, 64)
 	if err != nil {
@@ -127,11 +126,24 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 	}, nil
 }
 
-func (r Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
-	return []discover.ServiceInfo{}, nil
+func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
+	findClient, err := r.client("find")
+	if err != nil {
+		return nil, err
+	}
+	instances, err := findClient.SelectInstances(vo.SelectInstancesParam{
+		ServiceName: serviceName,
+		Clusters:    []string{r.c.Cluster},
+		GroupName:   r.c.Group,
+		HealthyOnly: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("nacos SelectInstances failed for service %s: %w", serviceName, err)
+	}
+	return buildService(instances), nil
 }
 
-func (r Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
+func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
 	registryClient, err := r.client("watch")
 	if err != nil {
 		return err

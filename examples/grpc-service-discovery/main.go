@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/discover/etcdv3"
 	"github.com/rushteam/beauty/pkg/service/discover/nacos"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
@@ -136,7 +137,7 @@ func main() {
 		grpcserver.WithWeight(100),
 		grpcserver.WithPriority(0),
 		// 启用自动服务发现，会自动读取已注册的protobuf服务
-		grpcserver.WithAutoServiceDiscovery(etcdRegistry, nacosRegistry),
+		grpcserver.WithAutoServiceDiscovery([]discover.Registry{etcdRegistry, nacosRegistry}),
 	)
 
 	slog.Info("配置完成",

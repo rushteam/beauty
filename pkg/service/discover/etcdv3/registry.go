@@ -25,14 +25,14 @@ var (
 	_ discover.Discovery = (*Registry)(nil)
 )
 
+
 func NewRegistry(c *Config) *Registry {
 	key := c.String()
 	mu.Lock()
+	defer mu.Unlock()
 	if v, ok := instance[key]; ok {
-		mu.Unlock()
 		return v
 	}
-	mu.Unlock()
 	dial := time.Second * 3
 	if c.DialMS > 0 {
 		dial = time.Duration(c.DialMS) * time.Millisecond
@@ -52,14 +52,7 @@ func NewRegistry(c *Config) *Registry {
 		prefix: c.Prefix,
 		config: c,
 	}
-	mu.Lock()
-	if v, ok := instance[key]; ok {
-		mu.Unlock()
-		_ = client.Close()
-		return v
-	}
 	instance[key] = r
-	mu.Unlock()
 	return r
 }
 
@@ -71,7 +64,10 @@ type Registry struct {
 	discover.Discovery
 }
 
-func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
+func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
+	if info.Kind() != "grpc" {
+		return func() {}, fmt.Errorf("etcdRegistry only supports grpc services, got kind=%q", info.Kind())
+	}
 	value := discover.ServiceInfo{
 		ID:       info.ID(),
 		Kind:     info.Kind(),
@@ -97,14 +93,14 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 	return func() {
 		stop()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
 		if _, err := r.client.Delete(ctx, key); err != nil {
 			logger.Error("etcdRegistry.Deregister Delete error", slog.Any("err", err))
 		}
-		cancel()
 	}, nil
 }
 
-func (r Registry) registerWithRetry(ctx context.Context, key, val string) (clientv3.LeaseID, error) {
+func (r *Registry) registerWithRetry(ctx context.Context, key, val string) (clientv3.LeaseID, error) {
 	ttl := grantTTL
 	if r.config != nil && r.config.TTL > 0 {
 		ttl = r.config.TTL
@@ -146,7 +142,7 @@ func (r Registry) registerWithRetry(ctx context.Context, key, val string) (clien
 	}
 }
 
-func (r Registry) keepAliveLoop(ctx context.Context, key, val string, leaseid clientv3.LeaseID) {
+func (r *Registry) keepAliveLoop(ctx context.Context, key, val string, leaseid clientv3.LeaseID) {
 outer:
 	for {
 		kaCtx, kaCancel := context.WithCancel(ctx)
@@ -194,11 +190,11 @@ outer:
 }
 
 func buildServiceKey(prefix, name, id string) string {
-	return fmt.Sprintf("/%s/%s/%s", strings.TrimLeft(prefix, "/"), name, id)
+	return fmt.Sprintf("/%s/%s/%s", strings.TrimPrefix(prefix, "/"), name, id)
 }
 
 func buildServicePath(prefix, name string) string {
-	return fmt.Sprintf("/%s/%s", strings.TrimLeft(prefix, "/"), name)
+	return fmt.Sprintf("/%s/%s", strings.TrimPrefix(prefix, "/"), name)
 }
 
 func getInstanceFromKey(key, prefix string) string {
@@ -229,9 +225,12 @@ func buildSortedServices(endpoints map[string]discover.ServiceInfo) []discover.S
 	return services
 }
 
-func (r Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, path string, key string, val []byte) []discover.ServiceInfo {
+func (r *Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, path string, key string, val []byte) []discover.ServiceInfo {
 	v := discover.ServiceInfo{}
-	v.Unmarshal(val)
+	if err := v.Unmarshal(val); err != nil {
+		logger.Error("etcdRegistry.applyPutEvent unmarshal error", slog.String("key", key), slog.Any("err", err))
+		return buildSortedServices(endpoints)
+	}
 	v.ID = getInstanceFromKey(key, path)
 	if isGrpcService(v) {
 		endpoints[v.ID] = v
@@ -241,13 +240,13 @@ func (r Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, path 
 	return buildSortedServices(endpoints)
 }
 
-func (r Registry) applyDeleteEvent(endpoints map[string]discover.ServiceInfo, path string, key string) []discover.ServiceInfo {
+func (r *Registry) applyDeleteEvent(endpoints map[string]discover.ServiceInfo, path string, key string) []discover.ServiceInfo {
 	id := getInstanceFromKey(key, path)
 	delete(endpoints, id)
 	return buildSortedServices(endpoints)
 }
 
-func (r Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo, error) {
+func (r *Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo, error) {
 	var services []discover.ServiceInfo
 	path := buildServicePath(r.prefix, name)
 	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
@@ -258,7 +257,10 @@ func (r Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo
 		// /beauty/helloworld.rpc/6bf14822-755d-4571-a7f5-bfe336783742
 		instanceID := getInstanceFromKey(string(kv.Key), path)
 		v := discover.ServiceInfo{}
-		v.Unmarshal(kv.Value)
+		if err := v.Unmarshal(kv.Value); err != nil {
+			logger.Error("etcdRegistry.Find unmarshal error", slog.String("key", string(kv.Key)), slog.Any("err", err))
+			continue
+		}
 		v.ID = instanceID
 		if !isGrpcService(v) {
 			continue
@@ -275,16 +277,92 @@ func (r Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo
 	return services, nil
 }
 
-func (r Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
+func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
 	path := buildServicePath(r.prefix, serviceName)
-	var endpoints = make(map[string]discover.ServiceInfo)
+	backoff := 200 * time.Millisecond
+
+	// 用带缓冲 channel 将 notify 回调与事件循环解耦，避免慢回调阻塞 watcher。
+	// 缓冲为 1：只保留最新快照，旧的未消费时直接丢弃（调用方会收到最新状态）。
+	notifyCh := make(chan []discover.ServiceInfo, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case services, ok := <-notifyCh:
+				if !ok {
+					return
+				}
+				update(services)
+			}
+		}
+	}()
+	notify := func(services []discover.ServiceInfo) {
+		select {
+		case notifyCh <- services:
+		default:
+			// 旧快照尚未消费，替换为最新
+			select {
+			case <-notifyCh:
+			default:
+			}
+			notifyCh <- services
+		}
+	}
+
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		endpoints, rev, err := r.watchSnapshot(ctx, path, notify)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			logger.Error("etcdRegistry.Watch snapshot error, retrying", slog.Any("err", err))
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(backoff):
+				if backoff < 8*time.Second {
+					backoff *= 2
+				}
+			}
+			continue
+		}
+		backoff = 200 * time.Millisecond // 快照成功，重置退避
+
+		disconnected := r.watchLoop(ctx, path, rev, endpoints, notify)
+		if !disconnected {
+			// ctx 已取消，正常退出
+			return nil
+		}
+		// 断连，退避后重建 watcher
+		logger.Warn("etcdRegistry.Watch disconnected, reconnecting", slog.String("service", serviceName))
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(backoff):
+			if backoff < 8*time.Second {
+				backoff *= 2
+			}
+		}
+	}
+}
+
+// watchSnapshot 拉取初始快照并通知，返回当前 endpoints 和 revision。
+func (r *Registry) watchSnapshot(ctx context.Context, path string, update discover.Notify) (map[string]discover.ServiceInfo, int64, error) {
 	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
 	if err != nil {
-		return fmt.Errorf("failed to get service: %w", err)
+		return nil, 0, fmt.Errorf("failed to get service: %w", err)
 	}
+	endpoints := make(map[string]discover.ServiceInfo)
 	for _, kv := range resp.Kvs {
 		v := discover.ServiceInfo{}
-		v.Unmarshal(kv.Value)
+		if err := v.Unmarshal(kv.Value); err != nil {
+			logger.Error("etcdRegistry.Watch unmarshal error", slog.String("key", string(kv.Key)), slog.Any("err", err))
+			continue
+		}
 		v.ID = getInstanceFromKey(string(kv.Key), path)
 		if !isGrpcService(v) {
 			continue
@@ -292,27 +370,32 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 		endpoints[v.ID] = v
 	}
 	update(buildSortedServices(endpoints))
+	return endpoints, resp.Header.Revision, nil
+}
+
+// watchLoop 持续监听事件，直到 ctx 取消（返回 false）或 watcher 断连（返回 true）。
+func (r *Registry) watchLoop(ctx context.Context, path string, rev int64, endpoints map[string]discover.ServiceInfo, update discover.Notify) (disconnected bool) {
 	w := clientv3.NewWatcher(r.client)
 	defer w.Close()
 	ch := w.Watch(ctx, path,
 		clientv3.WithPrefix(),
-		clientv3.WithRev(resp.Header.Revision),
+		clientv3.WithRev(rev),
 	)
 	if err := w.RequestProgress(ctx); err != nil {
-		logger.Error("watch Progress error", slog.Any("err", err))
+		logger.Error("etcdRegistry.Watch RequestProgress error", slog.Any("err", err))
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case event, closed := <-ch:
-			if closed {
-				logger.Error("watch closed")
-				return nil
+			return false
+		case event, ok := <-ch:
+			if !ok {
+				logger.Warn("etcdRegistry.Watch channel closed, will reconnect")
+				return true
 			}
 			if event.Canceled {
-				logger.Error("watch event canceled", slog.Any("err", event.Err()))
-				return nil
+				logger.Warn("etcdRegistry.Watch event canceled, will reconnect", slog.Any("err", event.Err()))
+				return true
 			}
 			for _, ev := range event.Events {
 				key := string(ev.Kv.Key)

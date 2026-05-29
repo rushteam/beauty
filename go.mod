@@ -1,15 +1,15 @@
 module github.com/rushteam/beauty
 
-go 1.24.0
+go 1.25.0
 
 require (
-	github.com/polarismesh/polaris-go v1.6.1
+	github.com/polarismesh/polaris-go v1.7.0
 	github.com/spf13/viper v1.20.1
 	go.etcd.io/etcd/client/v3 v3.6.2
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.34.0
-	go.opentelemetry.io/otel/metric v1.35.0
-	go.opentelemetry.io/otel/sdk/metric v1.35.0
-	go.opentelemetry.io/otel/trace v1.35.0
+	go.opentelemetry.io/otel/metric v1.44.0
+	go.opentelemetry.io/otel/sdk/metric v1.44.0
+	go.opentelemetry.io/otel/trace v1.44.0
 	google.golang.org/grpc v1.73.0
 	k8s.io/api v0.34.0
 	k8s.io/apimachinery v0.34.0
@@ -47,8 +47,9 @@ require (
 	github.com/deckarep/golang-set v1.7.1 // indirect
 	github.com/dlclark/regexp2 v1.7.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
+	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
@@ -73,7 +74,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.1-0.20220228012449-10b1cf09e00b // indirect
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/polarismesh/specification v1.5.5-alpha.1 // indirect
+	github.com/polarismesh/specification v1.7.0 // indirect
 	github.com/prometheus/client_golang v1.20.5 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
@@ -83,7 +84,8 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.2 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.2 // indirect
-	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
@@ -124,13 +126,13 @@ require (
 	github.com/spf13/pflag v1.0.7 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
-	go.opentelemetry.io/otel v1.35.0
+	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.56.0
 	go.opentelemetry.io/otel/exporters/stdout/stdoutmetric v1.34.0
-	go.opentelemetry.io/otel/sdk v1.35.0
+	go.opentelemetry.io/otel/sdk v1.44.0
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.42.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	golang.org/x/time v0.9.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20250715232539-7130f93afb79

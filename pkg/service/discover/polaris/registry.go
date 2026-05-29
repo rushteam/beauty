@@ -17,6 +17,7 @@ import (
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/addr"
+	"maps"
 )
 
 var (
@@ -25,54 +26,34 @@ var (
 )
 
 func NewRegistry(c *Config) *Registry {
-	return &Registry{
-		c:  c,
-		mu: &sync.Mutex{},
-	}
+	return &Registry{c: c}
 }
 
 type Registry struct {
 	c           *Config
-	mu          *sync.Mutex
+	initOnce    sync.Once
+	initErr     error
 	providerAPI api.ProviderAPI
 	consumerAPI api.ConsumerAPI
-	initialized bool
 }
 
 func (r *Registry) initClient() error {
-	if r.initialized {
-		return nil
-	}
+	r.initOnce.Do(func() {
+		configuration := config.NewDefaultConfiguration(r.c.Addresses)
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+		if r.c.Token != "" {
+			configuration.Global.ServerConnector.Token = r.c.Token
+		}
 
-	if r.initialized {
-		return nil
-	}
-
-	// 创建配置
-	configuration := config.NewDefaultConfiguration(r.c.Addresses)
-
-	// 设置全局配置
-	if r.c.Namespace != "" {
-		configuration.Global.ServerConnector.Addresses = r.c.Addresses
-	}
-
-	// 创建 SDK 上下文
-	sdkContext, err := api.InitContextByConfig(configuration)
-	if err != nil {
-		return fmt.Errorf("polaris init context failed: %w", err)
-	}
-
-	// 创建 ProviderAPI
-	r.providerAPI = api.NewProviderAPIByContext(sdkContext)
-
-	// 创建 ConsumerAPI
-	r.consumerAPI = api.NewConsumerAPIByContext(sdkContext)
-
-	r.initialized = true
-	return nil
+		sdkContext, err := api.InitContextByConfig(configuration)
+		if err != nil {
+			r.initErr = fmt.Errorf("polaris init context failed: %w", err)
+			return
+		}
+		r.providerAPI = api.NewProviderAPIByContext(sdkContext)
+		r.consumerAPI = api.NewConsumerAPIByContext(sdkContext)
+	})
+	return r.initErr
 }
 
 func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
@@ -81,115 +62,87 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 	}
 
 	host, portStr := addr.ParseHostAndPort(info.Addr())
-	port, _ := strconv.Atoi(portStr)
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return func() {}, fmt.Errorf("polaris register: invalid port %q for service %s: %w", portStr, info.Name(), err)
+	}
 
-	// 构建实例请求
+	ttl := r.c.TTL
+	if ttl <= 0 {
+		ttl = 5
+	}
+	healthy := true
+	weight := r.c.Weight
+	if weight <= 0 {
+		weight = 100
+	}
+	priority := r.c.Priority
+	version := r.c.Version
+	if version == "" {
+		version = "1.0.0"
+	}
+	protocol := r.c.Protocol
+	if protocol == "" {
+		protocol = "grpc"
+	}
+
+	// 合并 metadata，确保 kind 字段
+	metadata := make(map[string]string)
+	maps.Copy(metadata, info.Metadata())
+	if _, ok := metadata["kind"]; !ok {
+		metadata["kind"] = info.Kind()
+	}
+
 	request := &api.InstanceRegisterRequest{}
 	request.Service = info.Name()
 	request.Namespace = r.c.Namespace
 	request.Host = host
 	request.Port = port
-	request.Protocol = &r.c.Protocol
-	request.Version = &r.c.Version
-	request.Weight = &r.c.Weight
-	request.Priority = &r.c.Priority
-	request.TTL = &r.c.TTL
+	request.Protocol = &protocol
+	request.Version = &version
+	request.Weight = &weight
+	request.Priority = &priority
+	request.Healthy = &healthy
+	request.Metadata = metadata
+	// AutoHeartbeat = true：SDK 自动维持心跳，无需手动 Heartbeat 轮询
+	request.AutoHeartbeat = true
+	request.SetTTL(ttl)
 
-	// 设置元数据
-	if info.Metadata() != nil {
-		metadata := make(map[string]string)
-		for k, v := range info.Metadata() {
-			metadata[k] = v
-		}
-		// 确保 kind 字段存在
-		if _, ok := metadata["kind"]; !ok {
-			metadata["kind"] = info.Kind()
-		}
-		request.Metadata = metadata
-	} else {
-		request.Metadata = map[string]string{
-			"kind": info.Kind(),
-		}
-	}
-
-	// 注册实例
 	resp, err := r.providerAPI.RegisterInstance(request)
 	if err != nil {
-		logger.Error("polaris RegisterInstance failed",
-			slog.Any("err", err),
-			slog.String("svc.id", info.ID()),
-			slog.String("svc.name", info.Name()),
-			slog.String("svc.addr", info.Addr()),
-			slog.Any("svc.meta", info.Metadata()),
-		)
-		return func() {}, err
+		return func() {}, fmt.Errorf("polaris RegisterInstance failed for service %s: %w", info.Name(), err)
 	}
 
 	logger.Info("polaris RegisterInstance success",
 		slog.String("svc.id", info.ID()),
 		slog.String("svc.name", info.Name()),
 		slog.String("svc.addr", info.Addr()),
-		slog.Any("svc.meta", info.Metadata()),
 		slog.String("instance.id", resp.InstanceID),
 	)
 
-	// 启动心跳
-	heartbeatRequest := &api.InstanceHeartbeatRequest{}
-	heartbeatRequest.Service = info.Name()
-	heartbeatRequest.Namespace = r.c.Namespace
-	heartbeatRequest.Host = host
-	heartbeatRequest.Port = port
-	heartbeatRequest.InstanceID = resp.InstanceID
-
-	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
-	go r.startHeartbeat(heartbeatCtx, heartbeatRequest)
-
 	return func() {
-		// 停止心跳
-		heartbeatCancel()
+		deregReq := &api.InstanceDeRegisterRequest{}
+		deregReq.Service = info.Name()
+		deregReq.Namespace = r.c.Namespace
+		deregReq.Host = host
+		deregReq.Port = port
+		deregReq.InstanceID = resp.InstanceID
 
-		// 注销实例
-		deregisterRequest := &api.InstanceDeRegisterRequest{}
-		deregisterRequest.Service = info.Name()
-		deregisterRequest.Namespace = r.c.Namespace
-		deregisterRequest.Host = host
-		deregisterRequest.Port = port
-		deregisterRequest.InstanceID = resp.InstanceID
-
-		if err := r.providerAPI.Deregister(deregisterRequest); err != nil {
+		if err := r.providerAPI.Deregister(deregReq); err != nil {
 			logger.Error("polaris DeregisterInstance failed",
 				slog.Any("err", err),
 				slog.String("svc.id", info.ID()),
 				slog.String("svc.name", info.Name()),
 				slog.String("svc.addr", info.Addr()),
-				slog.Any("svc.meta", info.Metadata()),
 			)
 			return
 		}
-
 		logger.Info("polaris DeregisterInstance success",
 			slog.String("svc.id", info.ID()),
 			slog.String("svc.name", info.Name()),
 			slog.String("svc.addr", info.Addr()),
-			slog.Any("svc.meta", info.Metadata()),
 		)
 	}, nil
-}
-
-func (r *Registry) startHeartbeat(ctx context.Context, request *api.InstanceHeartbeatRequest) {
-	ticker := time.NewTicker(time.Duration(r.c.TTL/3) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := r.providerAPI.Heartbeat(request); err != nil {
-				logger.Warn("polaris heartbeat failed", slog.Any("err", err))
-			}
-		}
-	}
 }
 
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
@@ -197,105 +150,113 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 		return nil, err
 	}
 
-	request := &api.GetInstancesRequest{}
-	request.Service = serviceName
-	request.Namespace = r.c.Namespace
+	req := &api.GetInstancesRequest{}
+	req.Service = serviceName
+	req.Namespace = r.c.Namespace
 
-	resp, err := r.consumerAPI.GetInstances(request)
+	resp, err := r.consumerAPI.GetInstances(req)
 	if err != nil {
-		return nil, fmt.Errorf("polaris get instances failed: %w", err)
+		return nil, fmt.Errorf("polaris GetInstances failed for service %s: %w", serviceName, err)
 	}
-
 	return buildServiceInfos(resp.Instances), nil
 }
 
+// Watch 使用 WatchAllInstances (v1.7.0 推荐 API) 监听实例变化，带重连退避。
+// Watch 是阻塞的，直到 ctx 取消才返回，与 etcd/nacos 保持一致。
 func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
 	if err := r.initClient(); err != nil {
 		return err
 	}
 
-	// 首先获取一次实例列表
-	instances, err := r.Find(ctx, serviceName)
-	if err == nil && len(instances) > 0 {
+	// 先推送一次初始快照，失败只记日志不阻塞
+	if instances, err := r.Find(ctx, serviceName); err != nil {
+		logger.Warn("polaris Watch: initial Find failed", slog.String("service", serviceName), slog.Any("err", err))
+	} else {
 		update(instances)
 	}
 
-	// 使用 Polaris 的事件监听机制
-	go func() {
-		// 创建服务监听请求
-		watchRequest := &api.WatchServiceRequest{}
-		watchRequest.Key = model.ServiceKey{
-			Namespace: r.c.Namespace,
-			Service:   serviceName,
+	backoff := 200 * time.Millisecond
+	for {
+		if ctx.Err() != nil {
+			return nil
 		}
 
-		// 开始监听服务变化
-		watchResp, err := r.consumerAPI.WatchService(watchRequest)
+		watchResp, err := r.consumerAPI.WatchAllInstances(&api.WatchAllInstancesRequest{
+			WatchAllInstancesRequest: model.WatchAllInstancesRequest{
+				ServiceKey: model.ServiceKey{
+					Namespace: r.c.Namespace,
+					Service:   serviceName,
+				},
+				WatchMode:         model.WatchModeNotify,
+				InstancesListener: &instancesListener{update: update, serviceName: serviceName},
+			},
+		})
 		if err != nil {
-			logger.Error("polaris watch service failed",
-				slog.Any("err", err),
-				slog.String("service", serviceName))
-			return
-		}
-
-		// 监听事件通道
-		for {
+			logger.Error("polaris WatchAllInstances failed",
+				slog.String("service", serviceName), slog.Any("err", err))
 			select {
 			case <-ctx.Done():
-				logger.Info("polaris watch service context cancelled",
-					slog.String("service", serviceName))
-				return
-			case event, ok := <-watchResp.EventChannel:
-				if !ok {
-					logger.Warn("polaris watch service event channel closed",
-						slog.String("service", serviceName))
-					return
-				}
-
-				// 处理实例事件
-				if _, ok := event.(*model.InstanceEvent); ok {
-					logger.Info("polaris service instance event received",
-						slog.String("service", serviceName),
-						slog.Int("event_type", int(event.GetSubScribeEventType())))
-
-					// 重新获取最新的实例列表
-					currentInstances, err := r.Find(ctx, serviceName)
-					if err != nil {
-						logger.Warn("polaris get instances after event failed",
-							slog.Any("err", err),
-							slog.String("service", serviceName))
-						continue
-					}
-
-					logger.Info("polaris service instances updated",
-						slog.String("service", serviceName),
-						slog.Int("instances", len(currentInstances)))
-
-					// 更新服务实例列表
-					update(currentInstances)
-				} else {
-					logger.Debug("polaris received non-instance event",
-						slog.String("service", serviceName),
-						slog.Int("event_type", int(event.GetSubScribeEventType())))
+				return nil
+			case <-time.After(backoff):
+				if backoff < 8*time.Second {
+					backoff *= 2
 				}
 			}
+			continue
 		}
-	}()
 
-	return nil
+		backoff = 200 * time.Millisecond
+		// 阻塞直到 ctx 取消
+		<-ctx.Done()
+		watchResp.CancelWatch()
+		return nil
+	}
+}
+
+// instancesListener 实现 model.InstancesListener，由 Polaris SDK 在实例变更时回调。
+type instancesListener struct {
+	update      discover.Notify
+	serviceName string
+}
+
+func (l *instancesListener) OnInstancesUpdate(resp *model.InstancesResponse) {
+	if resp == nil {
+		return
+	}
+	services := buildServiceInfos(resp.GetInstances())
+	logger.Info("polaris instances updated",
+		slog.String("service", l.serviceName),
+		slog.Int("count", len(services)),
+	)
+	l.update(services)
+}
+
+// UpdateCallResult 上报一次 gRPC 调用结果，触发 Polaris 熔断/统计逻辑。
+// instance 通过 Find 获得；delay 为本次调用耗时；retCode 为 gRPC 状态码（0=OK）。
+func (r *Registry) UpdateCallResult(instance model.Instance, retStatus model.RetStatus, delay time.Duration, retCode int32) {
+	if r.consumerAPI == nil {
+		return
+	}
+	result := &api.ServiceCallResult{}
+	result.SetCalledInstance(instance)
+	result.SetRetStatus(retStatus)
+	result.SetDelay(delay)
+	result.SetRetCode(retCode)
+	if err := r.consumerAPI.UpdateServiceCallResult(result); err != nil {
+		logger.Warn("polaris UpdateServiceCallResult failed", slog.Any("err", err))
+	}
 }
 
 func buildServiceInfos(instances []model.Instance) []discover.ServiceInfo {
 	var ss []discover.ServiceInfo
-
 	for _, instance := range instances {
 		if !instance.IsHealthy() {
-			logger.Warn("polaris service not healthy", slog.Any("instance", instance))
 			continue
 		}
-
+		if instance.IsIsolated() {
+			continue
+		}
 		if instance.GetWeight() <= 0 {
-			logger.Warn("polaris service weight<=0", slog.Any("instance", instance))
 			continue
 		}
 
@@ -303,10 +264,7 @@ func buildServiceInfos(instances []model.Instance) []discover.ServiceInfo {
 		if metadata == nil {
 			metadata = make(map[string]string)
 		}
-
-		// 检查 kind 字段
 		if metadata["kind"] != "grpc" {
-			logger.Warn("polaris service metadata.kind != grpc", slog.Any("instance", instance))
 			continue
 		}
 
@@ -318,13 +276,11 @@ func buildServiceInfos(instances []model.Instance) []discover.ServiceInfo {
 		})
 	}
 
-	// 稳定排序（与 etcd 和 nacos 保持一致）
 	sort.Slice(ss, func(i, j int) bool {
 		if ss[i].Name == ss[j].Name {
 			return ss[i].ID < ss[j].ID
 		}
 		return ss[i].Name < ss[j].Name
 	})
-
 	return ss
 }

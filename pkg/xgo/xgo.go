@@ -459,34 +459,37 @@ func (p *wokerpool) CloseWithTimeout(timeout time.Duration) error {
 	}
 }
 
-// 全局默认协程池
-var defaultPool Pool
+var (
+	defaultPoolOnce sync.Once
+	defaultPool     Pool
+)
 
-func init() {
-	defaultPool = New(WithSetCap(1000))
+func getDefaultPool() Pool {
+	defaultPoolOnce.Do(func() { defaultPool = New(WithSetCap(1000)) })
+	return defaultPool
 }
 
 // SafeGo 使用默认协程池安全执行协程
 func SafeGo(f func()) {
-	defaultPool.Go(f)
+	getDefaultPool().Go(f)
 }
 
 // SafeGoWithContext 使用默认协程池安全执行带上下文的协程
 func SafeGoWithContext(ctx context.Context, f func(ctx context.Context)) {
-	defaultPool.GoWithContext(ctx, f)
+	getDefaultPool().GoWithContext(ctx, f)
 }
 
 // NewWaitGroup 使用默认协程池创建 WaitGroup
 func NewWaitGroup() *WaitGroup {
-	return defaultPool.NewWaitGroup()
+	return getDefaultPool().NewWaitGroup()
 }
 
 // NewErrorGroup 使用默认协程池创建 ErrorGroup
 func NewErrorGroup() *ErrorGroup {
-	return defaultPool.NewErrorGroup()
+	return getDefaultPool().NewErrorGroup()
 }
 
 // NewErrorGroupWithContext 使用默认协程池创建带上下文的 ErrorGroup
 func NewErrorGroupWithContext(ctx context.Context) (*ErrorGroup, context.Context) {
-	return defaultPool.NewErrorGroupWithContext(ctx)
+	return getDefaultPool().NewErrorGroupWithContext(ctx)
 }

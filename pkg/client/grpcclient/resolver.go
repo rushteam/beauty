@@ -1,14 +1,12 @@
 package grpcclient
 
 import (
-
-	// "github.com/ymcvalu/grpc-discovery/pkg/instance"
-
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
-	"google.golang.org/grpc/attributes"
+	grpcattr "google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -46,25 +44,43 @@ func (r *Resolver) Start() {
 			slog.Error("discovery updateState failed", slog.Any("err", err))
 		}
 	}
-	if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
-		slog.Error("discovery watch failed", slog.Any("err", err))
+	backoff := 200 * time.Millisecond
+	for {
+		if r.ctx.Err() != nil {
+			return
+		}
+		if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
+			slog.Error("discovery watch failed", slog.Any("err", err))
+		}
+		// Watch 返回 nil 表示 ctx 已取消（正常退出）或 backend 断连
+		if r.ctx.Err() != nil {
+			return
+		}
+		slog.Warn("resolver watch exited unexpectedly, reconnecting",
+			slog.String("service", r.serviceName),
+			slog.Duration("backoff", backoff))
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-time.After(backoff):
+			if backoff < 8*time.Second {
+				backoff *= 2
+			}
+		}
 	}
 }
 
 func buildState(services []discover.ServiceInfo) resolver.State {
 	addrs := make([]resolver.Address, 0, len(services))
-	attributes := &attributes.Attributes{}
 	for _, s := range services {
-		addrs = append(addrs, resolver.Address{
-			Addr: s.Addr,
-			// ServerName: s.Name,
-		})
+		var attr *grpcattr.Attributes
 		for k, v := range s.Metadata {
-			attributes = attributes.WithValue(k, v)
+			attr = attr.WithValue(k, v)
 		}
+		addrs = append(addrs, resolver.Address{
+			Addr:       s.Addr,
+			Attributes: attr,
+		})
 	}
-	return resolver.State{
-		Addresses:  addrs,
-		Attributes: attributes,
-	}
+	return resolver.State{Addresses: addrs}
 }

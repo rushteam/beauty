@@ -55,13 +55,14 @@ func (f *ClientFactory) GetClient(serviceName string, opts ...ServiceDiscoveryOp
 	return client
 }
 
-// Close 关闭所有客户端
+// Close 停止后台 goroutine 并关闭所有连接
 func (f *ClientFactory) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	var lastErr error
 	for serviceName, client := range f.clients {
+		client.Stop()
 		if err := client.Close(); err != nil {
 			lastErr = err
 		}
@@ -125,6 +126,12 @@ func (c *ServiceClient) NewStream(ctx context.Context, desc *grpc.StreamDesc, me
 	}
 
 	return conn.NewStream(ctx, desc, method, opts...)
+}
+
+// Close 停止后台 goroutine 并关闭所有连接
+func (c *ServiceClient) Close() error {
+	c.Stop()
+	return c.ServiceDiscoveryClient.Close()
 }
 
 // GetDiscovery 获取服务发现实例

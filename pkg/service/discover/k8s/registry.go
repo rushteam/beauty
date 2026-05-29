@@ -85,20 +85,9 @@ func createKubernetesClient(kubeconfig string) (kubernetes.Interface, error) {
 	return client, nil
 }
 
-// Register 注册服务（k8s 环境下通常不需要手动注册，服务通过 k8s Service 资源管理）
-func (r *Registry) Register(ctx context.Context, service discover.Service) (context.CancelFunc, error) {
-	logger.Info("k8s registry register service",
-		slog.String("service_id", service.ID()),
-		slog.String("service_name", service.Name()),
-		slog.String("addr", service.Addr()))
-
-	// 在 k8s 环境中，服务注册通常由 k8s Service 资源管理
-	// 这里返回一个空的取消函数
-	return func() {
-		logger.Info("k8s registry unregister service",
-			slog.String("service_id", service.ID()),
-			slog.String("service_name", service.Name()))
-	}, nil
+// Register 在 k8s 环境中无需手动注册服务，服务生命周期由 k8s Service 资源管理。
+func (r *Registry) Register(_ context.Context, _ discover.Service) (context.CancelFunc, error) {
+	return func() {}, fmt.Errorf("k8s registry does not support manual service registration; use Kubernetes Service resources instead")
 }
 
 // Find 查找服务实例

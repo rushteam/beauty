@@ -2,6 +2,7 @@ package grpcclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strconv"
@@ -13,9 +14,11 @@ import (
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 )
 
 // WithDiscoveryInsecure 明确声明使用明文连接（不加密）。
@@ -65,10 +68,14 @@ type ServiceDiscoveryClient struct {
 	maxRetries int
 	retryDelay time.Duration
 
+	// 连接排空
+	drainTimeout time.Duration
+
 	// 后台 goroutine 生命周期
-	stopOnce sync.Once
-	stopFn   context.CancelFunc
-	bgWg     sync.WaitGroup
+	startOnce sync.Once
+	stopOnce  sync.Once
+	stopFn    context.CancelFunc
+	bgWg      sync.WaitGroup
 }
 
 type wrrEntry struct {
@@ -97,6 +104,7 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		checkInterval: time.Second * 30,
 		maxRetries:    1,
 		retryDelay:    time.Second,
+		drainTimeout:  5 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -170,9 +178,25 @@ func WithDiscoveryFailover(maxRetries int, retryDelay time.Duration) ServiceDisc
 	}
 }
 
+// WithDiscoveryDrainTimeout 设置服务实例从发现列表移除后，连接的排空等待时间。
+// 在此期间连接不会被关闭，正在进行的请求有机会完成。默认 5s，设为 0 立即关闭。
+func WithDiscoveryDrainTimeout(d time.Duration) ServiceDiscoveryOption {
+	return func(c *ServiceDiscoveryClient) {
+		c.drainTimeout = d
+	}
+}
+
 // Start 启动客户端：拉取初始服务列表，启动 watch 和健康检查。
 // 调用 Stop() 或取消传入的 ctx 均可停止后台 goroutine。
-func (c *ServiceDiscoveryClient) Start(ctx context.Context) error {
+// Start 是幂等的，多次调用只有第一次生效。
+func (c *ServiceDiscoveryClient) Start(ctx context.Context) (err error) {
+	c.startOnce.Do(func() {
+		err = c.start(ctx)
+	})
+	return
+}
+
+func (c *ServiceDiscoveryClient) start(ctx context.Context) error {
 	if err := c.refreshServices(ctx); err != nil {
 		return fmt.Errorf("failed to refresh services: %w", err)
 	}
@@ -195,6 +219,17 @@ func (c *ServiceDiscoveryClient) Start(ctx context.Context) error {
 	return nil
 }
 
+// autoStart 在 GetClient 首次调用时，若 Start 从未调用，用 background context 自动启动。
+// 仅做一次 refresh，不启动 watch/healthCheck，并打印警告提示用户显式调用 Start。
+func (c *ServiceDiscoveryClient) autoStart() {
+	c.startOnce.Do(func() {
+		slog.Warn("ServiceDiscoveryClient.Start() was not called; "+
+			"service list will not update dynamically. Call Start(ctx) explicitly.",
+			"service", c.serviceName)
+		_ = c.refreshServices(context.Background())
+	})
+}
+
 // Stop 停止后台 goroutine 并等待它们退出
 func (c *ServiceDiscoveryClient) Stop() {
 	c.stopOnce.Do(func() {
@@ -207,6 +242,8 @@ func (c *ServiceDiscoveryClient) Stop() {
 
 // GetClient 获取一个连接，按负载均衡策略选择实例
 func (c *ServiceDiscoveryClient) GetClient(ctx context.Context) (*grpc.ClientConn, error) {
+	c.autoStart()
+
 	c.mu.RLock()
 	services := c.services
 	c.mu.RUnlock()
@@ -234,10 +271,14 @@ func (c *ServiceDiscoveryClient) GetClient(ctx context.Context) (*grpc.ClientCon
 
 // Call 调用服务方法，支持指数退避重试（带 ±25% jitter）。
 // maxRetries 为额外重试次数，0 表示不重试，总调用次数为 maxRetries+1。
+// context.Canceled / context.DeadlineExceeded 不重试，直接返回。
 func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, resp any, opts ...grpc.CallOption) error {
 	attempts := c.maxRetries + 1
 	var lastErr error
 	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		conn, err := c.GetClient(ctx)
 		if err != nil {
 			lastErr = err
@@ -245,6 +286,11 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 			return nil
 		} else {
 			lastErr = err
+		}
+
+		// 不可重试错误：调用方已取消或超时
+		if isNonRetryable(lastErr) {
+			return lastErr
 		}
 
 		if i < attempts-1 {
@@ -260,6 +306,24 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 		}
 	}
 	return fmt.Errorf("failed after %d retries: %w", c.maxRetries, lastErr)
+}
+
+// isNonRetryable 判断错误是否不应重试
+func isNonRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.Canceled, codes.InvalidArgument, codes.NotFound,
+			codes.AlreadyExists, codes.PermissionDenied, codes.Unauthenticated:
+			return true
+		}
+	}
+	return false
 }
 
 // selectService 根据策略选择服务实例，调用方持有 mu.RLock 或已复制 slice
@@ -396,34 +460,80 @@ func (c *ServiceDiscoveryClient) filterServices(services []discover.ServiceInfo)
 	return c.labelFilter.Filter(services)
 }
 
-// WatchServices 监听服务变化，自动更新缓存并关闭失效连接
+// WatchServices 监听服务变化，自动更新缓存并关闭失效连接。
+// 回调处理在独立 goroutine 中执行，避免阻塞底层 watcher 事件循环。
 func (c *ServiceDiscoveryClient) WatchServices(ctx context.Context) error {
-	return c.discovery.Watch(ctx, c.serviceName, func(services []discover.ServiceInfo) {
-		filtered := c.filterServices(services)
+	notifyCh := make(chan []discover.ServiceInfo, 1)
 
-		c.mu.Lock()
-		c.services = filtered
-		c.wrrServices = nil // 触发权重表重建
-
-		activeAddrs := make(map[string]bool, len(filtered))
-		for _, s := range filtered {
-			activeAddrs[s.Addr] = true
-		}
-		for addr, conn := range c.clients {
-			if !activeAddrs[addr] {
-				slog.Info("closing connection to removed service",
-					"service", c.serviceName,
-					"addr", addr)
-				conn.Close()
-				delete(c.clients, addr)
+	c.bgWg.Add(1)
+	go func() {
+		defer c.bgWg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case services, ok := <-notifyCh:
+				if !ok {
+					return
+				}
+				c.applyServiceUpdate(services)
 			}
 		}
-		c.mu.Unlock()
+	}()
 
-		slog.Info("service instances updated",
-			"service", c.serviceName,
-			"instances", len(filtered))
+	return c.discovery.Watch(ctx, c.serviceName, func(services []discover.ServiceInfo) {
+		select {
+		case notifyCh <- services:
+		default:
+			select {
+			case <-notifyCh:
+			default:
+			}
+			notifyCh <- services
+		}
 	})
+}
+
+func (c *ServiceDiscoveryClient) applyServiceUpdate(services []discover.ServiceInfo) {
+	filtered := c.filterServices(services)
+
+	c.mu.Lock()
+	c.services = filtered
+	c.wrrServices = nil
+
+	activeAddrs := make(map[string]bool, len(filtered))
+	for _, s := range filtered {
+		activeAddrs[s.Addr] = true
+	}
+	var toClose []*grpc.ClientConn
+	for addr, conn := range c.clients {
+		if !activeAddrs[addr] {
+			toClose = append(toClose, conn)
+			delete(c.clients, addr)
+		}
+	}
+	c.mu.Unlock()
+
+	for _, conn := range toClose {
+		conn := conn
+		if c.drainTimeout <= 0 {
+			slog.Info("closing connection to removed service",
+				"service", c.serviceName, "addr", conn.Target())
+			conn.Close()
+		} else {
+			slog.Info("draining connection to removed service",
+				"service", c.serviceName, "addr", conn.Target(),
+				"drain_timeout", c.drainTimeout)
+			go func() {
+				time.Sleep(c.drainTimeout)
+				conn.Close()
+			}()
+		}
+	}
+
+	slog.Info("service instances updated",
+		"service", c.serviceName,
+		"instances", len(filtered))
 }
 
 // healthCheckLoop 定期检查连接健康状态

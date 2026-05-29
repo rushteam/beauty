@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sync"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
@@ -11,11 +12,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+// internalServices 是框架自动注册的内部服务，默认不暴露到服务注册中心
+var internalServices = map[string]bool{
+	"grpc.health.v1.Health":                    true,
+	"grpc.reflection.v1.ServerReflection":      true,
+	"grpc.reflection.v1alpha.ServerReflection": true,
+}
+
 // ServiceDiscovery 从gRPC Server中读取已注册的服务
 type ServiceDiscovery struct {
-	server     *grpc.Server
-	registries []discover.Registry
-	services   map[string]*ProtoServiceInfo
+	server          *grpc.Server
+	registries      []discover.Registry
+	services        map[string]*ProtoServiceInfo
+	includeInternal bool
 }
 
 // ProtoServiceInfo protobuf服务信息
@@ -26,13 +35,27 @@ type ProtoServiceInfo struct {
 	ServerAddr  string            `json:"server_addr"`
 }
 
+// ServiceDiscoveryOption 服务发现选项
+type ServiceDiscoveryOption func(*ServiceDiscovery)
+
+// WithInternalServices 将 health check、reflection 等内部服务也注册到服务注册中心
+func WithInternalServices() ServiceDiscoveryOption {
+	return func(sd *ServiceDiscovery) {
+		sd.includeInternal = true
+	}
+}
+
 // NewServiceDiscovery 创建服务发现器
-func NewServiceDiscovery(server *grpc.Server, registries ...discover.Registry) *ServiceDiscovery {
-	return &ServiceDiscovery{
+func NewServiceDiscovery(server *grpc.Server, registries []discover.Registry, opts ...ServiceDiscoveryOption) *ServiceDiscovery {
+	sd := &ServiceDiscovery{
 		server:     server,
 		registries: registries,
 		services:   make(map[string]*ProtoServiceInfo),
 	}
+	for _, o := range opts {
+		o(sd)
+	}
+	return sd
 }
 
 // DiscoverServices 发现gRPC Server中已注册的服务
@@ -41,6 +64,9 @@ func (sd *ServiceDiscovery) DiscoverServices(serverAddr string, baseMetadata map
 	serviceInfos := sd.server.GetServiceInfo()
 
 	for serviceName, serviceInfo := range serviceInfos {
+		if !sd.includeInternal && internalServices[serviceName] {
+			continue
+		}
 		methods := make([]string, 0, len(serviceInfo.Methods))
 		for _, method := range serviceInfo.Methods {
 			methods = append(methods, method.Name)
@@ -99,8 +125,10 @@ func (sd *ServiceDiscovery) DiscoverServices(serverAddr string, baseMetadata map
 	return nil
 }
 
-// RegisterAllServices 注册所有发现的服务
-func (sd *ServiceDiscovery) RegisterAllServices(ctx context.Context) error {
+// RegisterAllServices 注册所有发现的服务，返回一个 wait 函数，
+// 调用方可在 ctx 取消后调用 wait() 确保所有注册 goroutine 已退出。
+func (sd *ServiceDiscovery) RegisterAllServices(ctx context.Context) (wait func(), err error) {
+	var wg sync.WaitGroup
 	for serviceName, serviceInfo := range sd.services {
 		serviceWrapper := &ProtoServiceWrapper{
 			id:          uuid.New(),
@@ -110,20 +138,22 @@ func (sd *ServiceDiscovery) RegisterAllServices(ctx context.Context) error {
 			metadata:    serviceInfo.Metadata,
 		}
 		for _, registry := range sd.registries {
-			go func(r discover.Registry) {
+			wg.Add(1)
+			go func(r discover.Registry, name string) {
+				defer wg.Done()
 				stop, err := r.Register(ctx, serviceWrapper)
 				if err != nil {
 					logger.Error("proto service register error",
-						"service", serviceName,
+						"service", name,
 						"error", err)
 					return
 				}
 				defer stop()
 				<-ctx.Done()
-			}(registry)
+			}(registry, serviceName)
 		}
 	}
-	return nil
+	return wg.Wait, nil
 }
 
 // ProtoServiceWrapper 实现discover.Service接口

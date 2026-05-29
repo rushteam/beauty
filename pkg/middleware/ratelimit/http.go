@@ -45,8 +45,8 @@ func HTTPWaitMiddleware(rl *RateLimitMiddleware) func(http.Handler) http.Handler
 }
 
 // buildHTTPMetadata 构建 HTTP 请求元数据
-func buildHTTPMetadata(r *http.Request) map[string]interface{} {
-	metadata := make(map[string]interface{})
+func buildHTTPMetadata(r *http.Request) map[string]any {
+	metadata := make(map[string]any)
 
 	// 添加 headers
 	headers := make(map[string][]string)
@@ -154,7 +154,7 @@ func RateLimitInfo(rl *RateLimitMiddleware) func(http.Handler) http.Handler {
 			// 添加限流信息头部
 			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%.0f", rl.LimitRate()))
 			w.Header().Set("X-RateLimit-Burst", fmt.Sprintf("%d", rl.Burst()))
-			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", limiter.Tokens()))
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%.0f", limiter.Tokens()))
 
 			next.ServeHTTP(w, r)
 		})

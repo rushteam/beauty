@@ -126,7 +126,7 @@ func (a *SimpleJWTAuthenticator) CreateToken(userID, username string, roles []st
 	}
 
 	// 创建 header
-	header := map[string]interface{}{
+	header := map[string]any{
 		"typ": "JWT",
 		"alg": "HS256",
 	}

@@ -41,15 +41,7 @@ func TestCircuitBreaker_BasicFunctionality(t *testing.T) {
 		t.Errorf("Expected test error, got %v", err)
 	}
 
-	// 再次失败，应该触发熔断
-	err = cb.Call(func() error {
-		return testError
-	})
-	if err != testError {
-		t.Errorf("Expected test error, got %v", err)
-	}
-
-	// 第三次失败，应该触发熔断
+	// 再次失败，触发熔断（Requests=3, TotalFailures=2，满足 ReadyToTrip 条件）
 	err = cb.Call(func() error {
 		return testError
 	})
@@ -123,7 +115,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 	cb := NewCircuitBreaker(config)
 
 	// 测试成功执行
-	result, err := cb.Execute(func() (interface{}, error) {
+	result, err := cb.Execute(func() (any, error) {
 		return "success", nil
 	})
 	if err != nil {
@@ -135,7 +127,7 @@ func TestCircuitBreaker_Execute(t *testing.T) {
 
 	// 测试失败执行
 	testError := errors.New("test error")
-	result, err = cb.Execute(func() (interface{}, error) {
+	result, err = cb.Execute(func() (any, error) {
 		return nil, testError
 	})
 	if err != testError {

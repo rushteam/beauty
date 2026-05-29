@@ -22,7 +22,7 @@ func NewHeaderTokenExtractor(headerName, prefix string) *HeaderTokenExtractor {
 }
 
 // Extract 从 HTTP Header 中提取令牌
-func (e *HeaderTokenExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *HeaderTokenExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	headers, ok := metadata["headers"].(map[string][]string)
 	if !ok {
 		return "", errors.New("no headers found in metadata")
@@ -57,7 +57,7 @@ func NewQueryTokenExtractor(paramName string) *QueryTokenExtractor {
 }
 
 // Extract 从查询参数中提取令牌
-func (e *QueryTokenExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *QueryTokenExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	query, ok := metadata["query"].(map[string][]string)
 	if !ok {
 		return "", errors.New("no query parameters found in metadata")
@@ -84,7 +84,7 @@ func NewCookieTokenExtractor(cookieName string) *CookieTokenExtractor {
 }
 
 // Extract 从 Cookie 中提取令牌
-func (e *CookieTokenExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *CookieTokenExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	cookies, ok := metadata["cookies"].(map[string]string)
 	if !ok {
 		return "", errors.New("no cookies found in metadata")
@@ -111,7 +111,7 @@ func NewMultiTokenExtractor(extractors ...TokenExtractor) *MultiTokenExtractor {
 }
 
 // Extract 按优先级尝试从多个源提取令牌
-func (e *MultiTokenExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *MultiTokenExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	var lastErr error
 
 	for _, extractor := range e.Extractors {
@@ -142,7 +142,7 @@ func NewGRPCMetadataExtractor(metadataKey string) *GRPCMetadataExtractor {
 }
 
 // Extract 从 gRPC metadata 中提取令牌
-func (e *GRPCMetadataExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *GRPCMetadataExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	grpcMD, ok := metadata["grpc_metadata"].(map[string][]string)
 	if !ok {
 		return "", errors.New("no gRPC metadata found")

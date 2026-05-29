@@ -73,7 +73,7 @@ type CircuitBreaker struct {
 	readyToTrip   func(counts Counts) bool
 	onStateChange func(name string, from State, to State)
 
-	mutex      sync.Mutex
+	mutex      sync.RWMutex
 	state      State
 	generation uint64
 	counts     Counts
@@ -133,8 +133,8 @@ func (cb *CircuitBreaker) State() State {
 
 // Counts 返回当前统计信息
 func (cb *CircuitBreaker) Counts() Counts {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
 
 	return cb.counts
 }
@@ -150,7 +150,7 @@ func (cb *CircuitBreaker) Snapshot() (State, Counts) {
 }
 
 // Execute 执行函数，如果熔断器允许的话
-func (cb *CircuitBreaker) Execute(req func() (interface{}, error)) (interface{}, error) {
+func (cb *CircuitBreaker) Execute(req func() (any, error)) (any, error) {
 	generation, err := cb.beforeRequest()
 	if err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func (cb *CircuitBreaker) Execute(req func() (interface{}, error)) (interface{},
 
 // Call 执行函数，返回是否成功
 func (cb *CircuitBreaker) Call(req func() error) error {
-	_, err := cb.Execute(func() (interface{}, error) {
+	_, err := cb.Execute(func() (any, error) {
 		return nil, req()
 	})
 	return err
@@ -306,8 +306,8 @@ func (cb *CircuitBreaker) Reset() {
 
 // String 返回熔断器的字符串表示
 func (cb *CircuitBreaker) String() string {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
 
 	return fmt.Sprintf("CircuitBreaker[%s: %s, %+v]", cb.name, cb.state.String(), cb.counts)
 }

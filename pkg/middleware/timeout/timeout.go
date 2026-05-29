@@ -156,8 +156,8 @@ func (tc *TimeoutController) Execute(ctx context.Context, fn func(ctx context.Co
 }
 
 // ExecuteWithResult 执行带超时控制和返回值的函数
-func (tc *TimeoutController) ExecuteWithResult(ctx context.Context, fn func(ctx context.Context) (interface{}, error)) (interface{}, error) {
-	var result interface{}
+func (tc *TimeoutController) ExecuteWithResult(ctx context.Context, fn func(ctx context.Context) (any, error)) (any, error) {
+	var result any
 	err := tc.Execute(ctx, func(ctx context.Context) error {
 		var err error
 		result, err = fn(ctx)

@@ -34,7 +34,7 @@ type User interface {
 	// HasRole 检查用户是否拥有指定角色
 	HasRole(role string) bool
 	// Metadata 返回用户元数据
-	Metadata() map[string]interface{}
+	Metadata() map[string]any
 }
 
 // DefaultUser 默认用户实现
@@ -42,7 +42,7 @@ type DefaultUser struct {
 	id       string
 	name     string
 	roles    []string
-	metadata map[string]interface{}
+	metadata map[string]any
 }
 
 func NewUser(id, name string, roles []string) *DefaultUser {
@@ -50,14 +50,14 @@ func NewUser(id, name string, roles []string) *DefaultUser {
 		id:       id,
 		name:     name,
 		roles:    roles,
-		metadata: make(map[string]interface{}),
+		metadata: make(map[string]any),
 	}
 }
 
 func (u *DefaultUser) ID() string                       { return u.id }
 func (u *DefaultUser) Name() string                     { return u.name }
 func (u *DefaultUser) Roles() []string                  { return u.roles }
-func (u *DefaultUser) Metadata() map[string]interface{} { return u.metadata }
+func (u *DefaultUser) Metadata() map[string]any { return u.metadata }
 
 func (u *DefaultUser) HasRole(role string) bool {
 	for _, r := range u.roles {
@@ -68,14 +68,14 @@ func (u *DefaultUser) HasRole(role string) bool {
 	return false
 }
 
-func (u *DefaultUser) SetMetadata(key string, value interface{}) {
+func (u *DefaultUser) SetMetadata(key string, value any) {
 	u.metadata[key] = value
 }
 
 // TokenExtractor 令牌提取器接口
 type TokenExtractor interface {
 	// Extract 从请求中提取令牌
-	Extract(ctx context.Context, metadata map[string]interface{}) (string, error)
+	Extract(ctx context.Context, metadata map[string]any) (string, error)
 }
 
 // Authenticator 认证器接口
@@ -171,7 +171,7 @@ func (am *AuthMiddleware) ShouldSkip(path string) bool {
 }
 
 // Authenticate 执行认证
-func (am *AuthMiddleware) Authenticate(ctx context.Context, metadata map[string]interface{}) (User, error) {
+func (am *AuthMiddleware) Authenticate(ctx context.Context, metadata map[string]any) (User, error) {
 	am.recordRequest()
 
 	// 提取令牌

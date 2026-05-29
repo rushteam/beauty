@@ -18,7 +18,7 @@ const (
 )
 
 // getFunctionName 获取最后两级包路径的函数/方法名
-func getFunctionName(i interface{}) string {
+func getFunctionName(i any) string {
 	fullName := runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 
 	// 获取最后一级包名

@@ -234,7 +234,7 @@ func (c *ServiceDiscoveryClient) GetClient(ctx context.Context) (*grpc.ClientCon
 
 // Call 调用服务方法，支持指数退避重试（带 ±25% jitter）。
 // maxRetries 为额外重试次数，0 表示不重试，总调用次数为 maxRetries+1。
-func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
+func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, resp any, opts ...grpc.CallOption) error {
 	attempts := c.maxRetries + 1
 	var lastErr error
 	for i := 0; i < attempts; i++ {

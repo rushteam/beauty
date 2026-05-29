@@ -42,9 +42,12 @@ type Registry struct {
 }
 
 func (r Registry) client(key string) (naming_client.INamingClient, error) {
+	r.mu.Lock()
 	if c, ok := r.clients[key]; ok {
+		r.mu.Unlock()
 		return c, nil
 	}
+	r.mu.Unlock()
 	client, err := nacos.NewNamingClient(&nacos.Config{
 		Addr:      r.c.Addr,
 		Namespace: r.c.Namespace,
@@ -57,6 +60,10 @@ func (r Registry) client(key string) (naming_client.INamingClient, error) {
 		return nil, fmt.Errorf("nacos naming client error: %w", err)
 	}
 	r.mu.Lock()
+	if c, ok := r.clients[key]; ok {
+		r.mu.Unlock()
+		return c, nil
+	}
 	r.clients[key] = client
 	r.mu.Unlock()
 	return client, nil

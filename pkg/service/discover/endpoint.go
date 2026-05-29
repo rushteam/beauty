@@ -28,8 +28,7 @@ func (s *ServiceInfo) Unmarshal(b []byte) error {
 	buf := bytes.NewBuffer(b)
 	decoder := json.NewDecoder(buf)
 	decoder.UseNumber()
-	decoder.Decode(s)
-	return nil
+	return decoder.Decode(s)
 }
 
 func (s *ServiceInfo) Marshal() (string, error) {

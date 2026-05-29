@@ -14,7 +14,7 @@ import (
 
 // UnaryServerInterceptor 返回一个 gRPC 一元服务器拦截器，用于认证
 func UnaryServerInterceptor(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// 检查是否跳过认证
 		if auth.ShouldSkip(info.FullMethod) {
 			auth.recordSkipped()
@@ -49,7 +49,7 @@ func UnaryServerInterceptor(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
 
 // UnaryClientInterceptor 返回一个 gRPC 一元客户端拦截器，用于认证
 func UnaryClientInterceptor(auth *AuthMiddleware) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		// 构建元数据
 		metadata := buildGRPCMetadata(ctx, method)
 
@@ -68,7 +68,7 @@ func UnaryClientInterceptor(auth *AuthMiddleware) grpc.UnaryClientInterceptor {
 
 // StreamServerInterceptor 返回一个 gRPC 流服务器拦截器，用于认证
 func StreamServerInterceptor(auth *AuthMiddleware) grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		// 检查是否跳过认证
 		if auth.ShouldSkip(info.FullMethod) {
 			auth.recordSkipped()
@@ -135,8 +135,8 @@ func (s *authServerStream) Context() context.Context {
 
 // buildGRPCMetadata 构建 gRPC 请求元数据。
 // grpc_metadata 直接引用 incoming metadata 原始对象，避免整个 map 的拷贝。
-func buildGRPCMetadata(ctx context.Context, method string) map[string]interface{} {
-	md := make(map[string]interface{}, 6)
+func buildGRPCMetadata(ctx context.Context, method string) map[string]any {
+	md := make(map[string]any, 6)
 
 	md["method"] = method
 	md["path"] = method
@@ -198,7 +198,7 @@ func RequireGRPCAuth(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
 
 // OptionalGRPCAuth 创建可选认证的 gRPC 拦截器（认证失败不会阻止请求）
 func OptionalGRPCAuth(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// 构建元数据
 		metadata := buildGRPCMetadata(ctx, info.FullMethod)
 

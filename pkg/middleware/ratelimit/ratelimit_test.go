@@ -16,7 +16,7 @@ func TestRateLimitMiddleware_Allow(t *testing.T) {
 	}
 
 	rl := NewRateLimitMiddleware(config)
-	metadata := map[string]interface{}{"default": "test"}
+	metadata := map[string]any{"default": "test"}
 
 	// 前两个请求应该通过
 	err := rl.Allow(context.Background(), metadata)
@@ -58,7 +58,7 @@ func TestRateLimitMiddleware_Wait(t *testing.T) {
 	}
 
 	rl := NewRateLimitMiddleware(config)
-	metadata := map[string]interface{}{"default": "test"}
+	metadata := map[string]any{"default": "test"}
 
 	// 第一个请求应该立即通过
 	start := time.Now()
@@ -120,7 +120,7 @@ func TestIPKeyExtractor(t *testing.T) {
 	extractor := NewIPKeyExtractor()
 
 	// 测试从 remote_addr 提取 IP
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"remote_addr": "192.168.1.100:8080",
 	}
 
@@ -133,7 +133,7 @@ func TestIPKeyExtractor(t *testing.T) {
 	}
 
 	// 测试从 X-Forwarded-For 提取 IP
-	metadata = map[string]interface{}{
+	metadata = map[string]any{
 		"headers": map[string][]string{
 			"X-Forwarded-For": {"10.0.0.1, 192.168.1.1"},
 		},
@@ -153,7 +153,7 @@ func TestUserKeyExtractor(t *testing.T) {
 	extractor := NewUserKeyExtractor("user_id")
 
 	// 测试从元数据中提取用户ID
-	metadata := map[string]interface{}{
+	metadata := map[string]any{
 		"headers": map[string][]string{
 			"X-User-ID": {"123"},
 		},

@@ -25,7 +25,7 @@ func NewIPKeyExtractor() *IPKeyExtractor {
 }
 
 // Extract 从请求中提取 IP 地址作为键
-func (e *IPKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *IPKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	// 尝试从 HTTP headers 获取真实 IP
 	if headers, ok := metadata["headers"].(map[string][]string); ok {
 		// 优先使用 X-Forwarded-For
@@ -89,7 +89,7 @@ func NewUserKeyExtractor(userIDKey string) *UserKeyExtractor {
 }
 
 // Extract 从请求中提取用户ID作为键
-func (e *UserKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *UserKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	// 从上下文中获取用户信息
 	if user := ctx.Value("user"); user != nil {
 		if u, ok := user.(interface{ ID() string }); ok {
@@ -129,7 +129,7 @@ func NewHeaderKeyExtractor(headerName, prefix string) *HeaderKeyExtractor {
 }
 
 // Extract 从 HTTP Header 中提取键
-func (e *HeaderKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *HeaderKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	headers, ok := metadata["headers"].(map[string][]string)
 	if !ok {
 		return "", fmt.Errorf("no headers found in metadata")
@@ -164,7 +164,7 @@ func NewPathKeyExtractor(prefix string, stripQuery bool) *PathKeyExtractor {
 }
 
 // Extract 从请求路径中提取键
-func (e *PathKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *PathKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	path, ok := metadata["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("no path found in metadata")
@@ -202,7 +202,7 @@ func NewCompositeKeyExtractor(separator, prefix string, extractors ...KeyExtract
 }
 
 // Extract 组合多个提取器的结果
-func (e *CompositeKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *CompositeKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	var parts []string
 
 	for _, extractor := range e.Extractors {
@@ -239,7 +239,7 @@ func NewHashKeyExtractor(extractor KeyExtractor, prefix string) *HashKeyExtracto
 }
 
 // Extract 提取键并进行哈希
-func (e *HashKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *HashKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	key, err := e.Extractor.Extract(ctx, metadata)
 	if err != nil {
 		return "", err
@@ -257,18 +257,18 @@ func (e *HashKeyExtractor) Extract(ctx context.Context, metadata map[string]inte
 
 // CallbackKeyExtractor 回调键提取器（允许业务方自定义提取逻辑）
 type CallbackKeyExtractor struct {
-	ExtractFunc func(ctx context.Context, metadata map[string]interface{}) (string, error)
+	ExtractFunc func(ctx context.Context, metadata map[string]any) (string, error)
 }
 
 // NewCallbackKeyExtractor 创建回调键提取器
-func NewCallbackKeyExtractor(extractFunc func(ctx context.Context, metadata map[string]interface{}) (string, error)) *CallbackKeyExtractor {
+func NewCallbackKeyExtractor(extractFunc func(ctx context.Context, metadata map[string]any) (string, error)) *CallbackKeyExtractor {
 	return &CallbackKeyExtractor{
 		ExtractFunc: extractFunc,
 	}
 }
 
 // Extract 执行回调提取键
-func (e *CallbackKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *CallbackKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	if e.ExtractFunc == nil {
 		return "", fmt.Errorf("no extract function provided")
 	}
@@ -288,7 +288,7 @@ func NewChainKeyExtractor(extractors ...KeyExtractor) *ChainKeyExtractor {
 }
 
 // Extract 按顺序尝试多个提取器
-func (e *ChainKeyExtractor) Extract(ctx context.Context, metadata map[string]interface{}) (string, error) {
+func (e *ChainKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	var lastErr error
 
 	for _, extractor := range e.Extractors {

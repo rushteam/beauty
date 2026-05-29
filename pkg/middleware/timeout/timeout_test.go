@@ -44,7 +44,7 @@ func TestTimeoutController_ExecuteWithResult(t *testing.T) {
 	tc := NewTimeoutController(config)
 
 	// 测试成功执行并返回结果
-	result, err := tc.ExecuteWithResult(context.Background(), func(ctx context.Context) (interface{}, error) {
+	result, err := tc.ExecuteWithResult(context.Background(), func(ctx context.Context) (any, error) {
 		return "success", nil
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestTimeoutController_ExecuteWithResult(t *testing.T) {
 	}
 
 	// 测试超时
-	result, err = tc.ExecuteWithResult(context.Background(), func(ctx context.Context) (interface{}, error) {
+	result, err = tc.ExecuteWithResult(context.Background(), func(ctx context.Context) (any, error) {
 		time.Sleep(200 * time.Millisecond)
 		return "timeout", nil
 	})

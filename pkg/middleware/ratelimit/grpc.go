@@ -12,7 +12,7 @@ import (
 
 // UnaryServerInterceptor 返回一个 gRPC 一元服务器拦截器，用于限流
 func UnaryServerInterceptor(rl *RateLimitMiddleware) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// 构建元数据
 		metadata := buildGRPCMetadata(ctx, info.FullMethod)
 
@@ -28,7 +28,7 @@ func UnaryServerInterceptor(rl *RateLimitMiddleware) grpc.UnaryServerInterceptor
 
 // UnaryServerWaitInterceptor 返回等待型一元服务器拦截器（会等待而不是直接拒绝）
 func UnaryServerWaitInterceptor(rl *RateLimitMiddleware) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// 构建元数据
 		metadata := buildGRPCMetadata(ctx, info.FullMethod)
 
@@ -44,7 +44,7 @@ func UnaryServerWaitInterceptor(rl *RateLimitMiddleware) grpc.UnaryServerInterce
 
 // UnaryClientInterceptor 返回一个 gRPC 一元客户端拦截器，用于限流
 func UnaryClientInterceptor(rl *RateLimitMiddleware) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		// 构建元数据
 		metadata := buildGRPCMetadata(ctx, method)
 
@@ -60,7 +60,7 @@ func UnaryClientInterceptor(rl *RateLimitMiddleware) grpc.UnaryClientInterceptor
 
 // StreamServerInterceptor 返回一个 gRPC 流服务器拦截器，用于限流
 func StreamServerInterceptor(rl *RateLimitMiddleware) grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		// 构建元数据
 		metadata := buildGRPCMetadata(ss.Context(), info.FullMethod)
 
@@ -91,8 +91,8 @@ func StreamClientInterceptor(rl *RateLimitMiddleware) grpc.StreamClientIntercept
 }
 
 // buildGRPCMetadata 构建 gRPC 请求元数据
-func buildGRPCMetadata(ctx context.Context, method string) map[string]interface{} {
-	md := make(map[string]interface{})
+func buildGRPCMetadata(ctx context.Context, method string) map[string]any {
+	md := make(map[string]any)
 
 	// 添加方法名
 	md["method"] = method

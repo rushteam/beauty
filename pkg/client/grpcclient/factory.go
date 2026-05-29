@@ -108,7 +108,7 @@ func NewServiceClient(discovery discover.Discovery, serviceName string, opts ...
 }
 
 // Call 调用服务方法
-func (c *ServiceClient) Call(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
+func (c *ServiceClient) Call(ctx context.Context, method string, req, resp any, opts ...grpc.CallOption) error {
 	conn, err := c.GetClient(ctx)
 	if err != nil {
 		return err

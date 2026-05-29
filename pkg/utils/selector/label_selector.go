@@ -123,20 +123,20 @@ func (f *LabelFilter) Matches(labels map[string]string) bool {
 }
 
 // FilterMap 过滤带有标签的对象切片，使用自定义的标签提取函数
-func (f *LabelFilter) FilterMap(items interface{}, getLabelsFn func(interface{}) map[string]string) []interface{} {
+func (f *LabelFilter) FilterMap(items any, getLabelsFn func(any) map[string]string) []any {
 	if f.selector == nil || (len(f.selector.MatchLabels) == 0 && len(f.selector.MatchExpressions) == 0) {
 		// 如果没有过滤条件，返回原始切片
-		if slice, ok := items.([]interface{}); ok {
+		if slice, ok := items.([]any); ok {
 			return slice
 		}
 		return nil
 	}
 
-	var filtered []interface{}
+	var filtered []any
 
 	// 使用反射处理不同类型的切片
 	switch v := items.(type) {
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			if f.matches(getLabelsFn(item)) {
 				filtered = append(filtered, item)
@@ -144,7 +144,7 @@ func (f *LabelFilter) FilterMap(items interface{}, getLabelsFn func(interface{})
 		}
 	default:
 		// 对于其他类型，返回空切片
-		return []interface{}{}
+		return []any{}
 	}
 
 	return filtered

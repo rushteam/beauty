@@ -10,8 +10,8 @@ import (
 
 // UnaryServerInterceptor 返回一个 gRPC 一元服务器拦截器，用于熔断
 func UnaryServerInterceptor(cb *CircuitBreaker) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		return cb.Execute(func() (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		return cb.Execute(func() (any, error) {
 			return handler(ctx, req)
 		})
 	}
@@ -19,7 +19,7 @@ func UnaryServerInterceptor(cb *CircuitBreaker) grpc.UnaryServerInterceptor {
 
 // UnaryClientInterceptor 返回一个 gRPC 一元客户端拦截器，用于熔断
 func UnaryClientInterceptor(cb *CircuitBreaker) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		return cb.Call(func() error {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		})
@@ -28,7 +28,7 @@ func UnaryClientInterceptor(cb *CircuitBreaker) grpc.UnaryClientInterceptor {
 
 // StreamServerInterceptor 返回一个 gRPC 流服务器拦截器，用于熔断
 func StreamServerInterceptor(cb *CircuitBreaker) grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		return cb.Call(func() error {
 			return handler(srv, ss)
 		})

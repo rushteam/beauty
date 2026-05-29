@@ -34,7 +34,7 @@ type Limiter interface {
 // KeyExtractor 键提取器接口，用于从请求中提取限流键
 type KeyExtractor interface {
 	// Extract 从请求元数据中提取限流键
-	Extract(ctx context.Context, metadata map[string]interface{}) (string, error)
+	Extract(ctx context.Context, metadata map[string]any) (string, error)
 }
 
 // Config 限流配置
@@ -120,7 +120,7 @@ func (rl *RateLimitMiddleware) Name() string {
 }
 
 // Allow 检查请求是否允许通过
-func (rl *RateLimitMiddleware) Allow(ctx context.Context, metadata map[string]interface{}) error {
+func (rl *RateLimitMiddleware) Allow(ctx context.Context, metadata map[string]any) error {
 	key := rl.extractKey(ctx, metadata)
 	limiter := rl.getLimiter(key)
 
@@ -140,7 +140,7 @@ func (rl *RateLimitMiddleware) Allow(ctx context.Context, metadata map[string]in
 }
 
 // Wait 等待直到可以处理请求
-func (rl *RateLimitMiddleware) Wait(ctx context.Context, metadata map[string]interface{}) error {
+func (rl *RateLimitMiddleware) Wait(ctx context.Context, metadata map[string]any) error {
 	key := rl.extractKey(ctx, metadata)
 	limiter := rl.getLimiter(key)
 
@@ -160,7 +160,7 @@ func (rl *RateLimitMiddleware) Wait(ctx context.Context, metadata map[string]int
 }
 
 // extractKey 提取限流键
-func (rl *RateLimitMiddleware) extractKey(ctx context.Context, metadata map[string]interface{}) string {
+func (rl *RateLimitMiddleware) extractKey(ctx context.Context, metadata map[string]any) string {
 	if rl.keyExtractor != nil {
 		if key, err := rl.keyExtractor.Extract(ctx, metadata); err == nil {
 			return key

@@ -17,38 +17,38 @@ import (
 
 var _ discover.Service = (*Server)(nil)
 
-func WithGrpcServerOptions(opts ...grpc.ServerOption) Options {
+func WithGrpcServerOptions(opts ...grpc.ServerOption) Option {
 	return func(s *Server) {
 		s.grpcOpts = append(s.grpcOpts, opts...)
 	}
 }
 
-func WithGrpcServerUnaryInterceptor(interceptors ...grpc.UnaryServerInterceptor) Options {
+func WithGrpcServerUnaryInterceptor(interceptors ...grpc.UnaryServerInterceptor) Option {
 	return WithGrpcServerOptions(grpc.UnaryInterceptor(
 		middleware.ChainUnaryServer(interceptors...),
 	))
 }
 
-func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerInterceptor) Options {
+func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerInterceptor) Option {
 	return WithGrpcServerOptions(grpc.StreamInterceptor(
 		middleware.ChainStreamServer(interceptors...),
 	))
 }
 
-func WithServiceName(name string) Options {
+func WithServiceName(name string) Option {
 	return func(s *Server) {
 		s.name = name
 	}
 }
 
-func WithMetadata(md map[string]string) Options {
+func WithMetadata(md map[string]string) Option {
 	return func(s *Server) {
 		maps.Copy(s.metadata, md)
 	}
 }
 
 // WithAutoServiceDiscovery 启用自动服务发现，为每个protobuf服务单独注册
-func WithAutoServiceDiscovery(registries ...discover.Registry) Options {
+func WithAutoServiceDiscovery(registries ...discover.Registry) Option {
 	return func(s *Server) {
 		s.autoDiscover = true
 		s.serviceDiscovery = NewServiceDiscovery(s.Server, registries...)
@@ -56,7 +56,7 @@ func WithAutoServiceDiscovery(registries ...discover.Registry) Options {
 }
 
 // WithRegionInfo 设置地域信息，兼容Polaris
-func WithRegionInfo(region, zone, campus string) Options {
+func WithRegionInfo(region, zone, campus string) Option {
 	return func(s *Server) {
 		if s.metadata == nil {
 			s.metadata = make(map[string]string)
@@ -68,7 +68,7 @@ func WithRegionInfo(region, zone, campus string) Options {
 }
 
 // WithEnvironment 设置环境信息
-func WithEnvironment(env string) Options {
+func WithEnvironment(env string) Option {
 	return func(s *Server) {
 		if s.metadata == nil {
 			s.metadata = make(map[string]string)
@@ -78,7 +78,7 @@ func WithEnvironment(env string) Options {
 }
 
 // WithWeight 设置服务权重
-func WithWeight(weight int) Options {
+func WithWeight(weight int) Option {
 	return func(s *Server) {
 		if s.metadata == nil {
 			s.metadata = make(map[string]string)
@@ -88,7 +88,7 @@ func WithWeight(weight int) Options {
 }
 
 // WithPriority 设置服务优先级
-func WithPriority(priority int) Options {
+func WithPriority(priority int) Option {
 	return func(s *Server) {
 		if s.metadata == nil {
 			s.metadata = make(map[string]string)
@@ -97,10 +97,10 @@ func WithPriority(priority int) Options {
 	}
 }
 
-type Options func(*Server)
+type Option func(*Server)
 
 // New create a grpc service with the name
-func New(addr string, handler func(*grpc.Server), opts ...Options) *Server {
+func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 	s := &Server{
 		id:                 uuid.New(),
 		name:               "grpc-server",

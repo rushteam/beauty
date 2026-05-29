@@ -39,10 +39,10 @@ func newCronHandler(cron *Cron, spec string, handler func(ctx context.Context) e
 
 type Cron struct {
 	*cron.Cron
+	// traceProvider/meterProvider 仅在 New() 初始化阶段使用，之后为 nil
 	traceProvider trace.TracerProvider
-	tracer        trace.Tracer
-
 	meterProvider metric.MeterProvider
+	tracer        trace.Tracer
 	meter         metric.Meter
 
 	metricsJobSpentDuration metric.Float64Histogram
@@ -63,11 +63,13 @@ func New(opts ...CronOptions) *Cron {
 		c.traceProvider = otel.GetTracerProvider()
 	}
 	c.tracer = c.traceProvider.Tracer(ScopeName)
+	c.traceProvider = nil // 初始化完成，释放引用
 
 	if c.meterProvider == nil {
 		c.meterProvider = otel.GetMeterProvider()
 	}
 	c.meter = c.meterProvider.Meter(ScopeName)
+	c.meterProvider = nil // 初始化完成，释放引用
 
 	var err error
 	c.metricsJobSpentDuration, err = c.meter.Float64Histogram(

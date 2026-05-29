@@ -2,8 +2,8 @@ package webserver
 
 import (
 	"context"
-	"log"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"time"
@@ -16,24 +16,22 @@ import (
 
 var _ discover.Service = (*Server)(nil)
 
-type Options func(*Server)
+type Option func(*Server)
 
-func WithServiceName(name string) Options {
+func WithServiceName(name string) Option {
 	return func(s *Server) {
 		s.name = name
 	}
 }
 
-func WithMetadata(md map[string]string) Options {
+func WithMetadata(md map[string]string) Option {
 	return func(s *Server) {
-		for k, v := range md {
-			s.metadata[k] = v
-		}
+		maps.Copy(s.metadata, md)
 	}
 }
 
 // WithMiddleware 添加 HTTP 中间件
-func WithMiddleware(middlewares ...func(http.Handler) http.Handler) Options {
+func WithMiddleware(middlewares ...func(http.Handler) http.Handler) Option {
 	return func(s *Server) {
 		if s.middlewares == nil {
 			s.middlewares = make([]func(http.Handler) http.Handler, 0)
@@ -42,7 +40,7 @@ func WithMiddleware(middlewares ...func(http.Handler) http.Handler) Options {
 	}
 }
 
-func New(addr string, mux http.Handler, opts ...Options) *Server {
+func New(addr string, mux http.Handler, opts ...Option) *Server {
 	s := &Server{
 		id:          uuid.New(),
 		name:        "http-server",
@@ -89,10 +87,8 @@ func (s *Server) Start(ctx context.Context) error {
 	close(s.ready)
 	go func() {
 		logger.Info("web server serve", slog.String("addr", s.Server.Addr))
-		if err := s.Serve(ln); err != nil {
-			if err != http.ErrServerClosed {
-				log.Fatalf("web server listen failed: %s\n", err)
-			}
+		if err := s.Serve(ln); err != nil && err != http.ErrServerClosed {
+			logger.Error("web server serve failed", "error", err)
 		}
 	}()
 	<-ctx.Done()

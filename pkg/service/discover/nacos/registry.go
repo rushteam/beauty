@@ -63,14 +63,17 @@ func (r Registry) client(key string) (naming_client.INamingClient, error) {
 }
 
 func (r Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
-	addr, port := addr.ParseHostAndPort(info.Addr())
-	portUint, _ := strconv.ParseUint(port, 10, 64)
+	host, port := addr.ParseHostAndPort(info.Addr())
+	portUint, err := strconv.ParseUint(port, 10, 64)
+	if err != nil {
+		return func() {}, fmt.Errorf("nacos register: invalid port %q for service %s: %w", port, info.Name(), err)
+	}
 	registerClient, err := r.client(info.ID())
 	if err != nil {
 		return func() {}, err
 	}
 	if _, err := registerClient.RegisterInstance(vo.RegisterInstanceParam{
-		Ip:          addr,
+		Ip:          host,
 		Port:        portUint,
 		Weight:      r.c.Weight,
 		Enable:      true,
@@ -81,14 +84,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		GroupName:   r.c.Group,
 		Ephemeral:   true,
 	}); err != nil {
-		logger.Error("nacos RegisterInstance failed",
-			slog.Any("err", err),
-			slog.String("svc.id", info.ID()),
-			slog.String("svc.name", info.Name()),
-			slog.String("svc.addr", info.Addr()),
-			slog.Any("svc.meta", info.Metadata()),
-		)
-		return func() {}, nil
+		return func() {}, fmt.Errorf("nacos RegisterInstance failed for service %s: %w", info.Name(), err)
 	}
 	logger.Info("nacos RegisterInstance success",
 		slog.String("svc.id", info.ID()),
@@ -98,7 +94,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 	)
 	return func() {
 		_, err := registerClient.DeregisterInstance(vo.DeregisterInstanceParam{
-			Ip:          addr,
+			Ip:          host,
 			Port:        portUint,
 			ServiceName: info.Name(),
 			Cluster:     r.c.Cluster,
@@ -117,7 +113,7 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 		}
 		logger.Info("nacos DeregisterInstance success",
 			slog.String("svc.id", info.ID()),
-			slog.String("svc.name ", info.Name()),
+			slog.String("svc.name", info.Name()),
 			slog.String("svc.addr", info.Addr()),
 			slog.Any("svc.meta", info.Metadata()),
 		)
@@ -133,39 +129,44 @@ func (r Registry) Watch(ctx context.Context, serviceName string, update discover
 	if err != nil {
 		return err
 	}
-	func() {
-		services, _ := registryClient.SelectInstances(vo.SelectInstancesParam{
-			ServiceName: serviceName,
-			Clusters:    []string{r.c.Cluster},
-			GroupName:   r.c.Group,
-			HealthyOnly: true,
-		})
-		if len(services) > 0 {
-			update(buildService(services))
-		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-		registryClient.Unsubscribe(&vo.SubscribeParam{
-			ServiceName:       serviceName,
-			Clusters:          []string{r.c.Cluster},
-			GroupName:         r.c.Group,
-			SubscribeCallback: func(services []model.Instance, err error) {},
-		})
-	}()
-	return registryClient.Subscribe(&vo.SubscribeParam{
+	// 拉取初始列表；失败只记日志，不阻止 Watch 继续
+	if services, err := registryClient.SelectInstances(vo.SelectInstancesParam{
 		ServiceName: serviceName,
 		Clusters:    []string{r.c.Cluster},
 		GroupName:   r.c.Group,
-		SubscribeCallback: func(services []model.Instance, err error) {
-			if err != nil {
-				logger.Warn("nacos service update error", slog.Any("err", err))
-				return
-			}
-			logger.Info("nacos service update", slog.Any("services", services))
-			update(buildService(services))
-		},
+		HealthyOnly: true,
+	}); err != nil {
+		logger.Warn("nacos SelectInstances failed", slog.String("service", serviceName), slog.Any("err", err))
+	} else if len(services) > 0 {
+		update(buildService(services))
+	}
+
+	// 订阅回调，用于 Unsubscribe 时匹配
+	subscribeCallback := func(services []model.Instance, err error) {
+		if err != nil {
+			logger.Warn("nacos service update error", slog.Any("err", err))
+			return
+		}
+		logger.Info("nacos service update", slog.Any("services", services))
+		update(buildService(services))
+	}
+
+	go func() {
+		<-ctx.Done()
+		if err := registryClient.Unsubscribe(&vo.SubscribeParam{
+			ServiceName:       serviceName,
+			Clusters:          []string{r.c.Cluster},
+			GroupName:         r.c.Group,
+			SubscribeCallback: subscribeCallback,
+		}); err != nil {
+			logger.Warn("nacos Unsubscribe failed", slog.String("service", serviceName), slog.Any("err", err))
+		}
+	}()
+	return registryClient.Subscribe(&vo.SubscribeParam{
+		ServiceName:       serviceName,
+		Clusters:          []string{r.c.Cluster},
+		GroupName:         r.c.Group,
+		SubscribeCallback: subscribeCallback,
 	})
 }
 

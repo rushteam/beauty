@@ -32,7 +32,10 @@ func (s *ServiceInfo) Unmarshal(b []byte) error {
 	return nil
 }
 
-func (s *ServiceInfo) Marshal() string {
-	b, _ := json.Marshal(s)
-	return string(b)
+func (s *ServiceInfo) Marshal() (string, error) {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

@@ -81,14 +81,19 @@ func (r Registry) Register(ctx context.Context, info discover.Service) (context.
 	}
 	key := buildServiceKey(r.prefix, info.Name(), info.ID())
 
+	valueStr, err := value.Marshal()
+	if err != nil {
+		return func() {}, fmt.Errorf("failed to marshal service info: %w", err)
+	}
+
 	// 同步首次注册（带重试）
-	leaseID, err := r.registerWithRetry(ctx, key, value.Marshal())
+	leaseID, err := r.registerWithRetry(ctx, key, valueStr)
 	if err != nil {
 		return func() {}, err
 	}
 
 	regCtx, stop := context.WithCancel(ctx)
-	go r.keepAliveLoop(regCtx, key, value.Marshal(), leaseID)
+	go r.keepAliveLoop(regCtx, key, valueStr, leaseID)
 	return func() {
 		stop()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)

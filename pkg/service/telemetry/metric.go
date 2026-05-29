@@ -2,7 +2,7 @@ package telemetry
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -41,7 +41,7 @@ func WithMetricStdoutReader() MetricOption {
 		stdoutmetric.WithPrettyPrint(),
 	)
 	if err != nil {
-		log.Fatal(err)
+		panic(fmt.Sprintf("telemetry: failed to create stdout metric exporter: %v", err))
 	}
 	return WithMetricReader(sdkmetric.NewPeriodicReader(
 		exporter,

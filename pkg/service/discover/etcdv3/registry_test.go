@@ -25,23 +25,32 @@ func TestApplyPutEvent_FilterGrpc(t *testing.T) {
 	reg := &Registry{}
 	endpoints := map[string]discover.ServiceInfo{}
 
+	mustMarshal := func(t *testing.T, s discover.ServiceInfo) []byte {
+		t.Helper()
+		v, err := s.Marshal()
+		if err != nil {
+			t.Fatalf("marshal failed: %v", err)
+		}
+		return []byte(v)
+	}
+
 	// grpc
 	vGrpc := discover.ServiceInfo{ID: "1", Name: "svc", Kind: "grpc"}
-	services := reg.applyPutEvent(endpoints, path, path+"/1", []byte(vGrpc.Marshal()))
+	services := reg.applyPutEvent(endpoints, path, path+"/1", mustMarshal(t, vGrpc))
 	if len(services) != 1 || services[0].ID != "1" {
 		t.Fatalf("grpc add failed: %v", services)
 	}
 
 	// non-grpc
 	vNon := discover.ServiceInfo{ID: "2", Name: "svc", Kind: "http"}
-	services = reg.applyPutEvent(endpoints, path, path+"/2", []byte(vNon.Marshal()))
+	services = reg.applyPutEvent(endpoints, path, path+"/2", mustMarshal(t, vNon))
 	if len(services) != 1 || services[0].ID != "1" {
 		t.Fatalf("non-grpc should be filtered, got: %v", services)
 	}
 
 	// change existing to non-grpc -> remove
 	vGrpc.Kind = "http"
-	services = reg.applyPutEvent(endpoints, path, path+"/1", []byte(vGrpc.Marshal()))
+	services = reg.applyPutEvent(endpoints, path, path+"/1", mustMarshal(t, vGrpc))
 	if len(services) != 0 {
 		t.Fatalf("change to non-grpc should remove, got: %v", services)
 	}

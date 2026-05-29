@@ -2,7 +2,7 @@ package telemetry
 
 import (
 	"context"
-	"log"
+	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -55,7 +55,7 @@ func WithTraceStdoutExporter() TraceOption {
 		stdouttrace.WithPrettyPrint(),
 	)
 	if err != nil {
-		log.Fatal(err)
+		panic(fmt.Sprintf("telemetry: failed to create stdout trace exporter: %v", err))
 	}
 	return WithTraceProviderOption(
 		sdktrace.WithBatcher(exporter),
@@ -77,7 +77,7 @@ func (c *traceComponent) Init() context.CancelFunc {
 		stdouttrace.WithPrettyPrint(),
 	)
 	if err != nil {
-		log.Fatal(err)
+		panic(fmt.Sprintf("telemetry: failed to create stdout trace exporter: %v", err))
 	}
 
 	// res, err := resource.Merge(

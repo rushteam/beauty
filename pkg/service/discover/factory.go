@@ -13,9 +13,6 @@ type RegistryFactory interface {
 
 	// CreateFromURL 从URL创建注册中心实例
 	CreateFromURL(targetURL *url.URL) (Discovery, error)
-
-	// CreateFromConfig 从配置创建注册中心实例
-	CreateFromConfig(config interface{}) (Discovery, error)
 }
 
 // RegistryFactoryFunc 工厂函数类型
@@ -35,11 +32,6 @@ func (f *registryFactory) CreateFromURL(targetURL *url.URL) (Discovery, error) {
 	return f.fn(targetURL)
 }
 
-func (f *registryFactory) CreateFromConfig(config interface{}) (Discovery, error) {
-	// 默认实现不支持从配置创建，子类可以重写
-	return nil, fmt.Errorf("CreateFromConfig not supported for scheme %s", f.scheme)
-}
-
 // RegistryManager 注册中心管理器
 type RegistryManager struct {
 	factories map[string]RegistryFactory
@@ -53,13 +45,13 @@ var (
 )
 
 // RegisterFactory 注册工厂
-func RegisterFactory(factory RegistryFactory) {
-	globalManager.RegisterFactory(factory)
+func RegisterFactory(factory RegistryFactory) error {
+	return globalManager.RegisterFactory(factory)
 }
 
 // RegisterFactoryFunc 注册工厂函数
-func RegisterFactoryFunc(scheme string, fn RegistryFactoryFunc) {
-	globalManager.RegisterFactory(&registryFactory{
+func RegisterFactoryFunc(scheme string, fn RegistryFactoryFunc) error {
+	return globalManager.RegisterFactory(&registryFactory{
 		scheme: scheme,
 		fn:     fn,
 	})
@@ -70,26 +62,25 @@ func GetManager() *RegistryManager {
 	return globalManager
 }
 
-// RegisterFactory 注册工厂
-func (m *RegistryManager) RegisterFactory(factory RegistryFactory) {
+// RegisterFactory 注册工厂，重复注册同一 scheme 会返回 error
+func (m *RegistryManager) RegisterFactory(factory RegistryFactory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	scheme := factory.Scheme()
 	if scheme == "" {
-		panic("registry factory scheme cannot be empty")
+		return fmt.Errorf("registry factory scheme cannot be empty")
 	}
-
 	if _, exists := m.factories[scheme]; exists {
-		panic(fmt.Sprintf("registry factory for scheme %s already registered", scheme))
+		return fmt.Errorf("registry factory for scheme %s already registered", scheme)
 	}
-
 	m.factories[scheme] = factory
+	return nil
 }
 
 // RegisterFactoryFunc 注册工厂函数
-func (m *RegistryManager) RegisterFactoryFunc(scheme string, fn RegistryFactoryFunc) {
-	m.RegisterFactory(&registryFactory{
+func (m *RegistryManager) RegisterFactoryFunc(scheme string, fn RegistryFactoryFunc) error {
+	return m.RegisterFactory(&registryFactory{
 		scheme: scheme,
 		fn:     fn,
 	})

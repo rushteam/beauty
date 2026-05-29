@@ -19,6 +19,10 @@ var (
 	ErrTokenExpired = errors.New("token expired")
 )
 
+type contextKey struct{}
+
+var userContextKey = contextKey{}
+
 // User 用户信息接口
 type User interface {
 	// ID 返回用户ID
@@ -173,18 +177,18 @@ func (am *AuthMiddleware) Authenticate(ctx context.Context, metadata map[string]
 	// 提取令牌
 	token, err := am.tokenExtractor.Extract(ctx, metadata)
 	if err != nil {
-		am.recordFailure(err)
+		am.recordFailure(ctx, err)
 		return nil, fmt.Errorf("failed to extract token: %w", err)
 	}
 
 	// 认证令牌
 	user, err := am.authenticator.Authenticate(ctx, token)
 	if err != nil {
-		am.recordFailure(err)
+		am.recordFailure(ctx, err)
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
-	am.recordSuccess()
+	am.recordSuccess(ctx, user)
 	return user, nil
 }
 
@@ -196,7 +200,7 @@ func (am *AuthMiddleware) Authorize(ctx context.Context, user User, resource, ac
 
 	err := am.authorizer.Authorize(ctx, user, resource, action)
 	if err != nil {
-		am.recordFailure(err)
+		am.recordFailure(ctx, err)
 		return fmt.Errorf("authorization failed: %w", err)
 	}
 
@@ -216,7 +220,7 @@ func (am *AuthMiddleware) recordRequest() {
 }
 
 // recordSuccess 记录成功
-func (am *AuthMiddleware) recordSuccess() {
+func (am *AuthMiddleware) recordSuccess(ctx context.Context, user User) {
 	if !am.enableMetrics {
 		return
 	}
@@ -227,16 +231,12 @@ func (am *AuthMiddleware) recordSuccess() {
 	am.stats.LastAuthTime = time.Now()
 
 	if am.onAuthSuccess != nil {
-		// 在 goroutine 中执行回调，避免阻塞
-		go func() {
-			// 这里需要传递用户信息，但为了简化，暂时传递 nil
-			am.onAuthSuccess(context.Background(), nil)
-		}()
+		go am.onAuthSuccess(ctx, user)
 	}
 }
 
 // recordFailure 记录失败
-func (am *AuthMiddleware) recordFailure(err error) {
+func (am *AuthMiddleware) recordFailure(ctx context.Context, err error) {
 	if !am.enableMetrics {
 		return
 	}
@@ -247,10 +247,7 @@ func (am *AuthMiddleware) recordFailure(err error) {
 	am.stats.LastFailureTime = time.Now()
 
 	if am.onAuthFailure != nil {
-		// 在 goroutine 中执行回调，避免阻塞
-		go func() {
-			am.onAuthFailure(context.Background(), err)
-		}()
+		go am.onAuthFailure(ctx, err)
 	}
 }
 
@@ -299,6 +296,6 @@ func (am *AuthMiddleware) String() string {
 
 // IsAuthError 检查错误是否为认证相关错误
 func IsAuthError(err error) bool {
-	return err == ErrUnauthorized || err == ErrForbidden ||
-		err == ErrInvalidToken || err == ErrTokenExpired
+	return errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrForbidden) ||
+		errors.Is(err, ErrInvalidToken) || errors.Is(err, ErrTokenExpired)
 }

@@ -167,42 +167,27 @@ func demonstrateRegionFiltering(factory *grpcclient.ClientFactory) {
 		),
 	)
 
-	// 获取服务信息
-	ctx := context.Background()
-
-	usWestServices, err := usWestClient.GetServiceInfo(ctx)
-	if err != nil {
-		log.Printf("failed to get us-west services: %v", err)
-	} else {
-		slog.Info("US West services", "count", len(usWestServices))
-		for _, service := range usWestServices {
-			slog.Info("Service", "addr", service.Addr, "region", service.Metadata["region"], "zone", service.Metadata["zone"])
-		}
+	usWestServices := usWestClient.GetServiceInfo()
+	slog.Info("US West services", "count", len(usWestServices))
+	for _, service := range usWestServices {
+		slog.Info("Service", "addr", service.Addr, "region", service.Metadata["region"], "zone", service.Metadata["zone"])
 	}
 
-	usEastServices, err := usEastClient.GetServiceInfo(ctx)
-	if err != nil {
-		log.Printf("failed to get us-east services: %v", err)
-	} else {
-		slog.Info("US East services", "count", len(usEastServices))
-		for _, service := range usEastServices {
-			slog.Info("Service", "addr", service.Addr, "region", service.Metadata["region"], "zone", service.Metadata["zone"], "campus", service.Metadata["campus"])
-		}
+	usEastServices := usEastClient.GetServiceInfo()
+	slog.Info("US East services", "count", len(usEastServices))
+	for _, service := range usEastServices {
+		slog.Info("Service", "addr", service.Addr, "region", service.Metadata["region"], "zone", service.Metadata["zone"], "campus", service.Metadata["campus"])
 	}
 
 	// 演示多选过滤
-	multiServices, err := multiRegionClient.GetServiceInfo(ctx)
-	if err != nil {
-		log.Printf("failed to get multi-region services: %v", err)
-	} else {
-		slog.Info("Multi-region services", "count", len(multiServices))
-		for _, service := range multiServices {
-			slog.Info("Multi-region Service",
-				"addr", service.Addr,
-				"region", service.Metadata["region"],
-				"zone", service.Metadata["zone"],
-				"campus", service.Metadata["campus"],
-				"environment", service.Metadata["environment"])
-		}
+	multiServices := multiRegionClient.GetServiceInfo()
+	slog.Info("Multi-region services", "count", len(multiServices))
+	for _, service := range multiServices {
+		slog.Info("Multi-region Service",
+			"addr", service.Addr,
+			"region", service.Metadata["region"],
+			"zone", service.Metadata["zone"],
+			"campus", service.Metadata["campus"],
+			"environment", service.Metadata["environment"])
 	}
 }

@@ -133,11 +133,11 @@ func demonstrateComplexFiltering(factory *grpcclient.ClientFactory) {
 		WithExpression("load", selector.FilterOpNotEquals, "high").
 		WithExpression("healthy", selector.FilterOpExists)
 
-	manager := grpcclient.NewClientManager(factory.GetDiscovery(), "v1alpha.OrderService",
-		grpcclient.WithLoadBalanceStrategy(grpcclient.WeightedRoundRobin),
-		grpcclient.WithManagerLabelFilter(managerFilter),
-		grpcclient.WithHealthCheck(true, time.Second*30),
-		grpcclient.WithFailover(true, 3, time.Second),
+	manager := grpcclient.NewServiceDiscoveryClient(factory.GetDiscovery(), "v1alpha.OrderService",
+		grpcclient.WithDiscoveryStrategy(grpcclient.WeightedRoundRobin),
+		grpcclient.WithDiscoveryLabelFilter(managerFilter),
+		grpcclient.WithDiscoveryHealthCheck(true, time.Second*30),
+		grpcclient.WithDiscoveryFailover(3, time.Second),
 	)
 
 	// 启动管理器

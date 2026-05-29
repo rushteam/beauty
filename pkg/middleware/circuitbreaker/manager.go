@@ -7,6 +7,22 @@ import (
 	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
+var (
+	defaultManagerOnce sync.Once
+	defaultManager     *Manager
+)
+
+func getDefaultManager() *Manager {
+	defaultManagerOnce.Do(func() {
+		defaultManager = NewManager(ManagerConfig{
+			DefaultConfig:  DefaultConfig("default"),
+			EnableLogging:  true,
+			LogStateChange: true,
+		})
+	})
+	return defaultManager
+}
+
 // Manager 熔断器管理器，用于管理多个熔断器实例
 type Manager struct {
 	mutex    sync.RWMutex
@@ -183,29 +199,22 @@ func (s CircuitBreakerStats) String() string {
 		s.Name, s.State.String(), s.Counts.Requests, s.Counts.TotalSuccesses, s.Counts.TotalFailures)
 }
 
-// DefaultManager 默认的全局熔断器管理器
-var DefaultManager = NewManager(ManagerConfig{
-	DefaultConfig:  DefaultConfig("default"),
-	EnableLogging:  true,
-	LogStateChange: true,
-})
-
 // GetCircuitBreaker 从默认管理器获取或创建熔断器
 func GetCircuitBreaker(name string, config ...Config) *CircuitBreaker {
-	return DefaultManager.GetOrCreate(name, config...)
+	return getDefaultManager().GetOrCreate(name, config...)
 }
 
 // GetCircuitBreakerStats 从默认管理器获取统计信息
 func GetCircuitBreakerStats() map[string]CircuitBreakerStats {
-	return DefaultManager.Stats()
+	return getDefaultManager().Stats()
 }
 
 // ResetCircuitBreaker 重置默认管理器中的熔断器
 func ResetCircuitBreaker(name string) bool {
-	return DefaultManager.ResetByName(name)
+	return getDefaultManager().ResetByName(name)
 }
 
 // ResetAllCircuitBreakers 重置默认管理器中的所有熔断器
 func ResetAllCircuitBreakers() {
-	DefaultManager.Reset()
+	getDefaultManager().Reset()
 }

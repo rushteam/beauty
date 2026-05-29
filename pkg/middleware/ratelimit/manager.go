@@ -219,36 +219,45 @@ func (s RateLimitStats) String() string {
 		s.Stats.LimitedRequests, len(s.ActiveLimiters))
 }
 
-// DefaultManager 默认的全局限流管理器
-var DefaultManager = NewManager(ManagerConfig{
-	DefaultRate:         100,
-	DefaultBurst:        100,
-	DefaultKeyExtractor: NewIPKeyExtractor(),
-	EnableLogging:       true,
-	EnableMetrics:       true,
-})
+var (
+	defaultManagerOnce sync.Once
+	defaultManager     *Manager
+)
+
+func getDefaultManager() *Manager {
+	defaultManagerOnce.Do(func() {
+		defaultManager = NewManager(ManagerConfig{
+			DefaultRate:         100,
+			DefaultBurst:        100,
+			DefaultKeyExtractor: NewIPKeyExtractor(),
+			EnableLogging:       true,
+			EnableMetrics:       true,
+		})
+	})
+	return defaultManager
+}
 
 // GetRateLimitMiddleware 从默认管理器获取或创建限流中间件
 func GetRateLimitMiddleware(name string, rate ...float64) *RateLimitMiddleware {
-	return DefaultManager.GetOrCreate(name, rate...)
+	return getDefaultManager().GetOrCreate(name, rate...)
 }
 
 // GetRateLimitStats 从默认管理器获取统计信息
 func GetRateLimitStats() map[string]RateLimitStats {
-	return DefaultManager.Stats()
+	return getDefaultManager().Stats()
 }
 
 // ResetRateLimitStats 重置默认管理器中的限流中间件统计信息
 func ResetRateLimitStats(name string) bool {
-	return DefaultManager.ResetStatsByName(name)
+	return getDefaultManager().ResetStatsByName(name)
 }
 
 // ResetAllRateLimitStats 重置默认管理器中的所有限流中间件统计信息
 func ResetAllRateLimitStats() {
-	DefaultManager.ResetStats()
+	getDefaultManager().ResetStats()
 }
 
 // UpdateRateLimit 更新默认管理器中的限流率
 func UpdateRateLimit(name string, newRate float64, newBurst int) bool {
-	return DefaultManager.UpdateRate(name, newRate, newBurst)
+	return getDefaultManager().UpdateRate(name, newRate, newBurst)
 }

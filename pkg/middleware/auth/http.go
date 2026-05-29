@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 )
 
@@ -33,7 +34,7 @@ func HTTPMiddleware(auth *AuthMiddleware) func(http.Handler) http.Handler {
 			}
 
 			// 将用户信息添加到上下文
-			ctx := context.WithValue(r.Context(), "user", user)
+			ctx := context.WithValue(r.Context(), userContextKey, user)
 			r = r.WithContext(ctx)
 
 			// 调用成功回调
@@ -78,9 +79,9 @@ func buildHTTPMetadata(r *http.Request) map[string]interface{} {
 
 // handleAuthError 处理认证错误
 func handleAuthError(w http.ResponseWriter, err error) {
-	if err == ErrUnauthorized || err == ErrInvalidToken || err == ErrTokenExpired {
+	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrInvalidToken) || errors.Is(err, ErrTokenExpired) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-	} else if err == ErrForbidden {
+	} else if errors.Is(err, ErrForbidden) {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 	} else {
 		http.Error(w, "Authentication Error", http.StatusUnauthorized)
@@ -89,7 +90,7 @@ func handleAuthError(w http.ResponseWriter, err error) {
 
 // GetUserFromContext 从上下文中获取用户信息
 func GetUserFromContext(ctx context.Context) (User, bool) {
-	user, ok := ctx.Value("user").(User)
+	user, ok := ctx.Value(userContextKey).(User)
 	return user, ok
 }
 
@@ -105,7 +106,7 @@ func RequireAuth(auth *AuthMiddleware) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), "user", user)
+			ctx := context.WithValue(r.Context(), userContextKey, user)
 			r = r.WithContext(ctx)
 
 			if auth.onAuthSuccess != nil {
@@ -161,7 +162,7 @@ func OptionalAuth(auth *AuthMiddleware) func(http.Handler) http.Handler {
 			user, err := auth.Authenticate(r.Context(), metadata)
 			if err == nil {
 				// 认证成功，将用户信息添加到上下文
-				ctx := context.WithValue(r.Context(), "user", user)
+				ctx := context.WithValue(r.Context(), userContextKey, user)
 				r = r.WithContext(ctx)
 
 				if auth.onAuthSuccess != nil {

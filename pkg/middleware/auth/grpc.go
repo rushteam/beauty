@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -34,7 +35,7 @@ func UnaryServerInterceptor(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
 		}
 
 		// 将用户信息添加到上下文
-		ctx = context.WithValue(ctx, "user", user)
+		ctx = context.WithValue(ctx, userContextKey, user)
 
 		// 调用成功回调
 		if auth.onAuthSuccess != nil {
@@ -58,7 +59,7 @@ func UnaryClientInterceptor(auth *AuthMiddleware) grpc.UnaryClientInterceptor {
 		}
 
 		// 将用户信息添加到上下文
-		ctx = context.WithValue(ctx, "user", user)
+		ctx = context.WithValue(ctx, userContextKey, user)
 
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
@@ -115,7 +116,7 @@ func StreamClientInterceptor(auth *AuthMiddleware) grpc.StreamClientInterceptor 
 		}
 
 		// 将用户信息添加到上下文
-		ctx = context.WithValue(ctx, "user", user)
+		ctx = context.WithValue(ctx, userContextKey, user)
 
 		return streamer(ctx, desc, cc, method, opts...)
 	}
@@ -155,7 +156,7 @@ func buildGRPCMetadata(ctx context.Context, method string) map[string]interface{
 	}
 
 	// 添加用户信息（如果存在）
-	if user := ctx.Value("user"); user != nil {
+	if user := ctx.Value(userContextKey); user != nil {
 		md["user"] = user
 	}
 
@@ -164,10 +165,10 @@ func buildGRPCMetadata(ctx context.Context, method string) map[string]interface{
 
 // wrapAuthError 将认证错误包装为 gRPC 错误
 func wrapAuthError(err error) error {
-	if err == ErrUnauthorized || err == ErrInvalidToken || err == ErrTokenExpired {
+	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrInvalidToken) || errors.Is(err, ErrTokenExpired) {
 		return status.Error(codes.Unauthenticated, err.Error())
 	}
-	if err == ErrForbidden {
+	if errors.Is(err, ErrForbidden) {
 		return status.Error(codes.PermissionDenied, err.Error())
 	}
 	return status.Error(codes.Internal, err.Error())
@@ -207,7 +208,7 @@ func OptionalGRPCAuth(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
 		user, err := auth.Authenticate(ctx, metadata)
 		if err == nil {
 			// 认证成功，将用户信息添加到上下文
-			ctx = context.WithValue(ctx, "user", user)
+			ctx = context.WithValue(ctx, userContextKey, user)
 
 			if auth.onAuthSuccess != nil {
 				auth.onAuthSuccess(ctx, user)

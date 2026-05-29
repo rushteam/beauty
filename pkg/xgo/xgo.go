@@ -152,19 +152,19 @@ func (eg *ErrorGroup) GoWithContext(ctx context.Context, f func(ctx context.Cont
 		return
 	}
 
-	// 合并上下文
+	// 合并上下文：任意一个取消都取消 mergedCtx
 	mergedCtx := ctx
+	var cancel context.CancelFunc
 	if eg.ctx != nil {
-		var cancel context.CancelFunc
 		mergedCtx, cancel = context.WithCancel(ctx)
 
-		// 监听父上下文取消
+		// 监控 eg.ctx，若被取消则同步取消 mergedCtx；不加入 wg，任务结束时 defer cancel() 会让它自然退出
 		go func() {
 			select {
 			case <-eg.ctx.Done():
 				cancel()
-			case <-ctx.Done():
-				cancel()
+			case <-mergedCtx.Done():
+				// mergedCtx 已取消（任务结束或 ctx 取消），直接退出
 			}
 		}()
 	}
@@ -173,6 +173,9 @@ func (eg *ErrorGroup) GoWithContext(ctx context.Context, f func(ctx context.Cont
 	task := &Task{
 		fn: func() {
 			defer eg.wg.Done()
+			if cancel != nil {
+				defer cancel() // 任务结束时取消 mergedCtx，让监控 goroutine 退出
+			}
 
 			if err := f(mergedCtx); err != nil {
 				eg.errOnce.Do(func() {
@@ -180,7 +183,6 @@ func (eg *ErrorGroup) GoWithContext(ctx context.Context, f func(ctx context.Cont
 					eg.err = err
 					eg.errMu.Unlock()
 
-					// 取消其他任务
 					if eg.cancel != nil {
 						eg.cancel()
 					}

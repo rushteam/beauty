@@ -201,30 +201,39 @@ func (s TimeoutControllerStats) String() string {
 		s.Stats.SlowRequests, s.SlowRate*100, s.Stats.AvgDuration)
 }
 
-// DefaultManager 默认的全局超时控制器管理器
-var DefaultManager = NewManager(ManagerConfig{
-	DefaultTimeout:       30 * time.Second,
-	DefaultSlowThreshold: 15 * time.Second,
-	EnableLogging:        true,
-	EnableMetrics:        true,
-})
+var (
+	defaultManagerOnce sync.Once
+	defaultManager     *Manager
+)
+
+func getDefaultManager() *Manager {
+	defaultManagerOnce.Do(func() {
+		defaultManager = NewManager(ManagerConfig{
+			DefaultTimeout:       30 * time.Second,
+			DefaultSlowThreshold: 15 * time.Second,
+			EnableLogging:        true,
+			EnableMetrics:        true,
+		})
+	})
+	return defaultManager
+}
 
 // GetTimeoutController 从默认管理器获取或创建超时控制器
 func GetTimeoutController(name string, timeout ...time.Duration) *TimeoutController {
-	return DefaultManager.GetOrCreate(name, timeout...)
+	return getDefaultManager().GetOrCreate(name, timeout...)
 }
 
 // GetTimeoutControllerStats 从默认管理器获取统计信息
 func GetTimeoutControllerStats() map[string]TimeoutControllerStats {
-	return DefaultManager.Stats()
+	return getDefaultManager().Stats()
 }
 
 // ResetTimeoutControllerStats 重置默认管理器中的超时控制器统计信息
 func ResetTimeoutControllerStats(name string) bool {
-	return DefaultManager.ResetStatsByName(name)
+	return getDefaultManager().ResetStatsByName(name)
 }
 
 // ResetAllTimeoutControllerStats 重置默认管理器中的所有超时控制器统计信息
 func ResetAllTimeoutControllerStats() {
-	DefaultManager.ResetStats()
+	getDefaultManager().ResetStats()
 }

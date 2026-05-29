@@ -43,10 +43,12 @@ func demonstrateManualRegistration() {
 	manager := discover.GetManager()
 
 	// 注册一个测试工厂
-	manager.RegisterFactoryFunc("test", func(targetURL *url.URL) (discover.Discovery, error) {
+	if err := manager.RegisterFactoryFunc("test", func(targetURL *url.URL) (discover.Discovery, error) {
 		slog.Info("创建测试注册中心", "url", targetURL.String())
 		return &testRegistry{url: targetURL.String()}, nil
-	})
+	}); err != nil {
+		slog.Error("注册工厂失败", "error", err)
+	}
 
 	// 再次查看可用的方案
 	schemes := manager.GetAvailableSchemes()

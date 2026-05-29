@@ -68,30 +68,14 @@ func demonstrateBasicFiltering(factory *grpcclient.ClientFactory) error {
 		),
 	)
 
-	// 测试客户端连接和服务信息获取
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-
 	// 测试精确匹配客户端
-	if services, err := exactMatchClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取精确匹配服务信息失败", "error", err)
-	} else {
-		slog.Info("精确匹配客户端", "services_found", len(services))
-	}
+	slog.Info("精确匹配客户端", "services_found", len(exactMatchClient.GetServiceInfo()))
 
 	// 测试地域过滤客户端
-	if services, err := regionClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取地域过滤服务信息失败", "error", err)
-	} else {
-		slog.Info("地域过滤客户端", "services_found", len(services))
-	}
+	slog.Info("地域过滤客户端", "services_found", len(regionClient.GetServiceInfo()))
 
 	// 测试多地域客户端
-	if services, err := multiRegionClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取多地域服务信息失败", "error", err)
-	} else {
-		slog.Info("多地域客户端", "services_found", len(services))
-	}
+	slog.Info("多地域客户端", "services_found", len(multiRegionClient.GetServiceInfo()))
 
 	slog.Info("基础过滤演示完成")
 	return nil
@@ -129,30 +113,14 @@ func demonstrateAdvancedFiltering(factory *grpcclient.ClientFactory) error {
 		),
 	)
 
-	// 测试高级过滤客户端
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-
 	// 测试 in 操作符客户端
-	if services, err := inFilterClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取 in 过滤服务信息失败", "error", err)
-	} else {
-		slog.Info("in 操作符客户端", "services_found", len(services))
-	}
+	slog.Info("in 操作符客户端", "services_found", len(inFilterClient.GetServiceInfo()))
 
 	// 测试 notin 操作符客户端
-	if services, err := notInFilterClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取 notin 过滤服务信息失败", "error", err)
-	} else {
-		slog.Info("notin 操作符客户端", "services_found", len(services))
-	}
+	slog.Info("notin 操作符客户端", "services_found", len(notInFilterClient.GetServiceInfo()))
 
 	// 测试存在性检查客户端
-	if services, err := existsFilterClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取存在性过滤服务信息失败", "error", err)
-	} else {
-		slog.Info("存在性检查客户端", "services_found", len(services))
-	}
+	slog.Info("存在性检查客户端", "services_found", len(existsFilterClient.GetServiceInfo()))
 
 	slog.Info("高级过滤演示完成")
 	return nil
@@ -190,25 +158,19 @@ func demonstrateComplexFiltering(factory *grpcclient.ClientFactory) error {
 		WithExpression("load", selector.FilterOpNotEquals, "high").
 		WithExpression("healthy", selector.FilterOpExists)
 
-	manager := grpcclient.NewClientManager(factory.GetDiscovery(), "v1alpha.OrderService",
-		grpcclient.WithLoadBalanceStrategy(grpcclient.WeightedRoundRobin),
-		grpcclient.WithManagerLabelFilter(managerFilter),
-		grpcclient.WithHealthCheck(true, time.Second*30),
-		grpcclient.WithFailover(true, 3, time.Second),
+	manager := grpcclient.NewServiceDiscoveryClient(factory.GetDiscovery(), "v1alpha.OrderService",
+		grpcclient.WithDiscoveryStrategy(grpcclient.WeightedRoundRobin),
+		grpcclient.WithDiscoveryLabelFilter(managerFilter),
+		grpcclient.WithDiscoveryHealthCheck(true, time.Second*30),
+		grpcclient.WithDiscoveryFailover(3, time.Second),
 	)
 
 	// 测试复杂过滤客户端
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-
-	// 测试复杂过滤客户端
-	if services, err := complexClient.GetServiceInfo(ctx); err != nil {
-		slog.Warn("获取复杂过滤服务信息失败", "error", err)
-	} else {
-		slog.Info("复杂过滤客户端", "services_found", len(services), "filter", complexFilter.String())
-	}
+	slog.Info("复杂过滤客户端", "services_found", len(complexClient.GetServiceInfo()), "filter", complexFilter.String())
 
 	// 启动客户端管理器
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
 	if err := manager.Start(ctx); err != nil {
 		slog.Error("启动客户端管理器失败", "error", err)
 		return err

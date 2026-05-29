@@ -2,6 +2,7 @@ package timeout
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -65,7 +66,7 @@ func (s *timeoutServerStream) Context() context.Context {
 
 // IsTimeoutError 检查错误是否为超时相关错误
 func IsTimeoutError(err error) bool {
-	if err == ErrTimeout || err == ErrTimeoutCanceled {
+	if errors.Is(err, ErrTimeout) || errors.Is(err, ErrTimeoutCanceled) {
 		return true
 	}
 
@@ -83,10 +84,10 @@ func IsTimeoutError(err error) bool {
 
 // WrapTimeoutError 将超时错误包装为 gRPC 错误
 func WrapTimeoutError(err error) error {
-	if err == ErrTimeout {
+	if errors.Is(err, ErrTimeout) {
 		return status.Error(codes.DeadlineExceeded, err.Error())
 	}
-	if err == ErrTimeoutCanceled {
+	if errors.Is(err, ErrTimeoutCanceled) {
 		return status.Error(codes.Canceled, err.Error())
 	}
 	return err

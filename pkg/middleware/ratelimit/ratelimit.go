@@ -317,5 +317,5 @@ func (rl *RateLimitMiddleware) String() string {
 
 // IsRateLimitError 检查错误是否为限流相关错误
 func IsRateLimitError(err error) bool {
-	return err == ErrRateLimitExceeded || err == ErrRateLimiterNotFound
+	return errors.Is(err, ErrRateLimitExceeded) || errors.Is(err, ErrRateLimiterNotFound)
 }

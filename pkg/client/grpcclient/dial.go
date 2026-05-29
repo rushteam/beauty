@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // DialOption 拨号选项
@@ -17,18 +18,33 @@ type DialOption func(*dialConfig)
 
 // dialConfig 拨号配置
 type dialConfig struct {
-	registry      discover.Discovery
-	labelFilter   *ServiceLabelFilter
-	grpcOpts      []grpc.DialOption
-	timeout       time.Duration
-	namespace     string
-	loadBalancer  string
-	disableRouter bool
-	// 地域信息（向后兼容）
+	// 直连模式
+	direct bool
+
+	registry    discover.Discovery
+	labelFilter *ServiceLabelFilter
+	grpcOpts    []grpc.DialOption
+	timeout     time.Duration
+	loadBalancer string
+
+	// 地域过滤
 	regions      []string
 	zones        []string
 	campuses     []string
 	environments []string
+}
+
+// WithDirect 直连模式，target 直接作为 addr 传给 gRPC，不走服务发现。
+// 用法：grpcclient.DialContext(ctx, "127.0.0.1:8080", grpcclient.WithDirect())
+func WithDirect() DialOption {
+	return func(c *dialConfig) {
+		c.direct = true
+	}
+}
+
+// WithInsecure 明文连接（不加密），通常用于开发或内网可信环境。
+func WithInsecure() DialOption {
+	return WithGRPCDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials()))
 }
 
 // WithRegistry 设置服务注册中心
@@ -45,7 +61,7 @@ func WithLabelFilter(filter *ServiceLabelFilter) DialOption {
 	}
 }
 
-// WithGRPCDialOptions 设置 gRPC 连接选项
+// WithGRPCDialOptions 设置底层 gRPC 连接选项
 func WithGRPCDialOptions(opts ...grpc.DialOption) DialOption {
 	return func(c *dialConfig) {
 		c.grpcOpts = append(c.grpcOpts, opts...)
@@ -59,28 +75,14 @@ func WithTimeout(timeout time.Duration) DialOption {
 	}
 }
 
-// WithNamespace 设置命名空间
-func WithNamespace(namespace string) DialOption {
-	return func(c *dialConfig) {
-		c.namespace = namespace
-	}
-}
-
-// WithLoadBalancer 设置负载均衡策略
+// WithLoadBalancer 设置负载均衡策略（服务发现模式有效）
 func WithLoadBalancer(strategy string) DialOption {
 	return func(c *dialConfig) {
 		c.loadBalancer = strategy
 	}
 }
 
-// WithDisableRouter 禁用路由
-func WithDisableRouter() DialOption {
-	return func(c *dialConfig) {
-		c.disableRouter = true
-	}
-}
-
-// WithRegionFilter 设置地域过滤（向后兼容）
+// WithRegionFilter 设置地域过滤
 func WithRegionFilter(regions, zones, campuses, environments []string) DialOption {
 	return func(c *dialConfig) {
 		c.regions = regions
@@ -90,105 +92,133 @@ func WithRegionFilter(regions, zones, campuses, environments []string) DialOptio
 	}
 }
 
-// WithEnvironment 设置环境过滤（便捷方法）
+// WithEnvironment 设置环境过滤
 func WithEnvironment(env string) DialOption {
 	return func(c *dialConfig) {
 		c.environments = []string{env}
 	}
 }
 
-// WithRegion 设置地域过滤（便捷方法）
+// WithRegion 设置地域过滤
 func WithRegion(region string) DialOption {
 	return func(c *dialConfig) {
 		c.regions = []string{region}
 	}
 }
 
-// DialContext 类似 Polaris 风格的简化拨号 API
-// 支持的 target 格式:
-//   - beauty://serviceName                          - 使用默认注册中心
-//   - beauty://serviceName?env=production           - 带环境参数
-//   - etcd://endpoints/serviceName                  - 使用 etcd
-//   - nacos://endpoints/serviceName                 - 使用 nacos
+// DialContext 统一拨号入口，支持两种模式：
+//
+//	直连：grpcclient.DialContext(ctx, "127.0.0.1:8080", grpcclient.WithDirect())
+//	服务发现：grpcclient.DialContext(ctx, "etcd://127.0.0.1:2379/my-service")
+//	          grpcclient.DialContext(ctx, "nacos://127.0.0.1:8848/my-service?env=prod")
 func DialContext(ctx context.Context, target string, opts ...DialOption) (*grpc.ClientConn, error) {
-	// 解析 target
+	cfg := &dialConfig{
+		timeout:      5 * time.Second,
+		loadBalancer: "round_robin",
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	// 直连模式：target 就是 addr
+	if cfg.direct {
+		return dialDirect(ctx, target, cfg)
+	}
+
+	// 服务发现模式
+	return dialWithDiscovery(ctx, target, cfg)
+}
+
+// Dial 不需要 context 的简化版本
+func Dial(target string, opts ...DialOption) (*grpc.ClientConn, error) {
+	return DialContext(context.Background(), target, opts...)
+}
+
+// dialDirect 直连模式
+func dialDirect(_ context.Context, addr string, cfg *dialConfig) (*grpc.ClientConn, error) {
+	var dOpts []directOption
+	dOpts = append(dOpts, withDirectAddr(addr))
+	if len(cfg.grpcOpts) > 0 {
+		dOpts = append(dOpts, withDirectDialOpts(cfg.grpcOpts...))
+	}
+	if cfg.loadBalancer != "" {
+		dOpts = append(dOpts, withDirectBalancingPolicy(cfg.loadBalancer))
+	}
+
+	c, err := newDirectClient(dOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return c.ClientConn, nil
+}
+
+// dialWithDiscovery 服务发现模式
+func dialWithDiscovery(ctx context.Context, target string, cfg *dialConfig) (*grpc.ClientConn, error) {
 	serviceName, registry, params, err := parseTarget(target)
 	if err != nil {
 		return nil, fmt.Errorf("invalid target %s: %w", target, err)
 	}
 
-	// 构建配置
-	config := &dialConfig{
-		registry:     registry,
-		grpcOpts:     []grpc.DialOption{},
-		timeout:      time.Second * 5,
-		loadBalancer: "round_robin",
+	// WithRegistry 选项优先级高于 URL 解析
+	if cfg.registry != nil {
+		registry = cfg.registry
 	}
 
-	// 应用选项
-	for _, opt := range opts {
-		opt(config)
+	if registry == nil {
+		return nil, fmt.Errorf("no registry for target %s; use WithRegistry() or provide a registry URL (etcd://, nacos://, ...)", target)
 	}
 
-	// 如果没有设置注册中心，返回错误
-	if config.registry == nil {
-		return nil, fmt.Errorf("no registry provided, use WithRegistry() option or provide explicit registry URL")
+	// 构建标签过滤器
+	if cfg.labelFilter == nil && len(params) > 0 {
+		cfg.labelFilter = buildFilterFromParams(params)
+	}
+	if cfg.labelFilter == nil && (len(cfg.regions) > 0 || len(cfg.zones) > 0 ||
+		len(cfg.campuses) > 0 || len(cfg.environments) > 0) {
+		cfg.labelFilter = NewLabelFilter().
+			WithRegionIn(cfg.regions...).
+			WithZoneIn(cfg.zones...).
+			WithCampusIn(cfg.campuses...).
+			WithEnvironmentIn(cfg.environments...)
 	}
 
-	// 从 URL 参数构建过滤器
-	if config.labelFilter == nil && len(params) > 0 {
-		config.labelFilter = buildFilterFromParams(params)
-	}
-
-	// 从地域信息构建过滤器（向后兼容）
-	if config.labelFilter == nil && (len(config.regions) > 0 || len(config.zones) > 0 ||
-		len(config.campuses) > 0 || len(config.environments) > 0) {
-		config.labelFilter = NewLabelFilter().
-			WithRegionIn(config.regions...).
-			WithZoneIn(config.zones...).
-			WithCampusIn(config.campuses...).
-			WithEnvironmentIn(config.environments...)
-	}
-
-	// 设置默认 gRPC 选项（不含 TLS，调用方须显式传入凭证或使用 WithGRPCDialOptions(grpc.WithTransportCredentials(...))）
-	if len(config.grpcOpts) == 0 {
-		config.grpcOpts = []grpc.DialOption{
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:                time.Second * 20,
-				Timeout:             time.Second * 10,
-				PermitWithoutStream: true,
-			}),
-			grpc.WithIdleTimeout(time.Second * 10),
-		}
-	}
-
-	// 添加负载均衡配置
-	if config.loadBalancer != "" {
-		serviceConfig := fmt.Sprintf(`{"loadBalancingPolicy":"%s"}`, config.loadBalancer)
-		config.grpcOpts = append(config.grpcOpts, grpc.WithDefaultServiceConfig(serviceConfig))
-	}
-
-	// 创建服务发现客户端
 	var clientOpts []ServiceDiscoveryOption
-	if config.labelFilter != nil {
-		clientOpts = append(clientOpts, WithDiscoveryLabelFilter(config.labelFilter))
+	if cfg.labelFilter != nil {
+		clientOpts = append(clientOpts, WithDiscoveryLabelFilter(cfg.labelFilter))
 	}
-	clientOpts = append(clientOpts, WithDiscoveryDialOptions(config.grpcOpts...))
+	if len(cfg.grpcOpts) > 0 {
+		clientOpts = append(clientOpts, WithDiscoveryDialOptions(cfg.grpcOpts...))
+	}
+	if cfg.loadBalancer != "" {
+		clientOpts = append(clientOpts, WithDiscoveryStrategy(loadBalancerToStrategy(cfg.loadBalancer)))
+	}
 
-	client := NewServiceDiscoveryClient(config.registry, serviceName, clientOpts...)
+	client := NewServiceDiscoveryClient(registry, serviceName, clientOpts...)
 
-	// 创建连接（带超时）
 	dialCtx := ctx
-	if config.timeout > 0 {
+	if cfg.timeout > 0 {
 		var cancel context.CancelFunc
-		dialCtx, cancel = context.WithTimeout(ctx, config.timeout)
+		dialCtx, cancel = context.WithTimeout(ctx, cfg.timeout)
 		defer cancel()
 	}
 
 	return client.GetClient(dialCtx)
 }
 
-// parseTarget 解析目标地址
+// loadBalancerToStrategy 将字符串策略名映射为 LoadBalanceStrategy
+func loadBalancerToStrategy(lb string) LoadBalanceStrategy {
+	switch lb {
+	case "random":
+		return Random
+	case "weighted_round_robin":
+		return WeightedRoundRobin
+	case "least_connections":
+		return LeastConnections
+	default:
+		return RoundRobin
+	}
+}
+
+// parseTarget 解析目标地址，返回服务名、注册中心、URL 查询参数
 func parseTarget(target string) (serviceName string, registry discover.Discovery, params map[string]string, err error) {
 	u, err := url.Parse(target)
 	if err != nil {
@@ -200,7 +230,6 @@ func parseTarget(target string) (serviceName string, registry discover.Discovery
 		serviceName = u.Host
 	}
 
-	// 解析查询参数
 	params = make(map[string]string)
 	for k, v := range u.Query() {
 		if len(v) > 0 {
@@ -208,7 +237,6 @@ func parseTarget(target string) (serviceName string, registry discover.Discovery
 		}
 	}
 
-	// 使用插件机制创建注册中心
 	registry, err = createRegistryFromScheme(u.Scheme, u)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("failed to create registry for scheme %s: %w", u.Scheme, err)
@@ -217,12 +245,11 @@ func parseTarget(target string) (serviceName string, registry discover.Discovery
 	return serviceName, registry, params, nil
 }
 
-// buildFilterFromParams 从 URL 参数构建过滤器
+// buildFilterFromParams 从 URL 查询参数构建标签过滤器
 func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 	filter := NewLabelFilter()
 	hasFilter := false
 
-	// 处理环境参数
 	if env := params["env"]; env != "" {
 		filter = filter.WithEnvironmentIn(env)
 		hasFilter = true
@@ -231,29 +258,18 @@ func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 		filter = filter.WithEnvironmentIn(env)
 		hasFilter = true
 	}
-
-	// 处理地域参数
 	if region := params["region"]; region != "" {
-		regions := strings.Split(region, ",")
-		filter = filter.WithRegionIn(regions...)
+		filter = filter.WithRegionIn(strings.Split(region, ",")...)
 		hasFilter = true
 	}
-
-	// 处理可用区参数
 	if zone := params["zone"]; zone != "" {
-		zones := strings.Split(zone, ",")
-		filter = filter.WithZoneIn(zones...)
+		filter = filter.WithZoneIn(strings.Split(zone, ",")...)
 		hasFilter = true
 	}
-
-	// 处理园区参数
 	if campus := params["campus"]; campus != "" {
-		campuses := strings.Split(campus, ",")
-		filter = filter.WithCampusIn(campuses...)
+		filter = filter.WithCampusIn(strings.Split(campus, ",")...)
 		hasFilter = true
 	}
-
-	// 处理其他标签
 	for k, v := range params {
 		if !isReservedParam(k) {
 			filter = filter.WithMatchLabel(k, v)
@@ -264,42 +280,23 @@ func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 	if !hasFilter {
 		return nil
 	}
-
 	return filter
 }
 
-// isReservedParam 检查是否为保留参数
 func isReservedParam(param string) bool {
-	reserved := []string{"env", "environment", "region", "zone", "campus", "namespace", "group"}
-	for _, r := range reserved {
-		if param == r {
-			return true
-		}
-	}
-	return false
+	return slices.Contains([]string{"env", "environment", "region", "zone", "campus", "namespace", "group"}, param)
 }
 
-// getDefaultRegistry 获取默认注册中心
 func getDefaultRegistry() discover.Discovery {
-	// 这里可以从环境变量或配置文件获取默认注册中心
-	// 暂时返回 nil，需要用户显式提供注册中心
-	// 在实际使用中，可以通过全局配置或环境变量来设置默认注册中心
 	return nil
-}
-
-// Dial 简化版本，不需要 context
-func Dial(target string, opts ...DialOption) (*grpc.ClientConn, error) {
-	return DialContext(context.Background(), target, opts...)
 }
 
 // createRegistryFromScheme 使用插件机制创建注册中心
 func createRegistryFromScheme(scheme string, targetURL *url.URL) (discover.Discovery, error) {
 	switch scheme {
 	case "beauty":
-		// 使用默认注册中心或从环境变量获取
 		return getDefaultRegistry(), nil
 	default:
-		// 使用插件机制创建注册中心
 		manager := discover.GetManager()
 		return manager.CreateRegistryFromURL(targetURL)
 	}

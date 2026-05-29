@@ -10,6 +10,7 @@ import (
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
@@ -21,10 +22,7 @@ import (
 var instance = make(map[string]*Registry)
 var mu sync.Mutex
 
-var (
-	_ discover.Registry  = (*Registry)(nil)
-	_ discover.Discovery = (*Registry)(nil)
-)
+var _ discover.RegistryDiscovery = (*Registry)(nil)
 
 // Registry k8s 服务注册和发现实现
 type Registry struct {
@@ -103,16 +101,20 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 	var serviceInfos []discover.ServiceInfo
 
 	for _, svc := range services.Items {
-		endpoints, err := r.client.CoreV1().Endpoints(r.config.Namespace).Get(ctx, svc.Name, metav1.GetOptions{})
+		slices, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "kubernetes.io/service-name=" + svc.Name,
+		})
 		if err != nil {
-			logger.Error("failed to get endpoints",
+			logger.Error("failed to get endpoint slices",
 				slog.String("service", svc.Name),
 				slog.Any("err", err))
 			continue
 		}
 
-		infos := r.serviceToServiceInfos(&svc, endpoints)
-		serviceInfos = append(serviceInfos, infos...)
+		for i := range slices.Items {
+			infos := r.endpointSliceToServiceInfos(&svc, &slices.Items[i])
+			serviceInfos = append(serviceInfos, infos...)
+		}
 	}
 
 	return serviceInfos, nil
@@ -132,7 +134,7 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, notify discove
 	r.watchers[serviceName] = cancel
 
 	go r.watchServices(watchCtx, serviceName, notify)
-	go r.watchEndpoints(watchCtx, serviceName, notify)
+	go r.watchEndpointSlices(watchCtx, serviceName, notify)
 
 	return nil
 }
@@ -172,19 +174,19 @@ func (r *Registry) watchServices(ctx context.Context, serviceName string, notify
 	}
 }
 
-// watchEndpoints 监听 Endpoints 资源变化
-func (r *Registry) watchEndpoints(ctx context.Context, serviceName string, notify discover.Notify) {
+// watchEndpointSlices 监听 EndpointSlice 资源变化
+func (r *Registry) watchEndpointSlices(ctx context.Context, serviceName string, notify discover.Notify) {
 	timeout := int64(r.config.WatchTimeout)
 	if timeout <= 0 {
 		timeout = 30
 	}
 
-	watcher, err := r.client.CoreV1().Endpoints(r.config.Namespace).Watch(ctx, metav1.ListOptions{
+	watcher, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).Watch(ctx, metav1.ListOptions{
 		LabelSelector:  r.buildLabelSelector(serviceName),
 		TimeoutSeconds: &timeout,
 	})
 	if err != nil {
-		logger.Error("failed to watch endpoints", slog.Any("err", err))
+		logger.Error("failed to watch endpoint slices", slog.Any("err", err))
 		return
 	}
 	defer watcher.Stop()
@@ -195,13 +197,12 @@ func (r *Registry) watchEndpoints(ctx context.Context, serviceName string, notif
 			return
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				logger.Info("endpoints watch channel closed, restarting...")
+				logger.Info("endpoint slices watch channel closed, restarting...")
 				time.Sleep(time.Second * 5)
-				r.watchEndpoints(ctx, serviceName, notify)
+				r.watchEndpointSlices(ctx, serviceName, notify)
 				return
 			}
-
-			r.handleEndpointsEvent(ctx, event, notify)
+			r.handleEndpointSlicesEvent(ctx, event, notify)
 		}
 	}
 }
@@ -220,51 +221,61 @@ func (r *Registry) handleServiceEvent(ctx context.Context, event watch.Event, no
 	}
 }
 
-// handleEndpointsEvent 处理 Endpoints 事件
-func (r *Registry) handleEndpointsEvent(ctx context.Context, event watch.Event, notify discover.Notify) {
+// handleEndpointSlicesEvent 处理 EndpointSlice 事件
+func (r *Registry) handleEndpointSlicesEvent(ctx context.Context, event watch.Event, notify discover.Notify) {
 	switch event.Type {
 	case watch.Added, watch.Modified, watch.Deleted:
-		// 当 Endpoints 发生变化时，重新获取所有服务实例
 		services, err := r.Find(ctx, "")
 		if err != nil {
-			logger.Error("failed to find services after endpoints event", slog.Any("err", err))
+			logger.Error("failed to find services after endpoint slices event", slog.Any("err", err))
 			return
 		}
 		notify(services)
 	}
 }
 
-// serviceToServiceInfos 将 k8s Service 和 Endpoints 转换为 ServiceInfo
-func (r *Registry) serviceToServiceInfos(svc *corev1.Service, endpoints *corev1.Endpoints) []discover.ServiceInfo {
+// endpointSliceToServiceInfos 将 k8s Service 和 EndpointSlice 转换为 ServiceInfo
+func (r *Registry) endpointSliceToServiceInfos(svc *corev1.Service, eps *discoveryv1.EndpointSlice) []discover.ServiceInfo {
 	var serviceInfos []discover.ServiceInfo
 
-	for _, subset := range endpoints.Subsets {
-		for _, addr := range subset.Addresses {
-			for _, port := range subset.Ports {
-				// 如果配置了端口名称，只处理匹配的端口
-				if r.config.PortName != "" && port.Name != r.config.PortName {
+	for _, endpoint := range eps.Endpoints {
+		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+			continue
+		}
+		for _, address := range endpoint.Addresses {
+			for _, port := range eps.Ports {
+				if port.Port == nil {
+					continue
+				}
+				if r.config.PortName != "" && (port.Name == nil || *port.Name != r.config.PortName) {
 					continue
 				}
 
+				portName := ""
+				if port.Name != nil {
+					portName = *port.Name
+				}
+				protocol := ""
+				if port.Protocol != nil {
+					protocol = string(*port.Protocol)
+				}
+
 				serviceInfo := discover.ServiceInfo{
-					ID:   fmt.Sprintf("%s-%s-%d", svc.Name, addr.IP, port.Port),
+					ID:   fmt.Sprintf("%s-%s-%d", svc.Name, address, *port.Port),
 					Name: svc.Name,
 					Kind: "k8s",
-					Addr: fmt.Sprintf("%s:%d", addr.IP, port.Port),
+					Addr: fmt.Sprintf("%s:%d", address, *port.Port),
 					Metadata: map[string]string{
 						"namespace":    svc.Namespace,
 						"service_type": string(svc.Spec.Type),
-						"port_name":    port.Name,
-						"protocol":     string(port.Protocol),
+						"port_name":    portName,
+						"protocol":     protocol,
 					},
 				}
 
-				// 添加服务标签到元数据
 				for k, v := range svc.Labels {
 					serviceInfo.Metadata["label."+k] = v
 				}
-
-				// 添加注解到元数据
 				for k, v := range svc.Annotations {
 					serviceInfo.Metadata["annotation."+k] = v
 				}

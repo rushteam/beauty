@@ -20,10 +20,7 @@ var grantTTL int64 = 10
 var instance = make(map[string]*Registry)
 var mu sync.Mutex
 
-var (
-	_ discover.Registry  = (*Registry)(nil)
-	_ discover.Discovery = (*Registry)(nil)
-)
+var _ discover.RegistryDiscovery = (*Registry)(nil)
 
 
 func NewRegistry(c *Config) *Registry {

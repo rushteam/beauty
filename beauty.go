@@ -40,23 +40,8 @@ type HookFunc func(app *App)
 // Option ..
 type Option func(app *App)
 
-// type ServiceOption func(*ServiceContext)
-type ServiceOption func(*discover.ServiceInfo)
-
-func WithServiceName(name string) ServiceOption {
-	return func(s *discover.ServiceInfo) {
-		s.Name = name
-	}
-}
-
-func WithServiceMeta(k, v string) ServiceOption {
-	return func(s *discover.ServiceInfo) {
-		s.Metadata[k] = v
-	}
-}
-
 // WithService ..
-func WithService(s Service, opts ...ServiceOption) Option {
+func WithService(s Service) Option {
 	return func(app *App) {
 		app.services = append(app.services, s)
 	}

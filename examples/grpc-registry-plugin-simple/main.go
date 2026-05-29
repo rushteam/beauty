@@ -43,7 +43,7 @@ func demonstrateManualRegistration() {
 	manager := discover.GetManager()
 
 	// 注册一个测试工厂
-	if err := manager.RegisterFactoryFunc("test", func(targetURL *url.URL) (discover.Discovery, error) {
+	if err := manager.RegisterFactoryFunc("test", func(targetURL *url.URL) (discover.RegistryDiscovery, error) {
 		slog.Info("创建测试注册中心", "url", targetURL.String())
 		return &testRegistry{url: targetURL.String()}, nil
 	}); err != nil {

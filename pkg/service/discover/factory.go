@@ -12,11 +12,11 @@ type RegistryFactory interface {
 	Scheme() string
 
 	// CreateFromURL 从URL创建注册中心实例
-	CreateFromURL(targetURL *url.URL) (Discovery, error)
+	CreateFromURL(targetURL *url.URL) (RegistryDiscovery, error)
 }
 
 // RegistryFactoryFunc 工厂函数类型
-type RegistryFactoryFunc func(targetURL *url.URL) (Discovery, error)
+type RegistryFactoryFunc func(targetURL *url.URL) (RegistryDiscovery, error)
 
 // registryFactory 内部工厂实现
 type registryFactory struct {
@@ -28,7 +28,7 @@ func (f *registryFactory) Scheme() string {
 	return f.scheme
 }
 
-func (f *registryFactory) CreateFromURL(targetURL *url.URL) (Discovery, error) {
+func (f *registryFactory) CreateFromURL(targetURL *url.URL) (RegistryDiscovery, error) {
 	return f.fn(targetURL)
 }
 
@@ -51,10 +51,7 @@ func RegisterFactory(factory RegistryFactory) error {
 
 // RegisterFactoryFunc 注册工厂函数
 func RegisterFactoryFunc(scheme string, fn RegistryFactoryFunc) error {
-	return globalManager.RegisterFactory(&registryFactory{
-		scheme: scheme,
-		fn:     fn,
-	})
+	return globalManager.RegisterFactory(&registryFactory{scheme: scheme, fn: fn})
 }
 
 // GetManager 获取全局管理器实例
@@ -87,7 +84,7 @@ func (m *RegistryManager) RegisterFactoryFunc(scheme string, fn RegistryFactoryF
 }
 
 // CreateRegistry 创建注册中心实例
-func (m *RegistryManager) CreateRegistry(target string) (Discovery, error) {
+func (m *RegistryManager) CreateRegistry(target string) (RegistryDiscovery, error) {
 	targetURL, err := url.Parse(target)
 	if err != nil {
 		return nil, fmt.Errorf("invalid target URL %s: %w", target, err)
@@ -111,7 +108,7 @@ func (m *RegistryManager) CreateRegistry(target string) (Discovery, error) {
 }
 
 // CreateRegistryFromURL 从URL创建注册中心实例
-func (m *RegistryManager) CreateRegistryFromURL(targetURL *url.URL) (Discovery, error) {
+func (m *RegistryManager) CreateRegistryFromURL(targetURL *url.URL) (RegistryDiscovery, error) {
 	scheme := targetURL.Scheme
 	if scheme == "" {
 		return nil, fmt.Errorf("URL must have a scheme")

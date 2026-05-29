@@ -13,11 +13,10 @@ func init() {
 }
 
 // createRegistryFromURL 从URL创建k8s注册中心
-func createRegistryFromURL(targetURL *url.URL) (discover.Discovery, error) {
+func createRegistryFromURL(targetURL *url.URL) (discover.RegistryDiscovery, error) {
 	config, err := NewFromURL(*targetURL)
 	if err != nil {
 		return nil, err
 	}
-	registry := NewRegistry(config)
-	return registry, nil
+	return NewRegistry(config), nil
 }

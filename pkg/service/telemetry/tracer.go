@@ -6,12 +6,9 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
-
-	// "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
-	// semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"github.com/rushteam/beauty/pkg/service/core"
 )
 
@@ -64,49 +61,13 @@ func WithTraceStdoutExporter() TraceOption {
 }
 
 func (c *traceComponent) Init() context.CancelFunc {
-	// exporter, err := jaeger.NewRawExporter(
-	// 	jaeger.WithCollectorEndpoint("http://your-jaeger-collector-endpoint:14268/api/traces"),
-	// 	jaeger.WithProcess(jaeger.Process{
-	// 		ServiceName: "your-service-name",
-	// 	}),
-	// )
-	// if err != nil {
-	// 	log.Fatalf("failed to initialize Jaeger exporter: %v", err)
-	// }
-	exporter, err := stdouttrace.New(
-		stdouttrace.WithPrettyPrint(),
-	)
-	if err != nil {
-		panic(fmt.Sprintf("telemetry: failed to create stdout trace exporter: %v", err))
-	}
-
-	// res, err := resource.Merge(
-	// 	resource.Environment(),
-	// 	resource.NewSchemaless(
-	// 		semconv.ServiceName("beauty"),
-	// 		semconv.ServiceVersion("0.0.1"),
-	// 		// semconv.SchemaURL,
-	// 		// semconv.ServerAddress(),
-	// 		// semconv.ServerPort(),
-	// 		// semconv.ServiceInstanceID(),
-	// 	),
-	// )
-
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-
-	// sdktrace.WithBatcher(exporter),
-	// sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	// sdktrace.WithResource(res),
-
 	if c.provider == nil {
 		c.provider = sdktrace.NewTracerProvider(c.options...)
 	}
 
 	otel.SetTracerProvider(c.provider)
-
 	tracer = c.provider.Tracer("beauty")
+
 	return func() {
 		type shutdown interface {
 			Shutdown(ctx context.Context) error
@@ -114,7 +75,6 @@ func (c *traceComponent) Init() context.CancelFunc {
 		if p, ok := c.provider.(shutdown); ok {
 			_ = p.Shutdown(context.Background())
 		}
-		_ = exporter.Shutdown(context.Background())
 	}
 }
 

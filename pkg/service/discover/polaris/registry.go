@@ -20,10 +20,7 @@ import (
 	"maps"
 )
 
-var (
-	_ discover.Registry  = (*Registry)(nil)
-	_ discover.Discovery = (*Registry)(nil)
-)
+var _ discover.RegistryDiscovery = (*Registry)(nil)
 
 func NewRegistry(c *Config) *Registry {
 	return &Registry{c: c}

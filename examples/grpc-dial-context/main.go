@@ -221,7 +221,6 @@ func comparePolarisStyle() {
 	slog.Info("Beauty 风格:")
 	conn, err := grpcclient.DialContext(ctx, "beauty://v1alpha.Greeter?env=production",
 		grpcclient.WithGRPCDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
-		grpcclient.WithDisableRouter(),
 	)
 	if err != nil {
 		slog.Warn("Beauty 风格拨号失败", "error", err)

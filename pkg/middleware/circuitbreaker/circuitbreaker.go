@@ -139,6 +139,16 @@ func (cb *CircuitBreaker) Counts() Counts {
 	return cb.counts
 }
 
+// Snapshot 一次加锁同时返回当前状态和统计信息，避免调用方分两次加锁。
+func (cb *CircuitBreaker) Snapshot() (State, Counts) {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	now := time.Now()
+	state, _ := cb.currentState(now)
+	return state, cb.counts
+}
+
 // Execute 执行函数，如果熔断器允许的话
 func (cb *CircuitBreaker) Execute(req func() (interface{}, error)) (interface{}, error) {
 	generation, err := cb.beforeRequest()

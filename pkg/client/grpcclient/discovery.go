@@ -17,6 +17,15 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+// WithDiscoveryInsecure 明确声明使用明文连接（不加密）。
+// 生产环境应通过 WithDiscoveryDialOptions(grpc.WithTransportCredentials(...)) 提供 TLS 凭证；
+// 此选项仅用于开发或内网可信环境。
+func WithDiscoveryInsecure() ServiceDiscoveryOption {
+	return func(c *ServiceDiscoveryClient) {
+		c.dialOpts = append(c.dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+}
+
 // LoadBalanceStrategy 负载均衡策略
 type LoadBalanceStrategy int
 
@@ -76,7 +85,6 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		serviceName: serviceName,
 		clients:     make(map[string]*grpc.ClientConn),
 		dialOpts: []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                time.Second * 20,
 				Timeout:             time.Second * 10,

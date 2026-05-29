@@ -51,7 +51,6 @@ func WithDefault() Option {
 				PermitWithoutStream: true,
 			}),
 			grpc.WithIdleTimeout(time.Second*10),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 	}
 }

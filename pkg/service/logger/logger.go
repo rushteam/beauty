@@ -33,6 +33,9 @@ func traceArgs(ctx context.Context) []any {
 
 func handle(ctx context.Context, level slog.Level, msg string, args []any) {
 	instance()
+	if !logger.Handler().Enabled(ctx, level) {
+		return
+	}
 	var pcs [1]uintptr
 	runtime.Callers(3, pcs[:])
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])

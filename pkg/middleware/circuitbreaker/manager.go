@@ -148,10 +148,11 @@ func (m *Manager) Stats() map[string]CircuitBreakerStats {
 
 	stats := make(map[string]CircuitBreakerStats)
 	for name, cb := range m.breakers {
+		state, counts := cb.Snapshot()
 		stats[name] = CircuitBreakerStats{
 			Name:   name,
-			State:  cb.State(),
-			Counts: cb.Counts(),
+			State:  state,
+			Counts: counts,
 		}
 	}
 	return stats

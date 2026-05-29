@@ -9,7 +9,6 @@ import (
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -151,10 +150,9 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (*grpc.
 			WithEnvironmentIn(config.environments...)
 	}
 
-	// 设置默认 gRPC 选项
+	// 设置默认 gRPC 选项（不含 TLS，调用方须显式传入凭证或使用 WithGRPCDialOptions(grpc.WithTransportCredentials(...))）
 	if len(config.grpcOpts) == 0 {
 		config.grpcOpts = []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                time.Second * 20,
 				Timeout:             time.Second * 10,

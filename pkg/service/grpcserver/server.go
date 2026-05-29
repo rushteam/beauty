@@ -3,7 +3,6 @@ package grpcserver
 import (
 	"context"
 	"fmt"
-	"log"
 	"maps"
 	"net"
 
@@ -231,11 +230,8 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		logger.Info("grpc server serve", "addr", s.addr)
-		if err := s.Server.Serve(ln); err != nil {
-			if err != grpc.ErrServerStopped {
-				log.Fatalf("grpc server serve failed: %s\n", err)
-			}
-			return
+		if err := s.Server.Serve(ln); err != nil && err != grpc.ErrServerStopped {
+			logger.Error("grpc server serve failed", "error", err)
 		}
 	}()
 	<-ctx.Done()

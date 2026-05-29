@@ -104,9 +104,9 @@ type Config struct {
 	SkipPaths []string
 	// EnableMetrics 是否启用指标统计
 	EnableMetrics bool
-	// OnAuthSuccess 认证成功回调
+	// OnAuthSuccess 认证成功回调（同步调用，须轻量，不得阻塞）
 	OnAuthSuccess func(ctx context.Context, user User)
-	// OnAuthFailure 认证失败回调
+	// OnAuthFailure 认证失败回调（同步调用，须轻量，不得阻塞）
 	OnAuthFailure func(ctx context.Context, err error)
 }
 
@@ -226,12 +226,13 @@ func (am *AuthMiddleware) recordSuccess(ctx context.Context, user User) {
 	}
 
 	am.mutex.Lock()
-	defer am.mutex.Unlock()
 	am.stats.SuccessRequests++
 	am.stats.LastAuthTime = time.Now()
+	cb := am.onAuthSuccess
+	am.mutex.Unlock()
 
-	if am.onAuthSuccess != nil {
-		go am.onAuthSuccess(ctx, user)
+	if cb != nil {
+		cb(ctx, user)
 	}
 }
 
@@ -242,12 +243,13 @@ func (am *AuthMiddleware) recordFailure(ctx context.Context, err error) {
 	}
 
 	am.mutex.Lock()
-	defer am.mutex.Unlock()
 	am.stats.FailureRequests++
 	am.stats.LastFailureTime = time.Now()
+	cb := am.onAuthFailure
+	am.mutex.Unlock()
 
-	if am.onAuthFailure != nil {
-		go am.onAuthFailure(ctx, err)
+	if cb != nil {
+		cb(ctx, err)
 	}
 }
 

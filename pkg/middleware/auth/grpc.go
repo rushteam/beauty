@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/rushteam/beauty/pkg/service/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -91,7 +92,7 @@ func StreamServerInterceptor(auth *AuthMiddleware) grpc.StreamServerInterceptor 
 		// 创建包装的流，包含用户信息
 		wrappedStream := &authServerStream{
 			ServerStream: ss,
-			ctx:          context.WithValue(ss.Context(), "user", user),
+			ctx:          context.WithValue(ss.Context(), userContextKey, user),
 		}
 
 		// 调用成功回调
@@ -163,7 +164,9 @@ func buildGRPCMetadata(ctx context.Context, method string) map[string]interface{
 	return md
 }
 
-// wrapAuthError 将认证错误包装为 gRPC 错误
+// wrapAuthError 将认证错误包装为 gRPC 错误。
+// 已知的业务错误（未认证、禁止）直接透传给调用方；
+// 未知内部错误只返回固定字符串，原始错误记服务端日志以便排查。
 func wrapAuthError(err error) error {
 	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrInvalidToken) || errors.Is(err, ErrTokenExpired) {
 		return status.Error(codes.Unauthenticated, err.Error())
@@ -171,7 +174,8 @@ func wrapAuthError(err error) error {
 	if errors.Is(err, ErrForbidden) {
 		return status.Error(codes.PermissionDenied, err.Error())
 	}
-	return status.Error(codes.Internal, err.Error())
+	logger.Error("auth internal error", "error", err)
+	return status.Error(codes.Internal, "internal authentication error")
 }
 
 // IsGRPCAuthError 检查错误是否为 gRPC 认证相关错误

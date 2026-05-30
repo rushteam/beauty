@@ -27,10 +27,28 @@ func WithServiceName(name string) Option {
 	}
 }
 
-// WithShutdownTimeout 设置 HTTP 服务优雅关闭的最长等待时间，默认 10s。
+// WithShutdownTimeout 设置 HTTP 服务优雅关闭的最长等待时间，默认 30s。
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(s *Server) {
 		s.shutdownTimeout = d
+	}
+}
+
+func WithReadTimeout(d time.Duration) Option {
+	return func(s *Server) {
+		s.readTimeout = d
+	}
+}
+
+func WithWriteTimeout(d time.Duration) Option {
+	return func(s *Server) {
+		s.writeTimeout = d
+	}
+}
+
+func WithIdleTimeout(d time.Duration) Option {
+	return func(s *Server) {
+		s.idleTimeout = d
 	}
 }
 
@@ -78,11 +96,11 @@ func New(addr string, mux http.Handler, opts ...Option) *Server {
 		metadata:        map[string]string{"kind": "http"},
 		middlewares:     make([]func(http.Handler) http.Handler, 0),
 		ready:           make(chan struct{}),
-		shutdownTimeout: 10 * time.Second,
-		Server: &http.Server{
-			Addr:    addr,
-			Handler: mux,
-		},
+		shutdownTimeout: 30 * time.Second,
+		readTimeout:     30 * time.Second,
+		writeTimeout:    30 * time.Second,
+		idleTimeout:     90 * time.Second,
+		Server:          &http.Server{},
 	}
 
 	// 应用选项
@@ -96,7 +114,11 @@ func New(addr string, mux http.Handler, opts ...Option) *Server {
 		handler = s.middlewares[i](handler)
 	}
 	// 最外层包裹 OTel HTTP 追踪
+	s.Server.Addr = addr
 	s.Server.Handler = otelhttp.NewHandler(handler, s.name)
+	s.Server.ReadTimeout = s.readTimeout
+	s.Server.WriteTimeout = s.writeTimeout
+	s.Server.IdleTimeout = s.idleTimeout
 
 	return s
 }
@@ -108,6 +130,9 @@ type Server struct {
 	middlewares     []func(http.Handler) http.Handler
 	ready           chan struct{}
 	shutdownTimeout time.Duration
+	readTimeout     time.Duration
+	writeTimeout    time.Duration
+	idleTimeout     time.Duration
 
 	*http.Server
 }

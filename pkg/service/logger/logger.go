@@ -2,8 +2,13 @@ package logger
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,10 +17,72 @@ import (
 
 var logger *slog.Logger
 var once sync.Once
+var levelVar = new(slog.LevelVar) // default: slog.LevelInfo (0)
 
 func instance() {
 	once.Do(func() {
-		logger = slog.Default().WithGroup("beauty")
+		h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: levelVar})
+		logger = slog.New(h).WithGroup("beauty")
+	})
+}
+
+// SetLevel dynamically sets the global log level; takes effect immediately without restart.
+func SetLevel(level slog.Level) {
+	levelVar.Set(level)
+}
+
+// GetLevel returns the current log level.
+func GetLevel() slog.Level {
+	return levelVar.Level()
+}
+
+// SetLevelByName sets the log level by name: "debug"/"info"/"warn"/"error" (case-insensitive).
+// Returns an error for unrecognized names without changing the current level.
+func SetLevelByName(name string) error {
+	switch strings.ToLower(name) {
+	case "debug":
+		levelVar.Set(slog.LevelDebug)
+	case "info":
+		levelVar.Set(slog.LevelInfo)
+	case "warn":
+		levelVar.Set(slog.LevelWarn)
+	case "error":
+		levelVar.Set(slog.LevelError)
+	default:
+		return fmt.Errorf("unknown log level %q: must be debug, info, warn or error", name)
+	}
+	return nil
+}
+
+// LevelHandler returns an http.Handler that exposes dynamic log-level control.
+//
+//	GET  /loglevel  -> {"level":"info"}
+//	PUT  /loglevel  -> body {"level":"debug"}, returns 200 {"level":"debug"} or 400 on error
+func LevelHandler() http.Handler {
+	type payload struct {
+		Level string `json:"level"`
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(payload{Level: levelVar.Level().String()})
+		case http.MethodPut:
+			var p payload
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			if err := SetLevelByName(p.Level); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(payload{Level: levelVar.Level().String()})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
 	})
 }
 

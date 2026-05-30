@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 )
 
 var _ discover.Service = (*Server)(nil)
@@ -167,7 +168,20 @@ func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 	}
 
 	// 添加默认选项
-	grpcOpts = append(grpcOpts, grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	grpcOpts = append(grpcOpts,
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     time.Minute * 5,
+			MaxConnectionAge:      time.Minute * 30,
+			MaxConnectionAgeGrace: time.Second * 10,
+			Time:                  time.Second * 20,
+			Timeout:               time.Second * 10,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             time.Second * 10,
+			PermitWithoutStream: true,
+		}),
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+	)
 
 	s.Server = grpc.NewServer(grpcOpts...)
 

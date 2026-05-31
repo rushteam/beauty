@@ -149,6 +149,46 @@ func TestIPKeyExtractor(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_GC(t *testing.T) {
+	rl := NewRateLimitMiddleware(Config{
+		Rate:       10,
+		Burst:      10,
+		IdleTTL:    50 * time.Millisecond,
+		GCInterval: 20 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rl.StartGC(ctx)
+
+	// 产生两个不同 key 的 limiter
+	_ = rl.getEntry("key-a")
+	_ = rl.getEntry("key-b")
+
+	if n := len(rl.limiters); n != 2 {
+		t.Fatalf("want 2 limiters, got %d", n)
+	}
+
+	// 等待 key-a 过期，同时持续访问 key-b 保持活跃
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_ = rl.getEntry("key-b")
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	rl.mutex.RLock()
+	_, hasA := rl.limiters["key-a"]
+	_, hasB := rl.limiters["key-b"]
+	rl.mutex.RUnlock()
+
+	if hasA {
+		t.Error("key-a should have been GC'd")
+	}
+	if !hasB {
+		t.Error("key-b should still be alive")
+	}
+}
+
 func TestUserKeyExtractor(t *testing.T) {
 	extractor := NewUserKeyExtractor("user_id")
 

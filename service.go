@@ -5,6 +5,7 @@ import (
 
 	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"github.com/rushteam/beauty/pkg/service/pprof"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"google.golang.org/grpc"
 )
@@ -19,6 +20,12 @@ func WithGrpcServer(addr string, handler func(*grpc.Server), opts ...grpcserver.
 
 func WithCrontab(opts ...cron.CronOptions) Option {
 	return WithService(cron.New(opts...))
+}
+
+// WithPprof 启动一个独立的 pprof HTTP 服务，默认监听 127.0.0.1:6060。
+// 仅在需要线上排查时挂载，生产环境建议通过 SSH 隧道访问而非对外暴露。
+func WithPprof(opts ...pprof.Option) Option {
+	return WithService(pprof.New(opts...))
 }
 
 // var WebLogger = middleware.Logger

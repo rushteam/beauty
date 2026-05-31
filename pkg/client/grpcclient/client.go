@@ -54,6 +54,7 @@ func newDirectClient(opts ...directOption) (*directClient, error) {
 				PermitWithoutStream: true,
 			}),
 			grpc.WithIdleTimeout(time.Second * 10),
+			grpc.WithDefaultServiceConfig(DefaultRetryPolicy().serviceConfig()),
 		},
 	}
 	for _, opt := range opts {

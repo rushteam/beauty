@@ -149,12 +149,12 @@ func RateLimitInfo(rl *RateLimitMiddleware) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			metadata := buildHTTPMetadata(r)
 			key := rl.extractKey(r.Context(), metadata)
-			limiter := rl.getLimiter(key)
+			entry := rl.getEntry(key)
 
 			// 添加限流信息头部
 			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%.0f", rl.LimitRate()))
 			w.Header().Set("X-RateLimit-Burst", fmt.Sprintf("%d", rl.Burst()))
-			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%.0f", limiter.Tokens()))
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%.0f", entry.limiter.Tokens()))
 
 			next.ServeHTTP(w, r)
 		})

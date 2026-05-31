@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/rushteam/beauty/pkg/service/core"
 	"github.com/rushteam/beauty/pkg/service/discover"
@@ -133,40 +132,44 @@ func (s *App) Start(ctx context.Context) error {
 		cancel()
 	})
 	s.runHooks(EventBeforeRun)
-	wg := sync.WaitGroup{}
+
+	// svcWg 追踪所有 srv.Start() goroutine，shutdown 时等它们全部退出
+	var svcWg sync.WaitGroup
 	for _, srv := range s.services {
-		s.startService(ctx, &wg, srv)
+		s.startService(ctx, &svcWg, srv, cancel)
 	}
 	s.ready.Swap(1)
-	wg.Wait()
+
+	// 等待 ctx 取消（signal、外部 cancel 或任意服务退出）
 	<-ctx.Done()
+
+	// 等待所有服务的 Start() 返回，确保 in-flight 请求处理完毕
+	svcWg.Wait()
+
 	s.runHooks(EventAfterRun)
 	defer logger.Sync()
-	sleep := time.Millisecond*100 + time.Second*time.Duration(len(s.registry))
-	logger.Info(fmt.Sprintf("stop after %s", sleep))
-	time.Sleep(sleep)
 	return nil
 }
 
-func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service) {
+func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service, appCancel context.CancelFunc) {
+	srvCtx, cancel := context.WithCancel(ctx)
+
+	// registry goroutine：等服务就绪后注册，ctx 取消后注销
 	wg.Add(1)
-	ctx, cancel := context.WithCancel(ctx)
 	go func(srv Service) {
 		defer wg.Done()
-		// Wait until the service signals it is ready (port listening) before
-		// registering with the registry. Fall through immediately for services
-		// that do not implement ReadyNotifier.
+		defer cancel()
+
 		if n, ok := srv.(ReadyNotifier); ok {
 			select {
 			case <-n.Ready():
-			case <-ctx.Done():
+			case <-srvCtx.Done():
 				return
 			}
 		}
 		if v, ok := srv.(discover.Service); ok {
 			for _, r := range s.registry {
-				// TODO: 这里不能超时,需要在Register内部做，因为里面需要做 keepalive
-				stop, err := r.Register(ctx, v)
+				stop, err := r.Register(srvCtx, v)
 				if err != nil {
 					logger.Error("service registry.Register error", "error", err)
 					return
@@ -174,13 +177,19 @@ func (s *App) startService(ctx context.Context, wg *sync.WaitGroup, srv Service)
 				defer stop()
 			}
 		}
-		<-ctx.Done()
+		<-srvCtx.Done()
 	}(srv)
+
+	// serve goroutine：运行服务，退出时取消 srvCtx 通知注册 goroutine 注销，
+	// 同时触发 appCancel 让整个 app 进入 shutdown 流程。
+	wg.Add(1)
 	go func(srv Service) {
-		if err := srv.Start(ctx); err != nil {
+		defer wg.Done()
+		defer cancel()
+		defer appCancel()
+		if err := srv.Start(srvCtx); err != nil {
 			logger.Error("service start error", "error", err)
 		}
-		cancel()
 	}(srv)
 }
 

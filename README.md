@@ -111,10 +111,11 @@ my-service/
 **核心特性**：
 - **多协议支持**: HTTP、gRPC、Cron 三种服务类型
 - **代码生成**: 基于 Protocol Buffers 自动生成 gRPC 代码
-- **服务发现**: 支持多种注册中心（etcd/nacos/polaris/k8s）
-- **统一配置**: 集中式配置管理
-- **中间件**: 完整的中间件支持
-- **监控**: 内置链路追踪和指标收集
+- **服务发现**: 支持多种注册中心（etcd / nacos / consul / polaris / k8s）
+- **配置中心**: 统一 `conf.New(url)` 接入本地文件与远程配置，支持热加载
+- **中间件**: recovery、cors、compress、health、metrics、auth、限流、熔断、超时
+- **可观测性**: 内置 OpenTelemetry 链路追踪与指标收集
+- **动态日志**: 运行时通过 HTTP 接口调整日志级别，无需重启
 
 ## Configuration
 
@@ -397,6 +398,116 @@ func main() {
     }
 }
 ```
+
+## Configuration Center
+
+Beauty 支持统一的配置加载接口，通过 URL scheme 切换本地文件与远程配置中心：
+
+```go
+import (
+    "github.com/rushteam/beauty/pkg/conf"
+    _ "github.com/rushteam/beauty/pkg/infra/etcd"   // 注册 etcd scheme
+    _ "github.com/rushteam/beauty/pkg/infra/nacos"  // 注册 nacos scheme
+)
+
+// 本地文件
+loader, _ := conf.New("config/app.yaml")
+
+// etcd 远程配置
+loader, _ := conf.New("etcd://127.0.0.1:2379/myapp/config.yaml")
+
+// nacos 远程配置
+loader, _ := conf.New("nacos://127.0.0.1:8848/myapp.yaml?namespace=dev")
+
+var cfg AppConfig
+loader.Unmarshal(&cfg)
+
+// 热加载
+loader.Watch(ctx, func() {
+    loader.Unmarshal(&cfg)
+})
+```
+
+支持 etcd / nacos / consul / polaris，详见 [docs/configuration.md](docs/configuration.md)。
+
+## Dynamic Log Level
+
+运行时通过 HTTP 接口动态调整日志级别，无需重启：
+
+```go
+import "github.com/rushteam/beauty/pkg/service/logger"
+
+// 挂载管理接口
+mux.Handle("/debug/loglevel", logger.LevelHandler())
+
+// 代码方式
+logger.SetLevelByName("debug")
+```
+
+```bash
+# 查询当前级别
+curl http://localhost:8080/debug/loglevel
+
+# 临时开启 debug
+curl -X PUT http://localhost:8080/debug/loglevel -d '{"level":"debug"}'
+```
+
+详见 [docs/logger.md](docs/logger.md)。
+
+## Built-in Middleware
+
+| 中间件 | 包 | 说明 |
+|--------|-----|------|
+| Recovery | `middleware/recovery` | panic 捕获，返回 500，支持自定义上报 |
+| CORS | `middleware/cors` | 跨域处理，支持细粒度配置 |
+| Compress | `middleware/compress` | gzip 响应压缩，按 minSize 控制 |
+| Health | `middleware/health` | `/healthz` 存活 + `/readyz` 就绪探针 |
+| Metrics | `middleware/metrics` | OTel 请求数/耗时/在途数指标 |
+| Auth | `middleware/auth` | JWT/静态 Token 认证，可扩展 |
+| RateLimit | `middleware/ratelimit` | 令牌桶限流，支持按 IP/用户/自定义键 |
+| CircuitBreaker | `middleware/circuitbreaker` | 三态熔断器 |
+| Timeout | `middleware/timeout` | 请求超时 + 慢请求检测 |
+
+详见 [docs/middleware-builtin.md](docs/middleware-builtin.md) 和 [docs/middleware-summary.md](docs/middleware-summary.md)。
+
+## HTTP Server Options
+
+```go
+beauty.WithWebServer(":8080", handler,
+    webserver.WithServiceName("api"),
+    webserver.WithReadTimeout(30 * time.Second),
+    webserver.WithWriteTimeout(30 * time.Second),
+    webserver.WithIdleTimeout(90 * time.Second),
+    webserver.WithShutdownTimeout(30 * time.Second),
+    webserver.WithTLS("cert.pem", "key.pem"),   // 启用 HTTPS
+    webserver.WithMiddleware(myMiddleware),
+)
+```
+
+## gRPC Server Options
+
+```go
+beauty.WithGrpcServer(":9090", register,
+    grpcserver.WithServiceName("rpc"),
+    grpcserver.WithGrpcServerUnaryInterceptor(myInterceptor),
+    grpcserver.WithGracefulStopTimeout(10 * time.Second),
+    grpcserver.WithTLS("cert.pem", "key.pem"),
+    // Keepalive 参数已内置合理默认值
+)
+```
+
+## Documentation
+
+| 文档 | 内容 |
+|------|------|
+| [docs/configuration.md](docs/configuration.md) | 配置系统：文件 + 远程配置中心 + 热加载 |
+| [docs/logger.md](docs/logger.md) | 动态日志级别 |
+| [docs/middleware-builtin.md](docs/middleware-builtin.md) | recovery / cors / compress / health / metrics |
+| [docs/middleware-summary.md](docs/middleware-summary.md) | auth / ratelimit / circuitbreaker / timeout 组合使用 |
+| [docs/metadata-propagation.md](docs/metadata-propagation.md) | 服务间 metadata 透传 + OTel trace 传播协议（W3C/B3）|
+| [docs/grpc-service-discovery.md](docs/grpc-service-discovery.md) | 服务注册与发现 |
+| [docs/grpc-client-discovery.md](docs/grpc-client-discovery.md) | gRPC 客户端发现 |
+| [docs/auth-ratelimit.md](docs/auth-ratelimit.md) | 认证与限流详解 |
 
 ## Contributing
 

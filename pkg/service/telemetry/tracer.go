@@ -6,6 +6,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
@@ -17,8 +18,9 @@ var tracer trace.Tracer
 type TraceOption func(c *traceComponent)
 
 type traceComponent struct {
-	provider trace.TracerProvider
-	options  []sdktrace.TracerProviderOption
+	provider    trace.TracerProvider
+	options     []sdktrace.TracerProviderOption
+	propagators []propagation.TextMapPropagator
 }
 
 func (c *traceComponent) Name() string {
@@ -34,6 +36,23 @@ func WithTraceProvider(provider trace.TracerProvider) TraceOption {
 func WithTraceProviderOption(opts ...sdktrace.TracerProviderOption) TraceOption {
 	return func(o *traceComponent) {
 		o.options = append(o.options, opts...)
+	}
+}
+
+// WithTracePropagator 追加 trace context 传播协议。
+// 默认已启用 W3C TraceContext + Baggage（OTel 推荐组合），调用此方法可追加或替换。
+//
+// 常用示例：
+//
+//	// 追加 B3（兼容 Zipkin/Jaeger 老版本）
+//	import "go.opentelemetry.io/contrib/propagators/b3"
+//	WithTracePropagator(b3.New())
+//
+//	// 只用 B3，不用 W3C（需先调用 WithTracePropagator 再在 Init 里覆盖默认值）
+//	WithTracePropagator(b3.New(b3.WithInjectEncoding(b3.B3SingleHeader)))
+func WithTracePropagator(p ...propagation.TextMapPropagator) TraceOption {
+	return func(o *traceComponent) {
+		o.propagators = append(o.propagators, p...)
 	}
 }
 
@@ -64,9 +83,17 @@ func (c *traceComponent) Init() context.CancelFunc {
 	if c.provider == nil {
 		c.provider = sdktrace.NewTracerProvider(c.options...)
 	}
-
 	otel.SetTracerProvider(c.provider)
 	tracer = c.provider.Tracer("beauty")
+
+	// 设置 TextMapPropagator：默认 W3C TraceContext + Baggage，可通过 WithTracePropagator 追加。
+	// 没有这一步，otelhttp/otelgrpc 无法在服务间传递 trace，链路会断开。
+	props := []propagation.TextMapPropagator{
+		propagation.TraceContext{}, // W3C traceparent / tracestate
+		propagation.Baggage{},     // W3C baggage
+	}
+	props = append(props, c.propagators...)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(props...))
 
 	return func() {
 		type shutdown interface {

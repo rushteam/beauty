@@ -9,6 +9,7 @@ import (
 	"time"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/rushteam/beauty/pkg/middleware/recovery"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/addr"
@@ -155,17 +156,14 @@ func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 	// 构建 gRPC 选项
 	grpcOpts := s.grpcOpts
 
-	// 添加拦截器链
-	if len(s.unaryInterceptors) > 0 {
-		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(
-			middleware.ChainUnaryServer(s.unaryInterceptors...),
-		))
-	}
-	if len(s.streamInterceptors) > 0 {
-		grpcOpts = append(grpcOpts, grpc.StreamInterceptor(
-			middleware.ChainStreamServer(s.streamInterceptors...),
-		))
-	}
+	// recovery 始终作为最外层拦截器，防止 handler panic 导致进程崩溃
+	unary := append([]grpc.UnaryServerInterceptor{recovery.UnaryServerInterceptor()}, s.unaryInterceptors...)
+	stream := append([]grpc.StreamServerInterceptor{recovery.StreamServerInterceptor()}, s.streamInterceptors...)
+
+	grpcOpts = append(grpcOpts,
+		grpc.UnaryInterceptor(middleware.ChainUnaryServer(unary...)),
+		grpc.StreamInterceptor(middleware.ChainStreamServer(stream...)),
+	)
 
 	// 添加默认选项
 	grpcOpts = append(grpcOpts,

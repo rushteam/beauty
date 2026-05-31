@@ -13,6 +13,7 @@ import (
 	"log/slog"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
@@ -48,6 +49,8 @@ type ServiceDiscoveryClient struct {
 	mu       sync.RWMutex
 	clients  map[string]*grpc.ClientConn
 	services []discover.ServiceInfo
+
+	retryPolicy *RetryPolicy // nil 表示使用 DefaultRetryPolicy
 
 	strategyVal LoadBalanceStrategy
 	rrIndex     atomic.Int64 // RoundRobin 游标，原子操作避免锁内写
@@ -93,6 +96,7 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		serviceName: serviceName,
 		clients:     make(map[string]*grpc.ClientConn),
 		dialOpts: []grpc.DialOption{
+			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                time.Second * 20,
 				Timeout:             time.Second * 10,
@@ -183,6 +187,18 @@ func WithDiscoveryFailover(maxRetries int, retryDelay time.Duration) ServiceDisc
 func WithDiscoveryDrainTimeout(d time.Duration) ServiceDiscoveryOption {
 	return func(c *ServiceDiscoveryClient) {
 		c.drainTimeout = d
+	}
+}
+
+// WithDiscoveryRetryPolicy 设置 gRPC 原生 retry policy，覆盖默认策略。
+// 传入零值 RetryPolicy{} 或空 RetryableStatusCodes 可禁用重试。
+//
+// 示例——对 UNAVAILABLE 和 RESOURCE_EXHAUSTED 均重试，最多 5 次：
+//
+//	WithDiscoveryRetryPolicy(grpcclient.DefaultRetryPolicy().WithResourceExhausted())
+func WithDiscoveryRetryPolicy(p RetryPolicy) ServiceDiscoveryOption {
+	return func(c *ServiceDiscoveryClient) {
+		c.retryPolicy = &p
 	}
 }
 
@@ -424,6 +440,15 @@ func (c *ServiceDiscoveryClient) getOrCreateConn(service *discover.ServiceInfo) 
 	}
 	if len(c.streamInterceptors) > 0 {
 		dialOpts = append(dialOpts, grpc.WithChainStreamInterceptor(c.streamInterceptors...))
+	}
+	// 注入 retry policy：使用调用方指定的策略，未指定则用默认策略。
+	// 若 RetryableStatusCodes 为空表示主动禁用，不注入。
+	rp := DefaultRetryPolicy()
+	if c.retryPolicy != nil {
+		rp = *c.retryPolicy
+	}
+	if len(rp.RetryableStatusCodes) > 0 {
+		dialOpts = append(dialOpts, grpc.WithDefaultServiceConfig(rp.serviceConfig()))
 	}
 
 	conn, err := grpc.NewClient(service.Addr, dialOpts...)

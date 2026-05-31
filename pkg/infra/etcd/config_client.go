@@ -3,10 +3,16 @@ package etcd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+const (
+	watchBaseDelay = 500 * time.Millisecond
+	watchMaxDelay  = 30 * time.Second
 )
 
 // Config etcd 连接配置
@@ -59,6 +65,7 @@ func (cc *ConfigCenter) Get(ctx context.Context, key string) (string, error) {
 
 // Watch 监听 key 变更（支持前缀监听，key 以 "/" 结尾时视为前缀）。
 // 删除事件 value 为空字符串。
+// 断线后自动重连，指数退避最长 30s，重连成功后推送一次当前值补齐断线期间的变更。
 func (cc *ConfigCenter) Watch(ctx context.Context, key string, onChange func(key, value string)) (context.CancelFunc, error) {
 	watchCtx, cancel := context.WithCancel(ctx)
 
@@ -67,25 +74,76 @@ func (cc *ConfigCenter) Watch(ctx context.Context, key string, onChange func(key
 		watchOpts = append(watchOpts, clientv3.WithPrefix())
 	}
 
-	wch := cc.client.Watch(watchCtx, key, watchOpts...)
-
-	go func() {
-		for {
-			select {
-			case <-watchCtx.Done():
-				return
-			case resp, ok := <-wch:
-				if !ok {
-					return
-				}
-				for _, ev := range resp.Events {
-					onChange(string(ev.Kv.Key), string(ev.Kv.Value))
-				}
-			}
-		}
-	}()
+	go cc.watchLoop(watchCtx, key, watchOpts, onChange)
 
 	return cancel, nil
+}
+
+// watchLoop 持续监听，channel 关闭或收到错误时指数退避重连。
+func (cc *ConfigCenter) watchLoop(ctx context.Context, key string, watchOpts []clientv3.OpOption, onChange func(key, value string)) {
+	delay := watchBaseDelay
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		wch := cc.client.Watch(ctx, key, watchOpts...)
+		healthy := false
+
+		for resp := range wch {
+			if err := resp.Err(); err != nil {
+				slog.Warn("etcd watch error, will reconnect",
+					"key", key, "err", err, "retry_in", delay)
+				break
+			}
+			// 收到第一个正常响应，重置退避计数
+			if !healthy {
+				healthy = true
+				delay = watchBaseDelay
+			}
+			for _, ev := range resp.Events {
+				onChange(string(ev.Kv.Key), string(ev.Kv.Value))
+			}
+		}
+
+		// channel 因 ctx 取消而关闭，正常退出
+		if ctx.Err() != nil {
+			return
+		}
+
+		// 异常断线：退避等待后重连
+		slog.Warn("etcd watch channel closed unexpectedly, reconnecting",
+			"key", key, "retry_in", delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if delay < watchMaxDelay {
+			delay *= 2
+			if delay > watchMaxDelay {
+				delay = watchMaxDelay
+			}
+		}
+
+		// 重连后补推当前值，避免断线期间的变更被遗漏
+		cc.pushCurrent(ctx, key, watchOpts, onChange)
+	}
+}
+
+// pushCurrent 拉取 key 当前值并回调，断线重连后调用以补齐遗漏的变更。
+func (cc *ConfigCenter) pushCurrent(ctx context.Context, key string, watchOpts []clientv3.OpOption, onChange func(key, value string)) {
+	// watchOpts 里可能含 WithPrefix，Get 同样支持，直接复用
+	resp, err := cc.client.Get(ctx, key, watchOpts...)
+	if err != nil {
+		slog.Warn("etcd watch reconnect: failed to fetch current value",
+			"key", key, "err", err)
+		return
+	}
+	for _, kv := range resp.Kvs {
+		onChange(string(kv.Key), string(kv.Value))
+	}
 }
 
 // Close 关闭 etcd 连接

@@ -7,6 +7,8 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 
 	"github.com/rushteam/beauty/pkg/service/core"
@@ -56,6 +58,39 @@ func WithoutMetricRuntime() MetricOption {
 	}
 }
 
+// WithMetricOTLPGRPCReader 通过 OTLP/gRPC（默认端口 4317）周期性上报指标到 Collector。
+// 指标为推送模型，exporter 包在 PeriodicReader 内（默认 60s 间隔）。
+// 不传 opts 时自动读取标准 OTEL_EXPORTER_OTLP_* 环境变量；也可显式配置：
+//
+//	WithMetricOTLPGRPCReader(
+//		otlpmetricgrpc.WithEndpoint("otel-collector:4317"),
+//		otlpmetricgrpc.WithInsecure(),
+//	)
+//
+// 需要自定义上报间隔时，改用 WithMetricReader(sdkmetric.NewPeriodicReader(exporter, ...))。
+func WithMetricOTLPGRPCReader(opts ...otlpmetricgrpc.Option) MetricOption {
+	exporter, err := otlpmetricgrpc.New(context.Background(), opts...)
+	if err != nil {
+		panic(fmt.Sprintf("telemetry: failed to create OTLP/gRPC metric exporter: %v", err))
+	}
+	return WithMetricReader(sdkmetric.NewPeriodicReader(exporter))
+}
+
+// WithMetricOTLPHTTPReader 通过 OTLP/HTTP（默认端口 4318）周期性上报指标。
+// 不传 opts 时自动读取标准 OTEL_EXPORTER_OTLP_* 环境变量；也可显式配置：
+//
+//	WithMetricOTLPHTTPReader(
+//		otlpmetrichttp.WithEndpoint("otel-collector:4318"),
+//		otlpmetrichttp.WithInsecure(),
+//	)
+func WithMetricOTLPHTTPReader(opts ...otlpmetrichttp.Option) MetricOption {
+	exporter, err := otlpmetrichttp.New(context.Background(), opts...)
+	if err != nil {
+		panic(fmt.Sprintf("telemetry: failed to create OTLP/HTTP metric exporter: %v", err))
+	}
+	return WithMetricReader(sdkmetric.NewPeriodicReader(exporter))
+}
+
 func WithMetricStdoutReader() MetricOption {
 	exporter, err := stdoutmetric.New(
 		stdoutmetric.WithPrettyPrint(),
@@ -81,6 +116,7 @@ func (c *metricComponent) Name() string {
 }
 
 func (c *metricComponent) Init() context.CancelFunc {
+	setupErrorHandler() // 把异步导出错误接到项目 logger，否则会被默默打到 stderr
 	if c.provider == nil {
 		c.provider = sdkmetric.NewMeterProvider(c.options...)
 	}

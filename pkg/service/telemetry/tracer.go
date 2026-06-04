@@ -81,7 +81,39 @@ func WithTraceStdoutExporter() TraceOption {
 	)
 }
 
+// WithTraceOTLPGRPCExporter 通过 OTLP/gRPC（默认端口 4317）上报 trace 到 Collector
+// （otel-collector / Tempo / Jaeger 等）。不传 opts 时自动读取标准 OTEL_EXPORTER_OTLP_* 环境变量；
+// 也可显式配置：
+//
+//	WithTraceOTLPGRPCExporter(
+//		otlptracegrpc.WithEndpoint("otel-collector:4317"),
+//		otlptracegrpc.WithInsecure(), // 无 TLS 的内网 Collector
+//	)
+func WithTraceOTLPGRPCExporter(opts ...otlptracegrpc.Option) TraceOption {
+	exporter, err := otlptracegrpc.New(context.Background(), opts...)
+	if err != nil {
+		panic(fmt.Sprintf("telemetry: failed to create OTLP/gRPC trace exporter: %v", err))
+	}
+	return WithTraceProviderOption(sdktrace.WithBatcher(exporter))
+}
+
+// WithTraceOTLPHTTPExporter 通过 OTLP/HTTP（默认端口 4318）上报 trace。
+// 不传 opts 时自动读取标准 OTEL_EXPORTER_OTLP_* 环境变量；也可显式配置：
+//
+//	WithTraceOTLPHTTPExporter(
+//		otlptracehttp.WithEndpoint("otel-collector:4318"),
+//		otlptracehttp.WithInsecure(),
+//	)
+func WithTraceOTLPHTTPExporter(opts ...otlptracehttp.Option) TraceOption {
+	exporter, err := otlptracehttp.New(context.Background(), opts...)
+	if err != nil {
+		panic(fmt.Sprintf("telemetry: failed to create OTLP/HTTP trace exporter: %v", err))
+	}
+	return WithTraceProviderOption(sdktrace.WithBatcher(exporter))
+}
+
 func (c *traceComponent) Init() context.CancelFunc {
+	setupErrorHandler() // 把异步导出错误接到项目 logger，否则会被默默打到 stderr
 	if c.provider == nil {
 		c.provider = sdktrace.NewTracerProvider(c.options...)
 	}

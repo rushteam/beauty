@@ -98,7 +98,9 @@ const (
 	defaultGCInterval = 5 * time.Minute
 )
 
-// NewRateLimitMiddleware 创建限流中间件，并在 ctx 存活期间后台运行 GC。
+// NewRateLimitMiddleware 创建限流中间件。
+// GC 不会自动启动——将返回值传给 beauty.WithComponent 可接入框架生命周期自动启停；
+// 也可手动调用 StartGC(ctx)。
 func NewRateLimitMiddleware(config Config) *RateLimitMiddleware {
 	if config.Name == "" {
 		config.Name = "rate-limit-middleware"
@@ -345,4 +347,23 @@ func (rl *RateLimitMiddleware) String() string {
 // IsRateLimitError 检查错误是否为限流相关错误
 func IsRateLimitError(err error) bool {
 	return errors.Is(err, ErrRateLimitExceeded) || errors.Is(err, ErrRateLimiterNotFound)
+}
+
+// Init 实现 core.Component 接口，启动后台 GC goroutine。
+// Name() 已在上方声明，两个方法合起来满足 core.Component 接口。
+// 通过 beauty.WithComponent(rl) 接入框架后，GC 随应用启动/停止自动管理，无需手动调用 StartGC。
+//
+// 用法：
+//
+//	rl := ratelimit.NewRateLimitMiddleware(cfg)
+//	app := beauty.New(
+//	    beauty.WithComponent(rl),           // 自动启停 GC
+//	    beauty.WithWebServer(":8080", mux,
+//	        webserver.WithMiddleware(ratelimit.HTTPMiddleware(rl)),
+//	    ),
+//	)
+func (rl *RateLimitMiddleware) Init() context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	rl.StartGC(ctx)
+	return cancel
 }

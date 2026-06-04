@@ -130,6 +130,24 @@ func WithDiscoveryRegionFilter(regions, zones, campuses, environments []string) 
 	}
 }
 
+// WithDiscoveryVersionFilter 只路由到 version 在给定集合中的实例。
+// 服务端通过 grpcserver.WithVersion("v2") 注册版本信息，客户端用此 Option 过滤。
+//
+// 灰度示例：同时保留 v1（稳定）和 v2（灰度），按流量比例路由见 WithDiscoveryStrategy。
+//
+//	// 只调 v2 实例
+//	client := grpcclient.NewServiceDiscoveryClient(reg, "order-svc",
+//	    grpcclient.WithDiscoveryVersionFilter("v2"),
+//	)
+func WithDiscoveryVersionFilter(versions ...string) ServiceDiscoveryOption {
+	return func(c *ServiceDiscoveryClient) {
+		if c.labelFilter == nil {
+			c.labelFilter = NewLabelFilter()
+		}
+		c.labelFilter.WithVersionIn(versions...)
+	}
+}
+
 // WithDiscoveryLabelFilter 设置标签过滤器，替换由 WithDiscoveryRegionFilter 设置的过滤条件。
 // 若需同时使用两种过滤，请在同一个 ServiceLabelFilter 上链式调用后再传入。
 func WithDiscoveryLabelFilter(filter *ServiceLabelFilter) ServiceDiscoveryOption {

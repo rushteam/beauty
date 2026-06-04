@@ -43,6 +43,14 @@ func (f *ServiceLabelFilter) WithEnvironmentIn(environments ...string) *ServiceL
 	return f
 }
 
+// WithVersionIn 只路由到 version 标签在给定集合中的实例，用于灰度发布。
+// 服务端通过 grpcserver.WithVersion("v2") / webserver.WithVersion("v2") 写入 metadata，
+// 客户端通过 WithVersionIn("v2") 过滤，实现版本级流量隔离。
+func (f *ServiceLabelFilter) WithVersionIn(versions ...string) *ServiceLabelFilter {
+	f.LabelFilter.WithExpression("version", selector.FilterOpIn, versions...)
+	return f
+}
+
 // WithMatchLabel 添加单个精确匹配的标签
 func (f *ServiceLabelFilter) WithMatchLabel(key, value string) *ServiceLabelFilter {
 	f.LabelFilter.WithMatchLabel(key, value)

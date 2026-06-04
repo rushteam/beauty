@@ -52,6 +52,13 @@ func WithIdleTimeout(d time.Duration) Option {
 	}
 }
 
+// WithVersion 将服务版本写入 metadata，注册到注册中心后可见，灰度发布时可用于流量路由。
+func WithVersion(version string) Option {
+	return func(s *Server) {
+		s.metadata["version"] = version
+	}
+}
+
 // WithTLS 通过证书文件启用 HTTPS。certFile 和 keyFile 为 PEM 格式文件路径。
 func WithTLS(certFile, keyFile string) Option {
 	return func(s *Server) {

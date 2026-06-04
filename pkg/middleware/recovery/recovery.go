@@ -2,11 +2,11 @@ package recovery
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 
+	apperrors "github.com/rushteam/beauty/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,7 +28,9 @@ func WithOnPanic(fn OnPanicFunc) Option {
 
 func buildOptions(opts []Option) *options {
 	o := &options{
-		onPanic: defaultOnPanic,
+		onPanic: func(_ context.Context, p any, stack []byte) {
+			slog.Error("panic recovered", "panic", p, "stack", string(stack))
+		},
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -36,49 +38,55 @@ func buildOptions(opts []Option) *options {
 	return o
 }
 
-func defaultOnPanic(_ context.Context, p any, stack []byte) {
-	slog.Error("panic recovered", "panic", p, "stack", string(stack))
-}
-
+// UnaryServerInterceptor gRPC unary 拦截器：兜底 panic + 将 *errors.Status 转为 gRPC status。
 func UnaryServerInterceptor(opts ...Option) grpc.UnaryServerInterceptor {
 	o := buildOptions(opts)
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		defer func() {
 			if p := recover(); p != nil {
-				stack := debug.Stack()
-				o.onPanic(ctx, p, stack)
+				o.onPanic(ctx, p, debug.Stack())
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()
-		return handler(ctx, req)
+		resp, err = handler(ctx, req)
+		if err != nil {
+			if s, ok := apperrors.FromError(err); ok {
+				err = apperrors.ToGRPC(s)
+			}
+		}
+		return resp, err
 	}
 }
 
+// StreamServerInterceptor gRPC stream 拦截器：兜底 panic + 将 *errors.Status 转为 gRPC status。
 func StreamServerInterceptor(opts ...Option) grpc.StreamServerInterceptor {
 	o := buildOptions(opts)
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {
 			if p := recover(); p != nil {
-				stack := debug.Stack()
-				o.onPanic(ss.Context(), p, stack)
+				o.onPanic(ss.Context(), p, debug.Stack())
 				err = status.Error(codes.Internal, "internal server error")
 			}
 		}()
-		return handler(srv, ss)
+		err = handler(srv, ss)
+		if err != nil {
+			if s, ok := apperrors.FromError(err); ok {
+				err = apperrors.ToGRPC(s)
+			}
+		}
+		return err
 	}
 }
 
+// HTTPMiddleware HTTP 中间件：兜底 panic + 将 *errors.Status 写为结构化 JSON 响应。
 func HTTPMiddleware(opts ...Option) func(http.Handler) http.Handler {
 	o := buildOptions(opts)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if p := recover(); p != nil {
-					stack := debug.Stack()
-					o.onPanic(r.Context(), p, stack)
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusInternalServerError)
-					_ = json.NewEncoder(w).Encode(map[string]string{"error": "internal server error"})
+					o.onPanic(r.Context(), p, debug.Stack())
+					apperrors.WriteHTTP(w, apperrors.Internal("internal server error"))
 				}
 			}()
 			next.ServeHTTP(w, r)

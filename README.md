@@ -504,6 +504,7 @@ beauty.WithGrpcServer(":9090", register,
 | [docs/logger.md](docs/logger.md) | 动态日志级别 |
 | [docs/middleware-builtin.md](docs/middleware-builtin.md) | recovery / cors / compress / health / metrics |
 | [docs/middleware-summary.md](docs/middleware-summary.md) | auth / ratelimit / circuitbreaker / timeout 组合使用 |
+| [docs/error-codes.md](docs/error-codes.md) | 结构化错误码：业务 Code / HTTP / gRPC 三层映射、Details、渐进式迁移 |
 | [docs/metadata-propagation.md](docs/metadata-propagation.md) | 服务间 metadata 透传 + OTel trace 传播协议（W3C/B3）|
 | [docs/grpc-service-discovery.md](docs/grpc-service-discovery.md) | 服务注册与发现 |
 | [docs/grpc-client-discovery.md](docs/grpc-client-discovery.md) | gRPC 客户端发现 |

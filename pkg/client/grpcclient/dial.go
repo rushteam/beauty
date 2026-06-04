@@ -32,6 +32,9 @@ type dialConfig struct {
 	zones        []string
 	campuses     []string
 	environments []string
+
+	// 版本过滤
+	versions []string
 }
 
 // WithDirect 直连模式，target 直接作为 addr 传给 gRPC，不走服务发现。
@@ -96,6 +99,25 @@ func WithRegionFilter(regions, zones, campuses, environments []string) DialOptio
 func WithEnvironment(env string) DialOption {
 	return func(c *dialConfig) {
 		c.environments = []string{env}
+	}
+}
+
+// WithVersion 只路由到指定版本的实例，用于灰度发布或版本级隔离。
+// 服务端需通过 grpcserver.WithVersion("v2") 将版本写入注册信息。
+//
+//	conn, _ := grpcclient.Dial("etcd://host/svc", grpcclient.WithVersion("v2"))
+func WithVersion(version string) DialOption {
+	return func(c *dialConfig) {
+		c.versions = []string{version}
+	}
+}
+
+// WithVersionIn 路由到版本在给定集合中的实例，支持同时灰度多个版本。
+//
+//	conn, _ := grpcclient.Dial("etcd://host/svc", grpcclient.WithVersionIn("v2", "v3"))
+func WithVersionIn(versions ...string) DialOption {
+	return func(c *dialConfig) {
+		c.versions = versions
 	}
 }
 
@@ -173,12 +195,16 @@ func dialWithDiscovery(ctx context.Context, target string, cfg *dialConfig) (*gr
 		cfg.labelFilter = buildFilterFromParams(params)
 	}
 	if cfg.labelFilter == nil && (len(cfg.regions) > 0 || len(cfg.zones) > 0 ||
-		len(cfg.campuses) > 0 || len(cfg.environments) > 0) {
+		len(cfg.campuses) > 0 || len(cfg.environments) > 0 || len(cfg.versions) > 0) {
 		cfg.labelFilter = NewLabelFilter().
 			WithRegionIn(cfg.regions...).
 			WithZoneIn(cfg.zones...).
 			WithCampusIn(cfg.campuses...).
-			WithEnvironmentIn(cfg.environments...)
+			WithEnvironmentIn(cfg.environments...).
+			WithVersionIn(cfg.versions...)
+	} else if cfg.labelFilter != nil && len(cfg.versions) > 0 {
+		// labelFilter 已存在（由 WithLabelFilter 设置），追加 version 条件
+		cfg.labelFilter.WithVersionIn(cfg.versions...)
 	}
 
 	var clientOpts []ServiceDiscoveryOption
@@ -270,6 +296,10 @@ func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 		filter = filter.WithCampusIn(strings.Split(campus, ",")...)
 		hasFilter = true
 	}
+	if version := params["version"]; version != "" {
+		filter = filter.WithVersionIn(strings.Split(version, ",")...)
+		hasFilter = true
+	}
 	for k, v := range params {
 		if !isReservedParam(k) {
 			filter = filter.WithMatchLabel(k, v)
@@ -284,7 +314,7 @@ func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 }
 
 func isReservedParam(param string) bool {
-	return slices.Contains([]string{"env", "environment", "region", "zone", "campus", "namespace", "group"}, param)
+	return slices.Contains([]string{"env", "environment", "region", "zone", "campus", "namespace", "group", "version"}, param)
 }
 
 func getDefaultRegistry() discover.Discovery {

@@ -147,31 +147,24 @@ mux.Handle("/readyz", health.Handler(
 
 ## Metrics
 
-基于 OpenTelemetry 的 HTTP / gRPC 请求指标，记录请求数、耗时（直方图）、在途请求数。
+HTTP / gRPC 请求指标（请求数、耗时直方图、在途请求数）由框架内置的 OpenTelemetry instrumentation 自动产出，**无需额外中间件**：
+
+- HTTP server 默认包裹 `otelhttp.NewHandler(...)`
+- HTTP client 默认使用 `otelhttp.NewTransport(...)`
+- gRPC server 默认挂载 `otelgrpc.NewServerHandler()`
+- gRPC client 默认挂载 `otelgrpc.NewClientHandler()`
+
+这些 instrumentation 会按 OTel 语义约定上报标准指标（如 `http.server.request.duration`、`rpc.server.duration` 等），指标名与标签遵循上游约定，随版本演进，不在框架内重复定义。
+
+只需配合 `beauty.WithMetric(...)` 初始化 OTel MeterProvider，指标即可实际上报：
 
 ```go
-import "github.com/rushteam/beauty/pkg/middleware/metrics"
-
-// HTTP
-webserver.WithMiddleware(metrics.HTTPMiddleware("my-service"))
-
-// gRPC
-grpcserver.WithGrpcServerUnaryInterceptor(metrics.UnaryServerInterceptor("my-service"))
-grpcserver.WithGrpcServerStreamInterceptor(metrics.StreamServerInterceptor("my-service"))
+metricExporter, _ := prometheus.New()
+app := beauty.New(
+    beauty.WithMetric(telemetry.WithMetricReader(metricExporter)),
+    // ...
+)
 ```
-
-上报的指标：
-
-| 指标名 | 类型 | 标签 |
-|--------|------|------|
-| `http.server.request.count` | Counter | method, path, status_code |
-| `http.server.request.duration` | Histogram (ms) | method, path, status_code |
-| `http.server.request.inflight` | UpDownCounter | method |
-| `grpc.server.request.count` | Counter | method, status_code |
-| `grpc.server.request.duration` | Histogram (ms) | method, status_code |
-| `grpc.server.request.inflight` | UpDownCounter | method |
-
-需配合 `beauty.WithMetric(...)` 初始化 OTel MeterProvider 才能实际上报数据，参见 [observability.md](observability.md)（若有）。
 
 ---
 
@@ -181,6 +174,5 @@ grpcserver.WithGrpcServerStreamInterceptor(metrics.StreamServerInterceptor("my-s
 webserver.WithMiddleware(recovery.HTTPMiddleware()),   // 1. 最外层兜底 panic
 webserver.WithMiddleware(cors.Default().Middleware()), // 2. CORS（OPTIONS 提前返回）
 webserver.WithMiddleware(health.Middleware()),         // 3. 健康检查（短路，不走后续）
-webserver.WithMiddleware(metrics.HTTPMiddleware("svc")), // 4. 指标（覆盖所有业务请求）
-webserver.WithMiddleware(compress.Middleware(1024)),   // 5. 压缩（最内层，压缩最终响应）
+webserver.WithMiddleware(compress.Middleware(1024)),   // 4. 压缩（最内层，压缩最终响应）
 ```

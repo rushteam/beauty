@@ -293,6 +293,15 @@ func main() {
 }
 ```
 
+HTTP/gRPC 请求指标由内置的 otelhttp/otelgrpc instrumentation 自动产出，Go runtime 指标（goroutine、GC、heap）默认开启（`telemetry.WithoutMetricRuntime()` 可关闭）。生产环境通常用 OTLP 出口：
+
+```go
+beauty.WithTrace(telemetry.WithTraceOTLPGRPCExporter()),   // OTLP/gRPC，默认读 OTEL_EXPORTER_OTLP_* 环境变量
+beauty.WithMetric(telemetry.WithMetricOTLPGRPCReader()),   // 指标周期上报到 Collector
+```
+
+**Exemplars**（指标↔链路关联）默认按 `trace_based` 启用——在已采样的 trace 上下文中产生的指标会带上 trace_id，可在 Grafana 从延迟直方图直接跳到对应 trace。OTLP exporter 默认导出 exemplar；Prometheus 需以 OpenMetrics 格式抓取。可用 `telemetry.WithMetricExemplarFilter(exemplar.AlwaysOffFilter)` 关闭，或通过环境变量 `OTEL_METRICS_EXEMPLAR_FILTER` 配置。
+
 ## Running Multiple Services
 
 Beauty allows you to run multiple services in a single application:
@@ -462,7 +471,6 @@ curl -X PUT http://localhost:8080/debug/loglevel -d '{"level":"debug"}'
 | CORS | `middleware/cors` | 跨域处理，支持细粒度配置 |
 | Compress | `middleware/compress` | gzip 响应压缩，按 minSize 控制 |
 | Health | `middleware/health` | `/healthz` 存活 + `/readyz` 就绪探针 |
-| Metrics | `middleware/metrics` | OTel 请求数/耗时/在途数指标 |
 | Auth | `middleware/auth` | JWT/静态 Token 认证，可扩展 |
 | RateLimit | `middleware/ratelimit` | 令牌桶限流，支持按 IP/用户/自定义键 |
 | CircuitBreaker | `middleware/circuitbreaker` | 三态熔断器 |
@@ -502,7 +510,7 @@ beauty.WithGrpcServer(":9090", register,
 |------|------|
 | [docs/configuration.md](docs/configuration.md) | 配置系统：文件 + 远程配置中心 + 热加载 |
 | [docs/logger.md](docs/logger.md) | 动态日志级别 |
-| [docs/middleware-builtin.md](docs/middleware-builtin.md) | recovery / cors / compress / health / metrics |
+| [docs/middleware-builtin.md](docs/middleware-builtin.md) | recovery / cors / compress / health |
 | [docs/middleware-summary.md](docs/middleware-summary.md) | auth / ratelimit / circuitbreaker / timeout 组合使用 |
 | [docs/error-codes.md](docs/error-codes.md) | 结构化错误码：业务 Code / HTTP / gRPC 三层映射、Details、渐进式迁移 |
 | [docs/metadata-propagation.md](docs/metadata-propagation.md) | 服务间 metadata 透传 + OTel trace 传播协议（W3C/B3）|

@@ -113,8 +113,8 @@ my-service/
 - **代码生成**: 基于 Protocol Buffers 自动生成 gRPC 代码
 - **服务发现**: 支持多种注册中心（etcd / nacos / consul / polaris / k8s）
 - **配置中心**: 统一 `conf.New(url)` 接入本地文件与远程配置，支持热加载
-- **中间件**: recovery、cors、compress、health、metrics、auth、限流、熔断、超时
-- **可观测性**: 内置 OpenTelemetry 链路追踪与指标收集
+- **中间件**: recovery、cors、compress、health、auth、限流、熔断、超时
+- **可观测性**: 内置 OpenTelemetry 链路追踪与指标收集（HTTP/gRPC 请求指标由 otelhttp/otelgrpc 自动采集）
 - **动态日志**: 运行时通过 HTTP 接口调整日志级别，无需重启
 
 ## Configuration

@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -271,7 +272,17 @@ func (cb *CircuitBreaker) setState(state State, now time.Time) {
 	cb.toNewGeneration(now)
 
 	if cb.onStateChange != nil {
-		cb.onStateChange(cb.name, prev, state)
+		// 此处持有 cb.mutex，用户回调若 panic 会破坏状态机；用 recover 兜底。
+		// 回调契约要求轻量、不得阻塞（阻塞会卡住所有经过熔断器的请求）。
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("circuitbreaker onStateChange panic",
+						"name", cb.name, "from", prev, "to", state, "panic", r)
+				}
+			}()
+			cb.onStateChange(cb.name, prev, state)
+		}()
 	}
 }
 

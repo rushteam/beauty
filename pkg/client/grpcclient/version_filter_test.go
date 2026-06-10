@@ -54,14 +54,15 @@ func TestWithVersionIn_MultiVersion(t *testing.T) {
 	}
 }
 
-func TestWithVersionIn_NoMatch_FallbackAll(t *testing.T) {
-	// 没有匹配的版本时 Filter 应容错返回全部实例
+func TestWithVersionIn_NoMatch_FailClosed(t *testing.T) {
+	// 没有匹配的版本时 Filter 应 fail-closed 返回空，而不是退回全部，
+	// 否则会静默击穿版本/地域隔离（路由到不兼容实例）。调用方据空结果报错。
 	all := makeServices("v1", "v2")
 	filter := NewLabelFilter().WithVersionIn("v99")
 	got := filter.Filter(all)
 
-	if len(got) != len(all) {
-		t.Errorf("no-match fallback: want %d instances, got %d", len(all), len(got))
+	if len(got) != 0 {
+		t.Errorf("no-match should fail-closed: want 0 instances, got %d", len(got))
 	}
 }
 

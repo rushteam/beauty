@@ -8,6 +8,11 @@ import (
 	"github.com/hashicorp/consul/api"
 )
 
+const (
+	watchBaseDelay = 500 * time.Millisecond
+	watchMaxDelay  = 30 * time.Second
+)
+
 // Config consul 连接配置
 type Config struct {
 	Addr       string
@@ -79,6 +84,7 @@ func (cc *ConfigCenter) Watch(ctx context.Context, key string, onChange func(key
 
 	watchCtx, cancel := context.WithCancel(ctx)
 	go func() {
+		delay := watchBaseDelay
 		for {
 			if watchCtx.Err() != nil {
 				return
@@ -91,7 +97,23 @@ func (cc *ConfigCenter) Watch(ctx context.Context, key string, onChange func(key
 				if watchCtx.Err() != nil {
 					return
 				}
-				time.Sleep(time.Second)
+				// 指数退避重连，避免配置中心抖动/重启时高频打爆
+				select {
+				case <-watchCtx.Done():
+					return
+				case <-time.After(delay):
+				}
+				if delay < watchMaxDelay {
+					if delay *= 2; delay > watchMaxDelay {
+						delay = watchMaxDelay
+					}
+				}
+				continue
+			}
+			delay = watchBaseDelay // 成功一次即重置退避
+			// Consul 在服务端重置或索引回退时 LastIndex 可能变小，此时按官方建议重置为 0
+			if m.LastIndex < lastIndex {
+				lastIndex = 0
 				continue
 			}
 			if m.LastIndex > lastIndex {

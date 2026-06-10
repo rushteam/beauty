@@ -3,11 +3,18 @@ package polaris
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/polarismesh/polaris-go/api"
 	"github.com/polarismesh/polaris-go/pkg/config"
 	"github.com/polarismesh/polaris-go/pkg/model"
+)
+
+const (
+	watchBaseDelay = 500 * time.Millisecond
+	watchMaxDelay  = 30 * time.Second
 )
 
 // Config polaris 连接配置
@@ -92,15 +99,45 @@ func (cc *ConfigCenter) Watch(ctx context.Context, key string, onChange func(key
 	watchCtx, cancel := context.WithCancel(ctx)
 
 	go func() {
+		delay := watchBaseDelay
 		for {
 			select {
 			case <-watchCtx.Done():
 				return
 			case ev, ok := <-ch:
-				if !ok {
-					return
+				if ok {
+					delay = watchBaseDelay // 正常收到事件，重置退避
+					onChange(key, ev.NewValue)
+					continue
 				}
-				onChange(key, ev.NewValue)
+				// channel 被关闭（如 SDK 内部连接异常）：退避后重新拉取并注册监听，
+				// 否则热加载会在一次抖动后静默失效。
+				slog.Warn("polaris config listener channel closed, reconnecting",
+					"key", key, "retry_in", delay)
+				select {
+				case <-watchCtx.Done():
+					return
+				case <-time.After(delay):
+				}
+				if delay < watchMaxDelay {
+					if delay *= 2; delay > watchMaxDelay {
+						delay = watchMaxDelay
+					}
+				}
+				newCf, err := cc.api.FetchConfigFile(&api.GetConfigFileRequest{
+					GetConfigFileRequest: &model.GetConfigFileRequest{
+						Namespace: cc.namespace,
+						FileGroup: fileGroup,
+						FileName:  fileName,
+					},
+				})
+				if err != nil {
+					slog.Warn("polaris config reconnect: fetch failed", "key", key, "err", err)
+					continue
+				}
+				ch = newCf.AddChangeListenerWithChannel()
+				// 补推一次当前值，补齐断连期间可能遗漏的变更
+				onChange(key, newCf.GetContent())
 			}
 		}
 	}()

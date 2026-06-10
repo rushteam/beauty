@@ -81,9 +81,9 @@ func (a *SimpleJWTAuthenticator) Authenticate(ctx context.Context, token string)
 		return nil, ErrInvalidToken
 	}
 
-	// 验证签名
+	// 验证签名：用常量时间比较，避免普通字符串比较的时序侧信道（逐字节探测签名）
 	expectedSig := a.sign(parts[0] + "." + parts[1])
-	if parts[2] != expectedSig {
+	if !hmac.Equal([]byte(parts[2]), []byte(expectedSig)) {
 		return nil, ErrInvalidToken
 	}
 

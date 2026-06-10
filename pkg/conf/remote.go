@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -31,9 +32,22 @@ func (r *remoteLoader) load(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := r.validate(val); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	r.current = val
 	r.mu.Unlock()
+	return nil
+}
+
+// validate 用配置格式试解析一遍，确保内容可用。
+func (r *remoteLoader) validate(raw string) error {
+	v := viper.New()
+	v.SetConfigType(r.format)
+	if err := v.ReadConfig(bytes.NewBufferString(raw)); err != nil {
+		return fmt.Errorf("conf: invalid %s content for key %q: %w", r.format, r.key, err)
+	}
 	return nil
 }
 
@@ -52,6 +66,13 @@ func (r *remoteLoader) Unmarshal(dst any) error {
 
 func (r *remoteLoader) Watch(ctx context.Context, fn func()) {
 	_, _ = r.cc.Watch(ctx, r.key, func(_, value string) {
+		// 先校验再提交：坏内容（如配置中心被误推一份非法 YAML）不应覆盖
+		// 当前可用配置，否则后续 Unmarshal 全部失败且无法回滚到 last-good。
+		if err := r.validate(value); err != nil {
+			slog.Warn("conf: ignored invalid remote config update, keeping last-good",
+				"key", r.key, "err", err)
+			return
+		}
 		r.mu.Lock()
 		r.current = value
 		r.mu.Unlock()

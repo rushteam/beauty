@@ -120,3 +120,38 @@ func TestRemoteLoader_HotReload(t *testing.T) {
 		t.Fatalf("want 9999 after reload, got %d", cfg2.Port)
 	}
 }
+
+// 推送一份非法 YAML 时，loader 必须保留上一份可用配置（last-good），
+// 且不触发变更回调，避免坏配置覆盖好配置导致后续 Unmarshal 全部失败。
+func TestRemoteLoader_InvalidUpdateKeepsLastGood(t *testing.T) {
+	cc := newMemCC("port: 9000\n")
+	conf.RegisterFactory("memtestbad", func(_ *url.URL) (conf.ConfigCenter, error) {
+		return cc, nil
+	})
+
+	loader, err := conf.New("memtestbad://host/config.yaml")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	changed := make(chan struct{}, 1)
+	loader.Watch(context.Background(), func() { changed <- struct{}{} })
+
+	// 非法 YAML（未闭合的流式序列），validate 应拒绝
+	cc.push("port: [unclosed\n")
+
+	select {
+	case <-changed:
+		t.Fatal("invalid config must not trigger change callback")
+	case <-time.After(300 * time.Millisecond):
+		// 预期：回调未触发
+	}
+
+	var cfg struct{ Port int }
+	if err := loader.Unmarshal(&cfg); err != nil {
+		t.Fatalf("Unmarshal should still work with last-good: %v", err)
+	}
+	if cfg.Port != 9000 {
+		t.Fatalf("want last-good 9000 after invalid push, got %d", cfg.Port)
+	}
+}

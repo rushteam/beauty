@@ -75,18 +75,19 @@ func (f *ServiceLabelFilter) Filter(services []discover.ServiceInfo) []discover.
 		return services
 	}
 
-	var filtered []discover.ServiceInfo
+	filtered := make([]discover.ServiceInfo, 0, len(services))
 	for _, service := range services {
 		if f.Matches(service.Metadata) {
 			filtered = append(filtered, service)
 		}
 	}
 
-	// 如果没有匹配的实例，返回所有实例（容错机制）
+	// fail-closed：没有匹配的实例时返回空，而不是退回全量。
+	// 退回全量会静默击穿 region/zone/version 等隔离约束——例如把请求路由到
+	// 错误的地域或不兼容的版本，比"无可用实例"更危险。调用方应据空结果报错。
 	if len(filtered) == 0 {
-		slog.Warn("no services match label selector, using all available services",
-			"selector", f.String())
-		return services
+		slog.Warn("no services match label selector; returning empty (fail-closed)",
+			"selector", f.String(), "total", len(services))
 	}
 
 	return filtered

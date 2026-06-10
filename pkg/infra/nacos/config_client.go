@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/config_client"
@@ -94,14 +95,20 @@ func (cc *ConfigCenter) Watch(ctx context.Context, dataID string, onChange func(
 	if err != nil {
 		return nil, fmt.Errorf("nacos config: %w", err)
 	}
+	watchCtx, cancelCtx := context.WithCancel(ctx)
+	var once sync.Once
 	cancel := func() {
-		_ = cc.client.CancelListenConfig(vo.ConfigParam{
-			DataId: dataID,
-			Group:  cc.group,
+		once.Do(func() {
+			cancelCtx()
+			_ = cc.client.CancelListenConfig(vo.ConfigParam{
+				DataId: dataID,
+				Group:  cc.group,
+			})
 		})
 	}
+	// ctx 取消或调用方主动 cancel 时都能唤醒并清理，不会有 goroutine 悬挂。
 	go func() {
-		<-ctx.Done()
+		<-watchCtx.Done()
 		cancel()
 	}()
 	return cancel, nil

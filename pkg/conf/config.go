@@ -6,10 +6,15 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
+
+// initialLoadTimeout 远程配置首次加载的最长等待时间，避免配置中心不可达时
+// New() 永久阻塞导致进程卡在启动阶段（K8s 会在就绪前 evict）。
+const initialLoadTimeout = 10 * time.Second
 
 // Loader 统一配置加载接口。
 // Unmarshal 将当前配置反序列化到 dst（热加载后再次调用可拿到新值）。
@@ -83,7 +88,9 @@ func newRemoteLoaderFromURL(u *url.URL) (Loader, error) {
 		format = inferFormat(key)
 	}
 	rl := newRemoteLoader(cc, key, format)
-	if err := rl.load(context.Background()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), initialLoadTimeout)
+	defer cancel()
+	if err := rl.load(ctx); err != nil {
 		return nil, fmt.Errorf("conf: initial load key %q: %w", key, err)
 	}
 	return rl, nil

@@ -139,71 +139,104 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, notify discove
 	return nil
 }
 
-// watchServices 监听 Service 资源变化
+// watchServices 监听 Service 资源变化。
+// watcher channel 因 k8s 周期性超时（默认 30s）或异常断开时，在外层循环重建，
+// 而不是递归自调——递归会让 goroutine 栈帧随重连次数无限累积。
 func (r *Registry) watchServices(ctx context.Context, serviceName string, notify discover.Notify) {
 	timeout := int64(r.config.WatchTimeout)
 	if timeout <= 0 {
 		timeout = 30
 	}
 
-	watcher, err := r.client.CoreV1().Services(r.config.Namespace).Watch(ctx, metav1.ListOptions{
-		LabelSelector:  r.buildLabelSelector(serviceName),
-		FieldSelector:  r.buildFieldSelector(),
-		TimeoutSeconds: &timeout,
-	})
-	if err != nil {
-		logger.Error("failed to watch services", slog.Any("err", err))
-		return
-	}
-	defer watcher.Stop()
-
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				logger.Info("service watch channel closed, restarting...")
-				time.Sleep(time.Second * 5)
-				r.watchServices(ctx, serviceName, notify)
+		}
+		watcher, err := r.client.CoreV1().Services(r.config.Namespace).Watch(ctx, metav1.ListOptions{
+			LabelSelector:  r.buildLabelSelector(serviceName),
+			FieldSelector:  r.buildFieldSelector(),
+			TimeoutSeconds: &timeout,
+		})
+		if err != nil {
+			logger.Error("failed to watch services", slog.Any("err", err))
+			if !sleepOrDone(ctx, time.Second*5) {
 				return
 			}
+			continue
+		}
 
-			r.handleServiceEvent(ctx, event, notify)
+		r.consumeEvents(ctx, watcher, r.handleServiceEvent, notify)
+
+		if ctx.Err() != nil {
+			return
+		}
+		logger.Info("service watch channel closed, restarting...")
+		if !sleepOrDone(ctx, time.Second*5) {
+			return
 		}
 	}
 }
 
-// watchEndpointSlices 监听 EndpointSlice 资源变化
+// watchEndpointSlices 监听 EndpointSlice 资源变化（重连策略同 watchServices）。
 func (r *Registry) watchEndpointSlices(ctx context.Context, serviceName string, notify discover.Notify) {
 	timeout := int64(r.config.WatchTimeout)
 	if timeout <= 0 {
 		timeout = 30
 	}
 
-	watcher, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).Watch(ctx, metav1.ListOptions{
-		LabelSelector:  r.buildLabelSelector(serviceName),
-		TimeoutSeconds: &timeout,
-	})
-	if err != nil {
-		logger.Error("failed to watch endpoint slices", slog.Any("err", err))
-		return
-	}
-	defer watcher.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		watcher, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).Watch(ctx, metav1.ListOptions{
+			LabelSelector:  r.buildLabelSelector(serviceName),
+			TimeoutSeconds: &timeout,
+		})
+		if err != nil {
+			logger.Error("failed to watch endpoint slices", slog.Any("err", err))
+			if !sleepOrDone(ctx, time.Second*5) {
+				return
+			}
+			continue
+		}
 
+		r.consumeEvents(ctx, watcher, r.handleEndpointSlicesEvent, notify)
+
+		if ctx.Err() != nil {
+			return
+		}
+		logger.Info("endpoint slices watch channel closed, restarting...")
+		if !sleepOrDone(ctx, time.Second*5) {
+			return
+		}
+	}
+}
+
+// consumeEvents 消费一个 watcher 的事件，channel 关闭或 ctx 取消时返回，
+// 并确保 watcher 被释放。
+func (r *Registry) consumeEvents(ctx context.Context, watcher watch.Interface,
+	handle func(context.Context, watch.Event, discover.Notify), notify discover.Notify) {
+	defer watcher.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				logger.Info("endpoint slices watch channel closed, restarting...")
-				time.Sleep(time.Second * 5)
-				r.watchEndpointSlices(ctx, serviceName, notify)
 				return
 			}
-			r.handleEndpointSlicesEvent(ctx, event, notify)
+			handle(ctx, event, notify)
 		}
+	}
+}
+
+// sleepOrDone 等待 d 或 ctx 取消，返回 true 表示正常等待结束、可继续。
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
 

@@ -114,6 +114,29 @@ func (g *gzipResponseWriter) close() {
 	}
 }
 
+// Flush 支持流式响应（SSE / chunked）。没有它，handler 调用 Flush 不会真正下发数据，
+// 全缓冲到 minSize 或 handler 返回才发——流式场景会被破坏。
+// 首次 Flush 时必须定下"压缩与否"，因为流式响应无法再等 minSize 累积。
+func (g *gzipResponseWriter) Flush() {
+	if !g.done {
+		ct := g.ResponseWriter.Header().Get("Content-Type")
+		g.flush(isCompressible(ct))
+	}
+	if g.compressed {
+		// 把 gzip 内部缓冲推到底层，否则压缩数据可能滞留
+		_ = g.gz.Flush()
+	}
+	if f, ok := g.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap 暴露底层 ResponseWriter，便于 http.ResponseController 及 Hijacker
+// 等可选接口透传（如 WebSocket 升级）。
+func (g *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return g.ResponseWriter
+}
+
 func Middleware(minSize int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

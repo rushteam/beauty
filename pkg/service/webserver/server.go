@@ -104,10 +104,13 @@ func New(addr string, mux http.Handler, opts ...Option) *Server {
 		middlewares:     make([]func(http.Handler) http.Handler, 0),
 		ready:           make(chan struct{}),
 		shutdownTimeout: 30 * time.Second,
-		readTimeout:     30 * time.Second,
-		writeTimeout:    30 * time.Second,
-		idleTimeout:     90 * time.Second,
-		Server:          &http.Server{},
+		// Read/Write/Idle 默认不设超时（0 = 不限）：长连接/SSE/流式响应开箱可用，
+		// 生产环境按需用 WithReadTimeout / WithWriteTimeout / WithIdleTimeout 设置。
+		// 注意：未设读超时时建议自行防范 slow-loris（如在反代层限制）。
+		readTimeout:  0,
+		writeTimeout: 0,
+		idleTimeout:  0,
+		Server:       &http.Server{},
 	}
 
 	// 应用选项

@@ -55,12 +55,15 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 		g.wroteHeader = true
 	}
 
-	if g.done {
-		return g.ResponseWriter.Write(b)
-	}
-
+	// 已进入压缩流：后续所有写入都必须经过 gz（流式响应会在 flush 后继续写入，
+	// compressed 必须优先于 done 判断，否则会绕过 gzip 写出原始字节）。
 	if g.compressed {
 		return g.gz.Write(b)
+	}
+
+	// 已决定不压缩：直接透传
+	if g.done {
+		return g.ResponseWriter.Write(b)
 	}
 
 	g.buf = append(g.buf, b...)

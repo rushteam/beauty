@@ -307,3 +307,65 @@ func (w *wrappedDiscoverService) Name() string                  { return w.name 
 func (w *wrappedDiscoverService) Kind() string                  { return "test" }
 func (w *wrappedDiscoverService) Addr() string                  { return "127.0.0.1:0" }
 func (w *wrappedDiscoverService) Metadata() map[string]string   { return nil }
+
+// orderingService 实现 discover.Service，并记录 Start 返回（server 停止）的时间。
+type orderingService struct {
+	name      string
+	stoppedAt atomic.Int64
+}
+
+func (s *orderingService) Start(ctx context.Context) error {
+	<-ctx.Done()
+	s.stoppedAt.Store(time.Now().UnixNano())
+	return nil
+}
+func (s *orderingService) String() string              { return s.name }
+func (s *orderingService) ID() string                  { return s.name }
+func (s *orderingService) Name() string                { return s.name }
+func (s *orderingService) Kind() string                { return "test" }
+func (s *orderingService) Addr() string                { return "127.0.0.1:0" }
+func (s *orderingService) Metadata() map[string]string { return nil }
+
+// orderingRegistry 记录注销（返回的 CancelFunc）被调用的时间。
+type orderingRegistry struct {
+	deregAt atomic.Int64
+}
+
+func (r *orderingRegistry) Register(_ context.Context, _ discover.Service) (context.CancelFunc, error) {
+	return func() { r.deregAt.Store(time.Now().UnixNano()) }, nil
+}
+
+// 验证优雅退出顺序：先注销 → 排空(drainDelay) → 再停 server。
+func TestGracefulShutdown_DeregisterBeforeStop(t *testing.T) {
+	svc := &orderingService{name: "svc"}
+	reg := &orderingRegistry{}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	app := New(WithService(svc), WithRegistry(reg), WithShutdownDrainDelay(50*time.Millisecond))
+	done := make(chan struct{})
+	go func() { _ = app.Start(ctx); close(done) }()
+
+	waitReady(t, app)
+	cancel() // 触发 shutdown
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("app.Start did not return")
+	}
+
+	dereg := reg.deregAt.Load()
+	stop := svc.stoppedAt.Load()
+	if dereg == 0 {
+		t.Fatal("deregister was never called")
+	}
+	if stop == 0 {
+		t.Fatal("service never stopped")
+	}
+	if dereg >= stop {
+		t.Fatalf("deregister must happen before server stop: dereg=%d stop=%d", dereg, stop)
+	}
+	if gap := time.Duration(stop - dereg); gap < 40*time.Millisecond {
+		t.Fatalf("drain delay not honored: gap=%v (want >= ~50ms)", gap)
+	}
+}

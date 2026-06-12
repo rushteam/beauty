@@ -32,8 +32,9 @@ type Node struct {
 
 // DAG 是一组按依赖关系执行的节点。零值不可用，请用 New 构造。
 type DAG struct {
-	nodes    []Node
-	strategy Strategy
+	nodes       []Node
+	strategy    Strategy
+	maxParallel int // 单层内最大并发数，<=0 表示不限制
 }
 
 // Option 配置 DAG。
@@ -42,6 +43,12 @@ type Option func(*DAG)
 // WithStrategy 设置错误处理策略，默认 FailFast。
 func WithStrategy(s Strategy) Option {
 	return func(d *DAG) { d.strategy = s }
+}
+
+// WithMaxParallel 限制同一层内并发执行的节点数（信号量），避免大扇出层
+// 一次性起成千上万个 goroutine。n<=0（默认）表示不限制。
+func WithMaxParallel(n int) Option {
+	return func(d *DAG) { d.maxParallel = n }
 }
 
 // New 创建一个 DAG。
@@ -81,7 +88,7 @@ func (d *DAG) Run(ctx context.Context) error {
 			return errors.Join(append(collected, fmt.Errorf("dag canceled: %w", err))...)
 		}
 
-		layerErrs := runLayer(ctx, layer)
+		layerErrs := runLayer(ctx, layer, d.maxParallel)
 
 		if len(layerErrs) > 0 {
 			if d.strategy == FailFast {
@@ -95,7 +102,8 @@ func (d *DAG) Run(ctx context.Context) error {
 }
 
 // runLayer 并行执行一层节点，返回该层出现的所有错误（已包裹节点名）。
-func runLayer(ctx context.Context, layer []Node) []error {
+// maxParallel>0 时用信号量限制同时运行的节点数。
+func runLayer(ctx context.Context, layer []Node, maxParallel int) []error {
 	if len(layer) == 1 {
 		// 单节点无需起 goroutine
 		if err := execNode(ctx, layer[0]); err != nil {
@@ -104,12 +112,23 @@ func runLayer(ctx context.Context, layer []Node) []error {
 		return nil
 	}
 
+	var sem chan struct{}
+	if maxParallel > 0 && maxParallel < len(layer) {
+		sem = make(chan struct{}, maxParallel)
+	}
+
 	errs := make([]error, len(layer))
 	var wg sync.WaitGroup
 	for i := range layer {
+		if sem != nil {
+			sem <- struct{}{} // 达到上限则阻塞，待有空位再调度下一个节点
+		}
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			if sem != nil {
+				defer func() { <-sem }()
+			}
 			errs[idx] = execNode(ctx, layer[idx])
 		}(i)
 	}
@@ -124,27 +143,32 @@ func runLayer(ctx context.Context, layer []Node) []error {
 	return out
 }
 
-func execNode(ctx context.Context, n Node) error {
+// execNode 执行单个节点，并捕获其 panic 转为 error，避免一个节点 panic
+// 拖垮整个进程（节点 Run 是用户代码，且在 goroutine 中运行）。
+func execNode(ctx context.Context, n Node) (err error) {
 	if n.Run == nil {
 		return nil
 	}
-	if err := n.Run(ctx); err != nil {
-		return fmt.Errorf("dag node %q: %w", n.Name, err)
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("dag node %q panicked: %v", n.Name, r)
+		}
+	}()
+	if e := n.Run(ctx); e != nil {
+		return fmt.Errorf("dag node %q: %w", n.Name, e)
 	}
 	return nil
 }
 
 // topoSort 用 Kahn 算法将节点按依赖分层；同一层的节点之间无依赖、可并行。
 // 同时校验：节点名不重复、依赖存在、无环。
+// 队列式实现，复杂度 O(V+E)；层内保持输入顺序，结果确定可复现。
 func topoSort(nodes []Node) ([][]Node, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
 
 	index := make(map[string]int, len(nodes)) // name -> nodes 下标
-	inDegree := make(map[string]int, len(nodes))
-	children := make(map[string][]string, len(nodes)) // dep -> 依赖它的节点
-
 	for i := range nodes {
 		name := nodes[i].Name
 		if name == "" {
@@ -154,40 +178,50 @@ func topoSort(nodes []Node) ([][]Node, error) {
 			return nil, fmt.Errorf("dag: duplicate node name %q", name)
 		}
 		index[name] = i
-		inDegree[name] = 0
 	}
 
-	for _, n := range nodes {
+	inDegree := make([]int, len(nodes))
+	children := make([][]int, len(nodes)) // dep 下标 -> 依赖它的节点下标
+	for i, n := range nodes {
 		for _, dep := range n.DependsOn {
-			if _, ok := index[dep]; !ok {
+			di, ok := index[dep]
+			if !ok {
 				return nil, fmt.Errorf("dag: node %q depends on unknown node %q", n.Name, dep)
 			}
-			children[dep] = append(children[dep], n.Name)
-			inDegree[n.Name]++
+			children[di] = append(children[di], i)
+			inDegree[i]++
+		}
+	}
+
+	// 初始层：入度为 0 的节点，按输入顺序
+	var current []int
+	for i := range nodes {
+		if inDegree[i] == 0 {
+			current = append(current, i)
 		}
 	}
 
 	var layers [][]Node
 	visited := 0
-
-	for visited < len(nodes) {
-		var layer []Node
-		for name, deg := range inDegree {
-			if deg == 0 {
-				layer = append(layer, nodes[index[name]])
-			}
-		}
-		if len(layer) == 0 {
-			return nil, fmt.Errorf("dag: cycle detected")
-		}
-		for _, n := range layer {
-			delete(inDegree, n.Name)
-			for _, child := range children[n.Name] {
-				inDegree[child]--
+	for len(current) > 0 {
+		layer := make([]Node, len(current))
+		var next []int
+		for k, idx := range current {
+			layer[k] = nodes[idx]
+			for _, ch := range children[idx] {
+				inDegree[ch]--
+				if inDegree[ch] == 0 {
+					next = append(next, ch)
+				}
 			}
 		}
 		layers = append(layers, layer)
-		visited += len(layer)
+		visited += len(current)
+		current = next
+	}
+
+	if visited < len(nodes) {
+		return nil, fmt.Errorf("dag: cycle detected")
 	}
 
 	return layers, nil

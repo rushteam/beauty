@@ -3,6 +3,7 @@ package dag
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -189,6 +190,57 @@ func TestRun_NilRunIsNoop(t *testing.T) {
 func TestRun_Empty(t *testing.T) {
 	if err := New().Run(context.Background()); err != nil {
 		t.Fatalf("empty DAG should succeed, got %v", err)
+	}
+}
+
+// 节点 panic 必须被捕获转成 error，不能崩进程；同层其它节点不受影响。
+func TestRun_NodePanicRecovered(t *testing.T) {
+	var bRan atomic.Bool
+	d := New(WithStrategy(ContinueOnError)).Add(
+		Node{Name: "boom", Run: func(_ context.Context) error { panic("kaboom") }},
+		Node{Name: "ok", Run: func(_ context.Context) error { bRan.Store(true); return nil }},
+	)
+	err := d.Run(context.Background())
+	if err == nil {
+		t.Fatal("want error from panicking node")
+	}
+	if !strings.Contains(err.Error(), "panicked") || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("error should mention the panicking node: %v", err)
+	}
+	if !bRan.Load() {
+		t.Error("sibling node should still run despite another node's panic")
+	}
+}
+
+// WithMaxParallel 应把同层并发限制在上限内。
+func TestRun_MaxParallel(t *testing.T) {
+	const limit = 3
+	var concurrent atomic.Int32
+	var maxSeen atomic.Int32
+	work := func(_ context.Context) error {
+		n := concurrent.Add(1)
+		for {
+			old := maxSeen.Load()
+			if n <= old || maxSeen.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+		concurrent.Add(-1)
+		return nil
+	}
+	d := New(WithMaxParallel(limit))
+	for i := range 12 {
+		d.Add(Node{Name: string(rune('a' + i)), Run: work})
+	}
+	if err := d.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := maxSeen.Load(); got > limit {
+		t.Fatalf("max concurrency %d exceeded limit %d", got, limit)
+	}
+	if maxSeen.Load() < 2 {
+		t.Fatalf("expected some parallelism, max=%d", maxSeen.Load())
 	}
 }
 

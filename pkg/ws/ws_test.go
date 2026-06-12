@@ -132,6 +132,41 @@ func TestHandler_Subprotocol(t *testing.T) {
 	}
 }
 
+// 开启心跳后，健康连接应保持正常 echo（ping 不影响数据帧）。
+func TestHandler_PingKeepsAlive(t *testing.T) {
+	url := serve(t, Handler(func(r *http.Request, c *Conn) error {
+		ctx := r.Context()
+		for {
+			typ, data, err := c.Read(ctx)
+			if err != nil {
+				return err
+			}
+			if err := c.Write(ctx, typ, data); err != nil {
+				return err
+			}
+		}
+	}, WithPingInterval(30*time.Millisecond)))
+
+	c := dial(t, url, nil)
+	defer c.CloseNow()
+	ctx := context.Background()
+
+	// 持续读使 pong 得到处理；跨多个 ping 周期仍能正常往返
+	for i := range 3 {
+		if err := c.Write(ctx, websocket.MessageText, []byte("hi")); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
+		if string(data) != "hi" {
+			t.Fatalf("echo %d mismatch: %q", i, string(data))
+		}
+		time.Sleep(40 * time.Millisecond) // 跨过一个 ping 周期
+	}
+}
+
 // fn 返回 nil 时应正常关闭（客户端收到 StatusNormalClosure）。
 func TestHandler_NormalClose(t *testing.T) {
 	url := serve(t, Handler(func(r *http.Request, c *Conn) error {

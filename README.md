@@ -114,6 +114,8 @@ my-service/
 - **服务发现**: 支持多种注册中心（etcd / nacos / consul / polaris / k8s）
 - **配置中心**: 统一 `conf.New(url)` 接入本地文件与远程配置，支持热加载
 - **中间件**: recovery、cors、compress、health、auth、限流、熔断、超时
+- **实时推送**: 内置 SSE（`pkg/sse`）与 WebSocket（`pkg/ws`）封装，开箱即用
+- **流程编排**: 轻量 DAG 执行器（`pkg/dag`），拓扑分层 + 层内并行
 - **可观测性**: 内置 OpenTelemetry 链路追踪与指标收集（HTTP/gRPC 请求指标由 otelhttp/otelgrpc 自动采集）
 - **动态日志**: 运行时通过 HTTP 接口调整日志级别，无需重启
 
@@ -513,6 +515,9 @@ beauty.WithGrpcServer(":9090", register,
 | [docs/middleware-builtin.md](docs/middleware-builtin.md) | recovery / cors / compress / health |
 | [docs/middleware-summary.md](docs/middleware-summary.md) | auth / ratelimit / circuitbreaker / timeout 组合使用 |
 | [docs/error-codes.md](docs/error-codes.md) | 结构化错误码：业务 Code / HTTP / gRPC 三层映射、Details、渐进式迁移 |
+| [docs/sse.md](docs/sse.md) | Server-Sent Events 推送封装：自动设头 / 写超时 / flush / 断连处理 |
+| [docs/websocket.md](docs/websocket.md) | WebSocket 封装（coder/websocket）：升级 / JSON / 子协议 / 心跳保活 |
+| [docs/dag.md](docs/dag.md) | DAG 执行器：拓扑分层、层内并行、panic 安全、错误策略 |
 | [docs/metadata-propagation.md](docs/metadata-propagation.md) | 服务间 metadata 透传 + OTel trace 传播协议（W3C/B3）|
 | [docs/grpc-service-discovery.md](docs/grpc-service-discovery.md) | 服务注册与发现 |
 | [docs/grpc-client-discovery.md](docs/grpc-client-discovery.md) | gRPC 客户端发现 |

@@ -9,6 +9,7 @@ package ws
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -94,6 +95,7 @@ type config struct {
 	insecureSkipVerify bool
 	readLimit          int64
 	readLimitSet       bool
+	pingInterval       time.Duration
 }
 
 // Option 配置 Handler 的握手行为。
@@ -119,6 +121,16 @@ func WithInsecureSkipVerify() Option {
 // 不设置时使用库默认（32KiB）。
 func WithReadLimit(n int64) Option {
 	return func(c *config) { c.readLimit = n; c.readLimitSet = true }
+}
+
+// WithPingInterval 启用后台心跳：每隔 d 向对端发送一次 ping，
+// ping 失败（对端无响应或连接已坏）即关闭连接，便于检测半开 TCP。
+// d<=0（默认）表示不启用。
+//
+// 注意：ping 的 pong 由 Read 流程处理，因此心跳对“持续 Read 的连接”最有效；
+// 对只写不读的连接，建议在 fn 内调用 c.Raw().CloseRead(ctx) 以在后台处理控制帧。
+func WithPingInterval(d time.Duration) Option {
+	return func(c *config) { c.pingInterval = d }
 }
 
 // Handler 把请求升级为 WebSocket 并执行 fn。
@@ -156,11 +168,41 @@ func Handler(fn func(r *http.Request, c *Conn) error, opts ...Option) http.Handl
 		}
 		defer raw.CloseNow() // 兜底：确保连接最终被关闭（已正常 Close 时为 no-op）
 
+		// 后台心跳：fn 返回后通过 cancel 停止
+		if cfg.pingInterval > 0 {
+			pctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			go pingLoop(pctx, raw, cfg.pingInterval)
+		}
+
 		c := &Conn{raw: raw}
 		if err := fn(r, c); err != nil {
 			_ = raw.Close(StatusInternalError, "handler error")
 			return
 		}
 		_ = raw.Close(StatusNormalClosure, "")
+	}
+}
+
+// pingLoop 周期性 ping，失败即关闭连接（会让 fn 的 Read/Write 出错并返回）。
+func pingLoop(ctx context.Context, c *websocket.Conn, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pctx, cancel := context.WithTimeout(ctx, interval)
+			err := c.Ping(pctx)
+			cancel()
+			if err != nil {
+				if ctx.Err() != nil {
+					return // fn 已结束，正常停止
+				}
+				_ = c.Close(StatusGoingAway, "ping timeout")
+				return
+			}
+		}
 	}
 }

@@ -3,6 +3,7 @@ module github.com/rushteam/beauty
 go 1.26
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/hashicorp/consul/api v1.34.3
 	github.com/polarismesh/polaris-go v1.7.0
 	github.com/spf13/viper v1.20.1

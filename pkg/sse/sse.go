@@ -4,12 +4,21 @@
 package sse
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 )
+
+// DefaultWriteTimeout 是单次事件写入的默认截止时间。慢/死客户端导致单次
+// 写入超过该时长即返回错误、结束流，避免 goroutine 被无限钉死。
+// 它是“每次写入”而非“整条连接”的超时，每次 Send 都会重置，因此不会掐断长连接。
+const DefaultWriteTimeout = 30 * time.Second
+
+// 复用事件格式化缓冲，降低高频推送的分配。
+var bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 // Event 是一条 Server-Sent Event。
 type Event struct {
@@ -31,9 +40,22 @@ type Sink interface {
 	Comment(text string) error
 }
 
+// Option 配置 Handler。
+type Option func(*config)
+
+type config struct {
+	writeTimeout time.Duration
+}
+
+// WithWriteTimeout 设置单次事件写入的截止时间，默认 DefaultWriteTimeout（30s）。
+// 传 0 表示不限制（清除写超时；此时慢客户端可能长时间占用 goroutine，慎用）。
+func WithWriteTimeout(d time.Duration) Option {
+	return func(c *config) { c.writeTimeout = d }
+}
+
 // Handler 把 fn 包装成一个 SSE 的 http.HandlerFunc：
 //   - 设置 Content-Type: text/event-stream 等响应头
-//   - 解除本连接写超时（穿透 otelhttp/compress 等包装链；不支持时忽略）
+//   - 每次写入设置滚动写超时（默认 30s，见 WithWriteTimeout），慢/死客户端不会钉死 goroutine
 //   - 每条事件后自动 flush
 //   - fn 返回或客户端断开（r.Context() 取消）时结束
 //
@@ -47,7 +69,11 @@ type Sink interface {
 //	    ctx := r.Context()
 //	    ...
 //	})
-func Handler(fn func(r *http.Request, sink Sink) error) http.HandlerFunc {
+func Handler(fn func(r *http.Request, sink Sink) error, opts ...Option) http.HandlerFunc {
+	cfg := config{writeTimeout: DefaultWriteTimeout}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Type", "text/event-stream")
@@ -56,13 +82,10 @@ func Handler(fn func(r *http.Request, sink Sink) error) http.HandlerFunc {
 		h.Set("X-Accel-Buffering", "no") // 提示 nginx 等反代不要缓冲
 
 		rc := http.NewResponseController(w)
-		// 解除写超时：未设时无影响；设了 WriteTimeout 时避免长连接被掐断。
-		// 不支持该能力的 ResponseWriter 会返回错误，忽略即可。
-		_ = rc.SetWriteDeadline(time.Time{})
-
-		s := &sink{w: w, rc: rc}
+		s := &sink{w: w, rc: rc, writeTimeout: cfg.writeTimeout}
 
 		// 先发一个空 flush，确保响应头尽快下发、连接进入流式状态
+		s.setDeadline()
 		w.WriteHeader(http.StatusOK)
 		_ = rc.Flush()
 
@@ -74,38 +97,53 @@ func Handler(fn func(r *http.Request, sink Sink) error) http.HandlerFunc {
 }
 
 type sink struct {
-	mu sync.Mutex
-	w  http.ResponseWriter
-	rc *http.ResponseController
+	mu           sync.Mutex
+	w            http.ResponseWriter
+	rc           *http.ResponseController
+	writeTimeout time.Duration
 }
 
 func (s *sink) Send(e Event) error {
-	var b strings.Builder
+	b := bufPool.Get().(*bytes.Buffer)
+	b.Reset()
+	defer bufPool.Put(b)
+
 	if e.ID != "" {
-		fmt.Fprintf(&b, "id: %s\n", sanitize(e.ID))
+		fmt.Fprintf(b, "id: %s\n", sanitize(e.ID))
 	}
 	if e.Event != "" {
-		fmt.Fprintf(&b, "event: %s\n", sanitize(e.Event))
+		fmt.Fprintf(b, "event: %s\n", sanitize(e.Event))
 	}
 	if e.Retry > 0 {
-		fmt.Fprintf(&b, "retry: %d\n", e.Retry)
+		fmt.Fprintf(b, "retry: %d\n", e.Retry)
 	}
 	// data 可多行：每行单独一个 data: 字段
 	for line := range strings.SplitSeq(e.Data, "\n") {
-		fmt.Fprintf(&b, "data: %s\n", strings.TrimSuffix(line, "\r"))
+		fmt.Fprintf(b, "data: %s\n", strings.TrimSuffix(line, "\r"))
 	}
 	b.WriteByte('\n') // 事件以空行结束
-	return s.write(b.String())
+	return s.write(b.Bytes())
 }
 
 func (s *sink) Comment(text string) error {
-	return s.write(": " + sanitize(text) + "\n\n")
+	return s.write([]byte(": " + sanitize(text) + "\n\n"))
 }
 
-func (s *sink) write(payload string) error {
+// setDeadline 为下一次写入设置滚动截止时间（writeTimeout>0 时）。
+// 调用方持有 s.mu（或在初始 flush 的串行阶段）。
+func (s *sink) setDeadline() {
+	if s.writeTimeout > 0 {
+		_ = s.rc.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+	} else {
+		_ = s.rc.SetWriteDeadline(time.Time{}) // 显式清除，避免被外层 WriteTimeout 掐断
+	}
+}
+
+func (s *sink) write(payload []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.w.Write([]byte(payload)); err != nil {
+	s.setDeadline()
+	if _, err := s.w.Write(payload); err != nil {
 		return err
 	}
 	return s.rc.Flush()

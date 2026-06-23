@@ -369,3 +369,57 @@ func TestGracefulShutdown_DeregisterBeforeStop(t *testing.T) {
 		t.Fatalf("drain delay not honored: gap=%v (want >= ~50ms)", gap)
 	}
 }
+
+// fakeLoader 实现 conf.Loader，用于测试 WithConfig。
+type fakeLoader struct {
+	mu      sync.Mutex
+	content string
+	notify  func()
+}
+
+func (f *fakeLoader) Unmarshal(dst any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cfg := dst.(*struct{ Port int })
+	if f.content == "bad" {
+		return fmt.Errorf("bad config")
+	}
+	if f.content == "9090" {
+		cfg.Port = 9090
+	} else {
+		cfg.Port = 8080
+	}
+	return nil
+}
+
+func (f *fakeLoader) Watch(_ context.Context, fn func()) { f.notify = fn }
+
+func (f *fakeLoader) push(content string) {
+	f.mu.Lock()
+	f.content = content
+	f.mu.Unlock()
+	if f.notify != nil {
+		f.notify()
+	}
+}
+
+func TestWithConfig_InitialLoadAndReload(t *testing.T) {
+	loader := &fakeLoader{content: "8080"}
+	var got atomic.Int64
+
+	app := New(WithConfig(loader, func(c *struct{ Port int }) {
+		got.Store(int64(c.Port))
+	}))
+	defer app.runHooks(EventAfterRun) // 触发组件 cancel 清理
+
+	// 初始加载应已回调
+	if got.Load() != 8080 {
+		t.Fatalf("initial load: want 8080, got %d", got.Load())
+	}
+
+	// 变更后应重新加载
+	loader.push("9090")
+	if got.Load() != 9090 {
+		t.Fatalf("after reload: want 9090, got %d", got.Load())
+	}
+}

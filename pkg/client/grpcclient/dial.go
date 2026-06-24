@@ -147,8 +147,31 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (*grpc.
 		return dialDirect(ctx, target, cfg)
 	}
 
+	// xDS 模式：target 形如 xds:///service，由 xDS 控制平面下发端点与负载均衡策略。
+	// 需先空导入 github.com/rushteam/beauty/pkg/client/grpcclient/xds 以注册 xds:// resolver，
+	// 并通过 GRPC_XDS_BOOTSTRAP / GRPC_XDS_BOOTSTRAP_CONFIG 提供引导配置。
+	if isXDSTarget(target) {
+		return dialXDS(target, cfg)
+	}
+
 	// 服务发现模式
 	return dialWithDiscovery(ctx, target, cfg)
+}
+
+// isXDSTarget 判断 target 是否为 xDS 方案（xds:///service）。
+func isXDSTarget(target string) bool {
+	return strings.HasPrefix(target, "xds:")
+}
+
+// dialXDS xDS 模式：target 原样交给 gRPC 内置的 xds resolver 处理。
+// 端点发现与负载均衡均由控制平面下发，故本地不设 loadBalancingPolicy，
+// 也不应用 WithRegistry / 标签过滤（这些仅服务发现模式有效）。
+// 传输凭证需由调用方提供：明文用 grpcclient.WithInsecure()，
+// mTLS 用 grpcclient/xds.WithCredentials()。
+func dialXDS(target string, cfg *dialConfig) (*grpc.ClientConn, error) {
+	opts := standardDialOpts()
+	opts = append(opts, cfg.grpcOpts...)
+	return grpc.NewClient(target, opts...)
 }
 
 // Dial 不需要 context 的简化版本

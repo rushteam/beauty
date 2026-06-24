@@ -109,22 +109,40 @@ go run main.go
 # 指定模板类型
 ./beauty new my-service --template grpc-service
 
+# 指定模块路径（真实仓库导入路径）
+./beauty new my-service --module github.com/org/my-service
+
 # 指定项目路径
 ./beauty new my-service --path /path/to/project
 
-# 包含Docker和K8s配置
-./beauty new my-service --with-docker --with-k8s
+# 包含 Docker / K8s / CI 配置
+./beauty new my-service --with-docker --with-k8s --with-ci
+
+# 预览将生成的文件（不写盘）
+./beauty new my-service --dry-run
 
 # 详细输出
 ./beauty new my-service --verbose
 ```
 
+#### 常用选项
+
+| 选项 | 说明 |
+|------|------|
+| `-t, --template` | 模板类型：`unified`(默认) / `web-service` / `grpc-service` / `cron-service` |
+| `-m, --module` | Go 模块路径（默认用项目名） |
+| `--web` / `--grpc` / `--cron` | 在 `unified` 下选择启用的服务类型 |
+| `--with-docker` | 生成 Dockerfile + docker-compose（应用 + etcd + jaeger） |
+| `--with-k8s` | 生成 `deploy/k8s/` 部署清单 |
+| `--with-ci` | 生成 GitHub Actions + golangci-lint 配置 |
+| `--dry-run` | 仅预览将生成的文件 |
+
 #### 支持的模板类型
 
-- **web-service** (默认) - HTTP微服务
+- **unified** (默认) - 按需组合 HTTP/gRPC/Cron（配合 `--web`/`--grpc`/`--cron`）
+- **web-service** - HTTP微服务
 - **grpc-service** - gRPC微服务
 - **cron-service** - 定时任务服务
-- **full-stack** - 完整微服务栈
 
 #### 功能特性
 
@@ -194,25 +212,34 @@ go run main.go
 ./beauty api ./api --out ./generated --generate
 ```
 
-### 3. 开发模式 (`dev`)
+### 3. 增量生成 (`add`)
 
-在开发模式下运行服务，支持热重载和调试。
+向现有项目增量添加代码骨架（不覆盖已有同名文件，并打印注册方式）。
 
 ```bash
-# 基本用法
+# 生成 HTTP handler 骨架
+./beauty add handler Order
+
+# 生成定时任务骨架
+./beauty add job Cleanup
+```
+
+### 4. 开发模式 (`dev`)
+
+在开发模式下运行服务，`--watch` 基于 fsnotify 监听 `.go` 变化自动重启。
+
+```bash
+# 基本用法（go run .）
 ./beauty dev
 
 # 指定配置文件
 ./beauty dev --config config/dev/app.yaml
 
-# 监听文件变化
+# 热重载：文件变更自动重启
 ./beauty dev --watch
-
-# 调试模式
-./beauty dev --debug
 ```
 
-### 4. 构建项目 (`build`)
+### 5. 构建项目 (`build`)
 
 构建项目为可执行文件。
 
@@ -646,6 +673,28 @@ cat config/dev/app.yaml
 - [服务发现配置](../../docs/directory-upgrade.md)
 
 ## 📝 更新日志
+
+### v0.1.0 (2026-06-24)
+
+#### 🐛 修复（生成项目此前开箱不可编译/运行）
+- **go.mod 模板**：升级 `go 1.26` 与当前 beauty 版本，生成后自动 `go get @latest` + `go mod tidy`
+- **中间件 API 对齐**：改用当前框架接口（HTTP `webserver.WithMiddleware`、gRPC `grpcserver` 一元拦截器），修复 `webserver.WithAuth`/`Options` 等已失效调用
+- **注册器字段**：修正 `nacos.Config.Addr`、`discover.NewNoop()`
+- **cron 模板**：移除坏死且无法编译的 HTTP 路由/中间件包（cron main 本就不使用）
+- **unified 模板**：按启用的服务类型显式裁剪文件、跳过被 `{{if}}` 关闭的空文件——所有服务组合均可编译
+- **gRPC 生成**：检测到 `buf` 时自动生成 protobuf 代码；修正 `buf.gen.yaml` 与脚本不一致
+
+#### ✨ 新功能
+- **`--module`** - 指定 Go 模块路径（如 `github.com/org/svc`），不再以项目名为模块名
+- **`--dry-run`** - 仅预览将生成的文件，不写盘
+- **`--with-docker`** - 多阶段 `Dockerfile` + `.dockerignore` + `docker-compose.yml`（应用 + etcd + jaeger）
+- **`--with-k8s`** - `deploy/k8s/` 部署清单（Deployment/Service）
+- **`--with-ci`** - GitHub Actions 工作流 + `.golangci.yml`
+- **生成即格式化** - 所有 `.go` 文件经 `go/format` 规范化
+- **`beauty add`** - 增量生成 `handler` / `job` 骨架
+- **`dev --watch`** - 基于 fsnotify 的真实热重载（替代占位实现）
+- **注册中心扩展** - 在 etcd/nacos 之外补齐 consul / polaris / k8s
+- **统一 Makefile** - web/grpc/cron 模板补齐一致的 `make build/run/test/tidy[/generate]`
 
 ### v0.0.3 (2024-12-19)
 

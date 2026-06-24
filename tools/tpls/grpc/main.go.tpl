@@ -64,7 +64,7 @@ func main() {
 			func(s *grpcpkg.Server) {
 				grpc.RegisterServices(s, cfg)
 			},
-			append([]grpcserver.Options{
+			append([]grpcserver.Option{
 				grpcserver.WithServiceName(cfg.App),
 			}, middlewares.GetGrpcServerOptions()...)...,
 		)),

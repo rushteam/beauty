@@ -6,6 +6,7 @@ import (
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"google.golang.org/grpc"
 	"{{.ImportPath}}internal/config"
 )
 
@@ -20,17 +21,20 @@ func New(cfg *config.Config) *Middleware {
 }
 
 // GetGrpcServerOptions 获取gRPC服务器选项
-func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
-	var options []grpcserver.Options
+//
+// 各中间件以 grpc.UnaryServerInterceptor 的形式提供，统一通过
+// grpcserver.WithGrpcServerUnaryInterceptor 注入（注入顺序即执行顺序）。
+func (m *Middleware) GetGrpcServerOptions() []grpcserver.Option {
+	var interceptors []grpc.UnaryServerInterceptor
 
 	// 认证拦截器
 	if m.cfg.IsAuthEnabled() {
 		authMiddleware := auth.NewAuthMiddleware(auth.Config{
 			TokenExtractor: auth.NewHeaderTokenExtractor("Authorization", "Bearer "),
 			Authenticator:  m.createAuthenticator(),
-			SkipPaths:     m.cfg.Middleware.Auth.SkipPaths,
+			SkipPaths:      m.cfg.Middleware.Auth.SkipPaths,
 		})
-		options = append(options, grpcserver.WithAuth(authMiddleware))
+		interceptors = append(interceptors, auth.UnaryServerInterceptor(authMiddleware))
 	}
 
 	// 限流拦截器
@@ -40,7 +44,7 @@ func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
 			Burst:        m.cfg.Middleware.RateLimit.Burst,
 			KeyExtractor: ratelimit.NewIPKeyExtractor(),
 		})
-		options = append(options, grpcserver.WithRateLimit(rateLimitMiddleware))
+		interceptors = append(interceptors, ratelimit.UnaryServerInterceptor(rateLimitMiddleware))
 	}
 
 	// 超时控制拦截器
@@ -49,7 +53,7 @@ func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
 			Timeout:       m.cfg.Middleware.Timeout.Timeout,
 			SlowThreshold: m.cfg.Middleware.Timeout.SlowThreshold,
 		})
-		options = append(options, grpcserver.WithTimeout(timeoutController))
+		interceptors = append(interceptors, timeout.UnaryServerInterceptor(timeoutController))
 	}
 
 	// 熔断器拦截器
@@ -59,10 +63,13 @@ func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
 			Interval:    m.cfg.Middleware.CircuitBreaker.Interval,
 			Timeout:     m.cfg.Middleware.CircuitBreaker.Timeout,
 		})
-		options = append(options, grpcserver.WithCircuitBreaker(circuitBreaker))
+		interceptors = append(interceptors, circuitbreaker.UnaryServerInterceptor(circuitBreaker))
 	}
 
-	return options
+	if len(interceptors) == 0 {
+		return nil
+	}
+	return []grpcserver.Option{grpcserver.WithGrpcServerUnaryInterceptor(interceptors...)}
 }
 
 // createAuthenticator 创建认证器

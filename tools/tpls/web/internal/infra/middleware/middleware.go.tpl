@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
@@ -20,17 +22,20 @@ func New(cfg *config.Config) *Middleware {
 }
 
 // GetWebServerOptions 获取Web服务器选项
-func (m *Middleware) GetWebServerOptions() []webserver.Options {
-	var options []webserver.Options
+//
+// 各中间件均实现为 func(http.Handler) http.Handler，统一通过
+// webserver.WithMiddleware 注入（注入顺序即外层到内层的执行顺序）。
+func (m *Middleware) GetWebServerOptions() []webserver.Option {
+	var mws []func(http.Handler) http.Handler
 
 	// 认证中间件
 	if m.cfg.IsAuthEnabled() {
 		authMiddleware := auth.NewAuthMiddleware(auth.Config{
 			TokenExtractor: auth.NewHeaderTokenExtractor("Authorization", "Bearer "),
 			Authenticator:  m.createAuthenticator(),
-			SkipPaths:     m.cfg.Middleware.Auth.SkipPaths,
+			SkipPaths:      m.cfg.Middleware.Auth.SkipPaths,
 		})
-		options = append(options, webserver.WithAuth(authMiddleware))
+		mws = append(mws, auth.HTTPMiddleware(authMiddleware))
 	}
 
 	// 限流中间件
@@ -40,7 +45,7 @@ func (m *Middleware) GetWebServerOptions() []webserver.Options {
 			Burst:        m.cfg.Middleware.RateLimit.Burst,
 			KeyExtractor: ratelimit.NewIPKeyExtractor(),
 		})
-		options = append(options, webserver.WithRateLimit(rateLimitMiddleware))
+		mws = append(mws, ratelimit.HTTPMiddleware(rateLimitMiddleware))
 	}
 
 	// 超时控制中间件
@@ -49,7 +54,7 @@ func (m *Middleware) GetWebServerOptions() []webserver.Options {
 			Timeout:       m.cfg.Middleware.Timeout.Timeout,
 			SlowThreshold: m.cfg.Middleware.Timeout.SlowThreshold,
 		})
-		options = append(options, webserver.WithTimeout(timeoutController))
+		mws = append(mws, timeout.HTTPMiddleware(timeoutController))
 	}
 
 	// 熔断器中间件
@@ -59,10 +64,13 @@ func (m *Middleware) GetWebServerOptions() []webserver.Options {
 			Interval:    m.cfg.Middleware.CircuitBreaker.Interval,
 			Timeout:     m.cfg.Middleware.CircuitBreaker.Timeout,
 		})
-		options = append(options, webserver.WithCircuitBreaker(circuitBreaker))
+		mws = append(mws, circuitbreaker.HTTPMiddleware(circuitBreaker))
 	}
 
-	return options
+	if len(mws) == 0 {
+		return nil
+	}
+	return []webserver.Option{webserver.WithMiddleware(mws...)}
 }
 
 // createAuthenticator 创建认证器

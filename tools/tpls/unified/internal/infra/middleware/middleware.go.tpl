@@ -1,13 +1,16 @@
 package middleware
 
 import (
-	"github.com/rushteam/beauty/pkg/middleware/auth"
-	"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
+	{{if .EnableWeb}}"net/http"
+
+	{{end}}"github.com/rushteam/beauty/pkg/middleware/auth"
+	{{if or .EnableWeb .EnableGrpc}}"github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"github.com/rushteam/beauty/pkg/middleware/ratelimit"
 	"github.com/rushteam/beauty/pkg/middleware/timeout"
-	"{{.ImportPath}}internal/config"
+	{{end}}"{{.ImportPath}}internal/config"
 	{{if .EnableWeb}}"github.com/rushteam/beauty/pkg/service/webserver"
 	{{end}}{{if .EnableGrpc}}"github.com/rushteam/beauty/pkg/service/grpcserver"
+	"google.golang.org/grpc"
 	{{end}}
 )
 
@@ -22,17 +25,20 @@ func New(cfg *config.Config) *Middleware {
 }
 
 {{if .EnableWeb}}// GetWebServerOptions 获取Web服务器选项
-func (m *Middleware) GetWebServerOptions() []webserver.Options {
-	var options []webserver.Options
+//
+// 各中间件均实现为 func(http.Handler) http.Handler，统一通过
+// webserver.WithMiddleware 注入（注入顺序即外层到内层的执行顺序）。
+func (m *Middleware) GetWebServerOptions() []webserver.Option {
+	var mws []func(http.Handler) http.Handler
 
 	// 认证中间件
 	if m.cfg.IsAuthEnabled() {
 		authMiddleware := auth.NewAuthMiddleware(auth.Config{
 			TokenExtractor: auth.NewHeaderTokenExtractor("Authorization", "Bearer "),
 			Authenticator:  m.createAuthenticator(),
-			SkipPaths:     m.cfg.Middleware.Auth.SkipPaths,
+			SkipPaths:      m.cfg.Middleware.Auth.SkipPaths,
 		})
-		options = append(options, webserver.WithAuth(authMiddleware))
+		mws = append(mws, auth.HTTPMiddleware(authMiddleware))
 	}
 
 	// 限流中间件
@@ -42,7 +48,7 @@ func (m *Middleware) GetWebServerOptions() []webserver.Options {
 			Burst:        m.cfg.Middleware.RateLimit.Burst,
 			KeyExtractor: ratelimit.NewIPKeyExtractor(),
 		})
-		options = append(options, webserver.WithRateLimit(rateLimitMiddleware))
+		mws = append(mws, ratelimit.HTTPMiddleware(rateLimitMiddleware))
 	}
 
 	// 超时控制中间件
@@ -51,7 +57,7 @@ func (m *Middleware) GetWebServerOptions() []webserver.Options {
 			Timeout:       m.cfg.Middleware.Timeout.Timeout,
 			SlowThreshold: m.cfg.Middleware.Timeout.SlowThreshold,
 		})
-		options = append(options, webserver.WithTimeout(timeoutController))
+		mws = append(mws, timeout.HTTPMiddleware(timeoutController))
 	}
 
 	// 熔断器中间件
@@ -61,25 +67,31 @@ func (m *Middleware) GetWebServerOptions() []webserver.Options {
 			Interval:    m.cfg.Middleware.CircuitBreaker.Interval,
 			Timeout:     m.cfg.Middleware.CircuitBreaker.Timeout,
 		})
-		options = append(options, webserver.WithCircuitBreaker(circuitBreaker))
+		mws = append(mws, circuitbreaker.HTTPMiddleware(circuitBreaker))
 	}
 
-	return options
+	if len(mws) == 0 {
+		return nil
+	}
+	return []webserver.Option{webserver.WithMiddleware(mws...)}
 }
 {{end}}
 
 {{if .EnableGrpc}}// GetGrpcServerOptions 获取gRPC服务器选项
-func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
-	var options []grpcserver.Options
+//
+// 各中间件以 grpc.UnaryServerInterceptor 的形式提供，统一通过
+// grpcserver.WithGrpcServerUnaryInterceptor 注入（注入顺序即执行顺序）。
+func (m *Middleware) GetGrpcServerOptions() []grpcserver.Option {
+	var interceptors []grpc.UnaryServerInterceptor
 
 	// 认证拦截器
 	if m.cfg.IsAuthEnabled() {
 		authMiddleware := auth.NewAuthMiddleware(auth.Config{
 			TokenExtractor: auth.NewHeaderTokenExtractor("Authorization", "Bearer "),
 			Authenticator:  m.createAuthenticator(),
-			SkipPaths:     m.cfg.Middleware.Auth.SkipPaths,
+			SkipPaths:      m.cfg.Middleware.Auth.SkipPaths,
 		})
-		options = append(options, grpcserver.WithAuth(authMiddleware))
+		interceptors = append(interceptors, auth.UnaryServerInterceptor(authMiddleware))
 	}
 
 	// 限流拦截器
@@ -89,7 +101,7 @@ func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
 			Burst:        m.cfg.Middleware.RateLimit.Burst,
 			KeyExtractor: ratelimit.NewIPKeyExtractor(),
 		})
-		options = append(options, grpcserver.WithRateLimit(rateLimitMiddleware))
+		interceptors = append(interceptors, ratelimit.UnaryServerInterceptor(rateLimitMiddleware))
 	}
 
 	// 超时控制拦截器
@@ -98,7 +110,7 @@ func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
 			Timeout:       m.cfg.Middleware.Timeout.Timeout,
 			SlowThreshold: m.cfg.Middleware.Timeout.SlowThreshold,
 		})
-		options = append(options, grpcserver.WithTimeout(timeoutController))
+		interceptors = append(interceptors, timeout.UnaryServerInterceptor(timeoutController))
 	}
 
 	// 熔断器拦截器
@@ -108,10 +120,13 @@ func (m *Middleware) GetGrpcServerOptions() []grpcserver.Options {
 			Interval:    m.cfg.Middleware.CircuitBreaker.Interval,
 			Timeout:     m.cfg.Middleware.CircuitBreaker.Timeout,
 		})
-		options = append(options, grpcserver.WithCircuitBreaker(circuitBreaker))
+		interceptors = append(interceptors, circuitbreaker.UnaryServerInterceptor(circuitBreaker))
 	}
 
-	return options
+	if len(interceptors) == 0 {
+		return nil
+	}
+	return []grpcserver.Option{grpcserver.WithGrpcServerUnaryInterceptor(interceptors...)}
 }
 {{end}}
 

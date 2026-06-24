@@ -28,7 +28,6 @@ generate: ## 生成protobuf代码
 	@echo "📋 生成的文件："
 	@echo "  - api/v1/user.pb.go (protobuf消息)"
 	@echo "  - api/v1/user_grpc.pb.go (gRPC服务)"
-	@echo "  - api/v1/user.pb.gw.go (gRPC-Gateway)"
 
 # 整理依赖
 tidy: ## 整理Go模块依赖

@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
+	"github.com/rushteam/beauty/tools/internal/cmd/add"
 	"github.com/rushteam/beauty/tools/internal/cmd/api"
+	"github.com/rushteam/beauty/tools/internal/cmd/dev"
 	"github.com/rushteam/beauty/tools/internal/cmd/new"
 	"github.com/urfave/cli/v3"
 )
@@ -56,17 +61,30 @@ func main() {
 						Value:   "unified",
 					},
 					&cli.StringFlag{
+						Name:    "module",
+						Aliases: []string{"m"},
+						Usage:   "Go 模块路径(如 github.com/org/svc)，默认使用项目名",
+					},
+					&cli.StringFlag{
 						Name:    "path",
 						Aliases: []string{"p"},
 						Usage:   "项目路径",
 					},
 					&cli.BoolFlag{
 						Name:  "with-docker",
-						Usage: "包含Docker配置",
+						Usage: "包含Docker配置(Dockerfile + docker-compose)",
 					},
 					&cli.BoolFlag{
 						Name:  "with-k8s",
-						Usage: "包含Kubernetes配置",
+						Usage: "包含Kubernetes部署清单",
+					},
+					&cli.BoolFlag{
+						Name:  "with-ci",
+						Usage: "包含CI配置(GitHub Actions + golangci-lint)",
+					},
+					&cli.BoolFlag{
+						Name:  "dry-run",
+						Usage: "仅预览将生成的文件，不写入磁盘",
 					},
 					&cli.BoolFlag{
 						Name:  "web",
@@ -83,6 +101,7 @@ func main() {
 				},
 				Action: new.Action,
 			},
+			add.Command(),
 			{
 				Name:    "api",
 				Aliases: []string{"a", "parse"},
@@ -141,8 +160,14 @@ func main() {
 					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					fmt.Println("🚀 开发模式功能开发中...")
-					return nil
+					config := cmd.String("config")
+					watch := cmd.Bool("watch")
+					if watch {
+						fmt.Printf("🚀 开发模式(热重载) config=%s\n", config)
+					} else {
+						fmt.Printf("🚀 开发模式运行 config=%s\n", config)
+					}
+					return dev.Action(ctx, config, watch)
 				},
 			},
 			{
@@ -164,7 +189,32 @@ func main() {
 					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					fmt.Println("🔨 构建功能开发中...")
+					output := cmd.String("output")
+					platform := cmd.String("platform")
+					if output == "" {
+						if wd, err := os.Getwd(); err == nil {
+							output = filepath.Base(wd)
+						} else {
+							output = "app"
+						}
+					}
+
+					c := exec.CommandContext(ctx, "go", "build", "-o", output, ".")
+					c.Env = os.Environ()
+					if platform != "" {
+						parts := strings.SplitN(platform, "/", 2)
+						if len(parts) == 2 {
+							c.Env = append(c.Env, "GOOS="+parts[0], "GOARCH="+parts[1])
+						}
+					}
+					c.Stdout = os.Stdout
+					c.Stderr = os.Stderr
+
+					fmt.Printf("🔨 构建 %s (%s)...\n", output, platform)
+					if err := c.Run(); err != nil {
+						return err
+					}
+					fmt.Printf("✅ 构建完成: %s\n", output)
 					return nil
 				},
 			},

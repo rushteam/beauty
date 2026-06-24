@@ -2,11 +2,21 @@ package tpls
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 )
 
-//go:embed all:web all:grpc all:cron all:unified
+//go:embed all:web all:grpc all:cron all:unified all:addons
 var files embed.FS
+
+// AddonRoot 获取附加组件(docker/k8s/ci)的模板子目录
+func AddonRoot(name string) (fs.FS, error) {
+	sub, err := fs.Sub(files, "addons/"+name)
+	if err != nil {
+		return nil, fmt.Errorf("加载附加组件模板 %q 失败: %w", name, err)
+	}
+	return sub, nil
+}
 
 // Root 获取web模板
 func Root() fs.FS {

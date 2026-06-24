@@ -2,12 +2,15 @@ package new
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"go/format"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -30,9 +33,12 @@ func Action(ctx context.Context, c *cli.Command) error {
 	// 获取命令行参数
 	projectName := args.Get(0)
 	template := c.String("template")
+	module := c.String("module")
 	projectPath := c.String("path")
 	withDocker := c.Bool("with-docker")
 	withK8s := c.Bool("with-k8s")
+	withCI := c.Bool("with-ci")
+	dryRun := c.Bool("dry-run")
 	verbose := c.Bool("verbose")
 
 	// 服务类型选择
@@ -118,10 +124,17 @@ func Action(ctx context.Context, c *cli.Command) error {
 
 	// 设置项目配置
 	entity.Config.Name = projectName
-	entity.Config.Module = projectName // 设置模块名
+	// 模块名：优先使用 --module，否则回退到项目名
+	if module != "" {
+		entity.Config.Module = module
+	} else {
+		entity.Config.Module = projectName
+	}
 	entity.Config.Template = template
 	entity.Config.WithDocker = withDocker
 	entity.Config.WithK8s = withK8s
+	entity.Config.WithCI = withCI
+	entity.Config.DryRun = dryRun
 	entity.Config.EnableWeb = enableWeb
 	entity.Config.EnableGrpc = enableGrpc
 	entity.Config.EnableCron = enableCron
@@ -149,28 +162,174 @@ func Action(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("❌ 操作失败: %w", err)
 	}
 
+	// 渲染可选附加组件（Docker / K8s / CI）
+	if err := renderAddons(entity.Config, verbose); err != nil {
+		return fmt.Errorf("❌ 生成附加配置失败: %w", err)
+	}
+
+	// 写入 .gitignore（仅新项目，不覆盖已有文件）
+	if !dirExists {
+		writeGitignore(entity.Config)
+	}
+
 	// 显示完成信息
 	duration := time.Since(startTime)
+
+	// dry-run：仅预览，不执行收尾（依赖整理 / 代码生成 / 格式化）
+	if entity.Config.DryRun {
+		fmt.Printf("\n🔎 dry-run：以上为将生成的文件，未写入磁盘 (耗时 %v)\n", duration.Round(time.Millisecond))
+		return nil
+	}
+
 	if dirExists {
 		fmt.Printf("\n✅ 服务添加完成! 耗时: %v\n", duration.Round(time.Millisecond))
 	} else {
 		fmt.Printf("\n✅ 项目创建完成! 耗时: %v\n", duration.Round(time.Millisecond))
 	}
 
+	// 自动收尾：生成 protobuf 代码 / 拉取最新依赖 / 整理依赖 / 格式化
+	setup := postSetup(entity.Config, verbose)
+
 	// 显示后续步骤
 	fmt.Println("\n📋 后续步骤:")
-	if !dirExists {
+	if !dirExists && projectName != "." && projectName != "./" {
 		fmt.Printf("  cd %s\n", projectName)
 	}
-	fmt.Println("  go mod tidy")
+	if setup.protoNeeded && !setup.protoGenerated {
+		if setup.bufMissing {
+			fmt.Println("  # 需要 buf 生成 gRPC 代码，安装: https://buf.build/docs/installation")
+		}
+		if entity.Config.Template == "unified" {
+			fmt.Println("  make generate              # 生成 protobuf 代码")
+		} else {
+			fmt.Println("  bash scripts/generate.sh   # 生成 protobuf 代码")
+		}
+		fmt.Println("  go mod tidy")
+	} else if !setup.tidied {
+		fmt.Println("  go mod tidy")
+	}
 	fmt.Println("  go run main.go")
 
 	if withDocker {
-		fmt.Println("  docker build -t " + projectName + " .")
-		fmt.Println("  docker run -p 8080:8080 " + projectName)
+		fmt.Println("  docker compose up -d        # 启动应用及本地依赖(etcd/jaeger)")
 	}
 
 	return nil
+}
+
+// setupResult 记录自动收尾步骤的执行结果，用于生成准确的后续提示
+type setupResult struct {
+	protoNeeded    bool // 项目是否包含 gRPC（依赖 protobuf 生成代码）
+	protoGenerated bool // protobuf 代码是否已成功生成
+	bufMissing     bool // 是否因缺少 buf 而跳过生成
+	tidied         bool // go mod tidy 是否成功
+}
+
+// postSetup 在生成项目文件后自动执行收尾步骤：
+//   - gRPC 项目：检测到 buf 时自动生成 protobuf 代码
+//   - 拉取最新 beauty 依赖并执行 go mod tidy
+//
+// 所有步骤均为非致命：失败时仅告警并在"后续步骤"中提示手动操作。
+func postSetup(conf *entity.Project, verbose bool) setupResult {
+	res := setupResult{
+		protoNeeded: conf.Template == "grpc-service" || (conf.Template == "unified" && conf.EnableGrpc),
+	}
+
+	if !commandExists("go") {
+		fmt.Println("⚠️  未检测到 go 命令，跳过依赖整理（请手动执行 go mod tidy）")
+		return res
+	}
+
+	// gRPC 代码必须先于 go mod tidy 生成，否则 api/v1 包缺失导致 tidy 失败
+	if res.protoNeeded {
+		if commandExists("buf") {
+			fmt.Println("🔧 生成 protobuf 代码 (buf)...")
+			_ = runCmd(conf.Path, verbose, "buf", "dep", "update")
+			if err := runCmd(conf.Path, verbose, "buf", "generate"); err != nil {
+				fmt.Printf("⚠️  buf generate 失败: %v\n", err)
+			} else {
+				res.protoGenerated = true
+			}
+		} else {
+			res.bufMissing = true
+			fmt.Println("⚠️  未检测到 buf，跳过 protobuf 生成（gRPC 代码暂不可编译）")
+		}
+		// 生成代码缺失时整理依赖必然失败，直接跳过
+		if !res.protoGenerated {
+			return res
+		}
+	}
+
+	// 拉取最新 beauty 依赖（离线时失败，非致命）
+	fmt.Println("📦 获取最新 beauty 依赖 (go get ...@latest)...")
+	if err := runCmd(conf.Path, verbose, "go", "get", "github.com/rushteam/beauty@latest"); err != nil && verbose {
+		fmt.Printf("⚠️  go get 失败（可能处于离线环境）: %v\n", err)
+	}
+
+	// 整理依赖
+	fmt.Println("📦 整理 Go 模块依赖 (go mod tidy)...")
+	if err := runCmd(conf.Path, verbose, "go", "mod", "tidy"); err != nil {
+		fmt.Printf("⚠️  go mod tidy 失败: %v\n", err)
+	} else {
+		res.tidied = true
+	}
+
+	return res
+}
+
+// commandExists 判断某个可执行命令是否存在于 PATH
+func commandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+// runCmd 在指定目录执行命令；verbose 时透传标准输出/错误
+func runCmd(dir string, verbose bool, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
+// writeGitignore 为新项目写入默认 .gitignore（已存在则跳过）
+func writeGitignore(conf *entity.Project) {
+	path := filepath.Join(conf.Path, ".gitignore")
+	if conf.DryRun {
+		fmt.Printf("  + %s\n", path)
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	const content = `# 二进制产物
+*.exe
+*.dll
+*.so
+*.dylib
+/bin/
+
+# 测试与覆盖率
+*.test
+*.out
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# 环境与本地配置
+.env
+*.local
+
+# 编辑器 / 操作系统
+.idea/
+.vscode/
+.DS_Store
+`
+	_ = os.WriteFile(path, []byte(content), 0o644)
 }
 
 // ProjectServices 项目服务检测结果
@@ -528,13 +687,14 @@ func (sg *ServiceGenerator) shouldSkipFile(path string, serviceType string) bool
 
 // createProject 创建新项目
 func createProject(conf *entity.Project, verbose bool) error {
-	// 创建项目目录
-	if err := pkg.MkdirAll(conf.Path); err != nil {
-		return fmt.Errorf("创建项目目录失败: %w", err)
+	// 创建项目目录（dry-run 不落盘）
+	if !conf.DryRun {
+		if err := pkg.MkdirAll(conf.Path); err != nil {
+			return fmt.Errorf("创建项目目录失败: %w", err)
+		}
 	}
 
-	// 设置模块信息
-	conf.Module = conf.Name // 使用项目名称作为模块名
+	// 模块名已在 Action 中按 --module / 项目名设置好，这里只派生导入路径
 	conf.ImportPath = conf.Module + "/"
 
 	// 获取模块信息（用于其他用途）
@@ -622,94 +782,183 @@ func buildProject(conf *entity.Project, verbose bool) error {
 		if err != nil {
 			return err
 		}
-
 		// 跳过不需要的文件
 		if shouldSkipFile(path, conf) {
 			return nil
 		}
-
 		if info.IsDir() {
-			dirPath := filepath.Join(conf.Path, path)
-			if err := pkg.MkdirAll(dirPath); err != nil {
-				return err
-			}
-			if verbose {
-				fmt.Printf("📁 创建目录: %s\n", dirPath)
-			}
-			return nil
+			return nil // 目录在写文件时按需创建
 		}
 
-		// 读取模板文件
 		src, err := tpl.Open(path)
 		if err != nil {
 			return err
 		}
-		defer src.Close()
-
 		data, err := io.ReadAll(src)
+		src.Close()
 		if err != nil {
 			return err
 		}
 
-		// 处理文件名
-		filename := strings.TrimSuffix(path, ".tpl")
-		outputPath := filepath.Join(conf.Path, filename)
-
-		// 创建目标文件
-		dst, err := pkg.Create(outputPath)
-		if err != nil {
-			return err
-		}
-		defer dst.Close()
-
-		// 解析并执行模板
-		tmpl, err := template.New(info.Name()).Parse(string(data))
-		if err != nil {
-			return err
-		}
-
-		if err := tmpl.Execute(dst, conf); err != nil {
-			return err
-		}
-
-		if verbose {
-			fmt.Printf("📄 创建文件: %s\n", outputPath)
-		}
-
-		return nil
+		outputPath := filepath.Join(conf.Path, strings.TrimSuffix(path, ".tpl"))
+		return renderTemplateFile(info.Name(), data, conf, outputPath, verbose)
 	})
+}
+
+// renderTemplateFile 渲染单个模板文件到目标路径，封装了所有通用逻辑：
+//   - 模板渲染为纯空白时跳过（条件模板被 {{if}} 整体关闭的情况）
+//   - .go 文件写入前用 go/format 规范化（失败则按原样写入）
+//   - dry-run 时只打印将生成的路径，不落盘
+func renderTemplateFile(name string, tplData []byte, conf *entity.Project, outputPath string, verbose bool) error {
+	tmpl, err := template.New(name).Parse(string(tplData))
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, conf); err != nil {
+		return err
+	}
+	if strings.TrimSpace(buf.String()) == "" {
+		if verbose {
+			fmt.Printf("⏭️  跳过空文件: %s\n", outputPath)
+		}
+		return nil
+	}
+
+	out := buf.Bytes()
+	// Go 源码写入前格式化，确保生成物符合 gofmt
+	if strings.HasSuffix(outputPath, ".go") {
+		if formatted, ferr := format.Source(out); ferr == nil {
+			out = formatted
+		} else if verbose {
+			fmt.Printf("⚠️  gofmt 跳过(语法待生成代码补全): %s\n", outputPath)
+		}
+	}
+
+	if conf.DryRun {
+		fmt.Printf("  + %s\n", outputPath)
+		return nil
+	}
+
+	if err := pkg.MkdirAll(filepath.Dir(outputPath)); err != nil {
+		return err
+	}
+	dst, err := pkg.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	if _, err := dst.Write(out); err != nil {
+		return err
+	}
+	if verbose {
+		fmt.Printf("📄 创建文件: %s\n", outputPath)
+	}
+	return nil
+}
+
+// renderAddons 根据 --with-docker / --with-k8s / --with-ci 渲染可选附加组件。
+// 附加组件不会覆盖项目中已存在的同名文件。
+func renderAddons(conf *entity.Project, verbose bool) error {
+	addons := []struct {
+		enabled bool
+		dir     string
+		label   string
+	}{
+		{conf.WithDocker, "docker", "Docker"},
+		{conf.WithK8s, "k8s", "Kubernetes"},
+		{conf.WithCI, "ci", "CI"},
+	}
+
+	for _, a := range addons {
+		if !a.enabled {
+			continue
+		}
+		sub, err := tpls.AddonRoot(a.dir)
+		if err != nil {
+			return err
+		}
+		if !conf.DryRun {
+			fmt.Printf("🧩 生成 %s 配置...\n", a.label)
+		}
+		walkErr := fs.WalkDir(sub, ".", func(path string, info os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			src, err := sub.Open(path)
+			if err != nil {
+				return err
+			}
+			data, err := io.ReadAll(src)
+			src.Close()
+			if err != nil {
+				return err
+			}
+			outputPath := filepath.Join(conf.Path, strings.TrimSuffix(path, ".tpl"))
+			// 附加组件不覆盖已有文件
+			if _, statErr := os.Stat(outputPath); statErr == nil {
+				if verbose {
+					fmt.Printf("⚠️  已存在，跳过: %s\n", outputPath)
+				}
+				return nil
+			}
+			return renderTemplateFile(info.Name(), data, conf, outputPath, verbose)
+		})
+		if walkErr != nil {
+			return fmt.Errorf("%s: %w", a.label, walkErr)
+		}
+	}
+	return nil
+}
+
+// 各服务类型在 unified 模板中独占的文件路径前缀。
+// 用显式归类替代脆弱的子串匹配：例如 internal/service/user.go 是 gRPC 服务实现，
+// 但路径里并不含 "grpc"，子串匹配会漏掉它，导致 Web-only 项目残留无法编译的文件。
+var unifiedServicePrefixes = map[string][]string{
+	"web": {
+		"internal/endpoint/handlers",
+		"internal/endpoint/router",
+	},
+	"grpc": {
+		"internal/endpoint/grpc",
+		"internal/service",
+		"api/",
+		"buf.yaml",
+		"buf.gen.yaml",
+	},
+	"cron": {
+		"internal/endpoint/job",
+	},
 }
 
 // shouldSkipFile 判断是否应该跳过某个文件
 func shouldSkipFile(path string, conf *entity.Project) bool {
-	// 对于统一模板，根据启用的服务类型决定是否跳过文件
-	if conf.Template == "unified" {
-		// 如果未启用 Web 服务，跳过 HTTP 相关文件
-		if !conf.EnableWeb && (strings.Contains(path, "http") || strings.Contains(path, "web")) {
-			return true
-		}
-		// 如果未启用 gRPC 服务，跳过 gRPC 相关文件
-		if !conf.EnableGrpc && strings.Contains(path, "grpc") {
-			return true
-		}
-		// 如果未启用 Cron 服务，跳过 Cron 相关文件
-		if !conf.EnableCron && (strings.Contains(path, "cron") || strings.Contains(path, "endpoint/job")) {
-			return true
+	// 专用模板（web-service / grpc-service / cron-service）目录内容已按类型裁剪，
+	// 全部原样生成；仅 unified 模板需要按启用的服务类型裁剪。
+	if conf.Template != "unified" {
+		return false
+	}
+
+	matches := func(svc string) bool {
+		for _, prefix := range unifiedServicePrefixes[svc] {
+			if strings.Contains(path, prefix) {
+				return true
+			}
 		}
 		return false
 	}
 
-	// 根据模板类型跳过不需要的文件
-	switch conf.Template {
-	case "grpc-service":
-		// 跳过HTTP相关的模板文件
-		return strings.Contains(path, "http") || strings.Contains(path, "web")
-	case "cron-service":
-		// 跳过HTTP和gRPC相关的模板文件
-		return strings.Contains(path, "http") || strings.Contains(path, "grpc") || strings.Contains(path, "web")
-	case "web-service":
-		// 跳过gRPC相关的模板文件
-		return strings.Contains(path, "grpc")
+	if !conf.EnableWeb && matches("web") {
+		return true
+	}
+	if !conf.EnableGrpc && matches("grpc") {
+		return true
+	}
+	if !conf.EnableCron && matches("cron") {
+		return true
 	}
 	return false
 }

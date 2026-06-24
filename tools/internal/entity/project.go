@@ -11,6 +11,8 @@ type Project struct {
 	Template   string
 	WithDocker bool
 	WithK8s    bool
+	WithCI     bool
+	DryRun     bool
 	Info       here.Info
 	// 服务类型选择
 	EnableWeb  bool // 是否启用 HTTP 服务

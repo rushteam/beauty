@@ -44,18 +44,24 @@ func (c *directClient) Close() error {
 	return nil
 }
 
+// standardDialOpts 返回所有拨号模式共用的基础 gRPC 选项
+// （OTel 统计、keepalive、空闲超时、默认重试策略）。
+func standardDialOpts() []grpc.DialOption {
+	return []grpc.DialOption{
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                time.Second * 20,
+			Timeout:             time.Second * 10,
+			PermitWithoutStream: true,
+		}),
+		grpc.WithIdleTimeout(time.Second * 10),
+		grpc.WithDefaultServiceConfig(DefaultRetryPolicy().serviceConfig()),
+	}
+}
+
 func newDirectClient(opts ...directOption) (*directClient, error) {
 	c := &directClient{
-		dialOpts: []grpc.DialOption{
-			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:                time.Second * 20,
-				Timeout:             time.Second * 10,
-				PermitWithoutStream: true,
-			}),
-			grpc.WithIdleTimeout(time.Second * 10),
-			grpc.WithDefaultServiceConfig(DefaultRetryPolicy().serviceConfig()),
-		},
+		dialOpts: standardDialOpts(),
 	}
 	for _, opt := range opts {
 		opt(c)

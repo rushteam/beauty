@@ -1,0 +1,15 @@
+{
+  "xds_servers": [
+    {
+      "server_uri": "xds-control-plane.example.com:15010",
+      "channel_creds": [
+        { "type": "insecure" }
+      ],
+      "server_features": ["xds_v3"]
+    }
+  ],
+  "node": {
+    "id": "beauty-client",
+    "locality": {}
+  }
+}

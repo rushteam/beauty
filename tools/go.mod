@@ -9,3 +9,8 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20250826171959-ef028d996bc1
 	google.golang.org/protobuf v1.36.8
 )
+
+require (
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+)

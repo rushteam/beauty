@@ -17,7 +17,7 @@ import (
 )
 
 // Version ..
-var Version = "0.0.3"
+var Version = "0.1.0"
 
 func main() {
 	app := &cli.Command{

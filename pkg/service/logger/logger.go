@@ -86,6 +86,36 @@ func LevelHandler() http.Handler {
 	})
 }
 
+// TraceHandler 包装一个 slog.Handler，在每条日志记录上自动追加当前
+// OpenTelemetry span 的 trace_id / span_id（取自记录的 context）。
+// 仅当 context 中存在有效 span 时才追加，因此需用 *Context 系列方法记录日志：
+//
+//	base := slog.NewJSONHandler(os.Stdout, opts)
+//	slog.SetDefault(slog.New(logger.NewTraceHandler(base)))
+//	slog.InfoContext(ctx, "handled request") // 自动带上 trace_id/span_id
+func NewTraceHandler(h slog.Handler) slog.Handler {
+	return &traceHandler{Handler: h}
+}
+
+type traceHandler struct {
+	slog.Handler
+}
+
+func (t *traceHandler) Handle(ctx context.Context, r slog.Record) error {
+	if args := traceArgs(ctx); len(args) > 0 {
+		r.Add(args...)
+	}
+	return t.Handler.Handle(ctx, r)
+}
+
+func (t *traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &traceHandler{Handler: t.Handler.WithAttrs(attrs)}
+}
+
+func (t *traceHandler) WithGroup(name string) slog.Handler {
+	return &traceHandler{Handler: t.Handler.WithGroup(name)}
+}
+
 func traceArgs(ctx context.Context) []any {
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {

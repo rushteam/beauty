@@ -5,10 +5,13 @@ import (
 	"log/slog"
 	"os"
 
+	beautylog "github.com/rushteam/beauty/pkg/service/logger"
 	"{{.ImportPath}}internal/infra/conf"
 )
 
-// New 创建新的日志记录器
+// New 创建新的日志记录器。
+// 通过 beautylog.NewTraceHandler 包装底层 handler：使用 slog.*Context 方法
+// （如 slog.InfoContext(ctx, ...)）记录日志时会自动带上 trace_id / span_id。
 func New(cfg *conf.Log) *slog.Logger {
 	var output io.Writer = os.Stdout
 	if cfg.Output != "stdout" {
@@ -41,5 +44,5 @@ func New(cfg *conf.Log) *slog.Logger {
 		})
 	}
 
-	return slog.New(handler)
+	return slog.New(beautylog.NewTraceHandler(handler))
 }

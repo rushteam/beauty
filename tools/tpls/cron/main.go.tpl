@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 
@@ -20,12 +21,19 @@ var (
 	version    = flag.Bool("version", false, "显示版本信息")
 )
 
+// 构建信息（由 Makefile/Dockerfile 通过 -ldflags -X 注入）
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildTime = "unknown"
+)
+
 func main() {
 	flag.Parse()
 
 	// 显示版本信息
 	if *version {
-		log.Printf("{{.Name}} Cron v1.0.0")
+		fmt.Printf("{{.Name}} Cron %s (commit %s, built %s)\n", Version, Commit, BuildTime)
 		return
 	}
 
@@ -37,7 +45,7 @@ func main() {
 
 	// 初始化日志
 	slog.SetDefault(logger.New(&cfg.Log))
-	slog.Info("启动定时任务服务", "name", cfg.GetAppName(), "version", "1.0.0")
+	slog.Info("启动定时任务服务", "name", cfg.GetAppName(), "version", Version)
 
 	// 创建服务注册器
 	var registryOption beauty.Option

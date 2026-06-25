@@ -715,6 +715,8 @@ func createProject(conf *entity.Project, verbose bool) error {
 		return createCronService(conf, verbose)
 	case "unified":
 		return createUnifiedService(conf, verbose)
+	case "clean":
+		return createCleanService(conf, verbose)
 	default: // web-service
 		return createWebService(conf, verbose)
 	}
@@ -723,6 +725,12 @@ func createProject(conf *entity.Project, verbose bool) error {
 // createWebService 创建HTTP微服务
 func createWebService(conf *entity.Project, verbose bool) error {
 	fmt.Println("🌐 创建HTTP微服务...")
+	return buildProject(conf, verbose)
+}
+
+// createCleanService 创建整洁架构(Clean Architecture)项目
+func createCleanService(conf *entity.Project, verbose bool) error {
+	fmt.Println("🧱 创建整洁架构项目(domain/application/adapter/infra/bootstrap)...")
 	return buildProject(conf, verbose)
 }
 

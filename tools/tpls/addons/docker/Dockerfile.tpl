@@ -9,7 +9,9 @@ COPY go.* ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/{{.Name}} .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w -X main.Version=$(cat VERSION 2>/dev/null || echo docker) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /out/{{.Name}} .
 
 # ---- 运行阶段 ----
 FROM gcr.io/distroless/static-debian12:nonroot

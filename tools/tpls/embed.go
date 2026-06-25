@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-//go:embed all:web all:grpc all:cron all:unified all:addons
+//go:embed all:web all:grpc all:cron all:unified all:clean all:addons
 var files embed.FS
 
 // AddonRoot 获取附加组件(docker/k8s/ci)的模板子目录
@@ -42,6 +42,12 @@ func UnifiedRoot() fs.FS {
 	return f
 }
 
+// CleanRoot 获取整洁架构模板
+func CleanRoot() fs.FS {
+	f, _ := fs.Sub(files, "clean")
+	return f
+}
+
 // GetTemplateRoot 根据模板类型获取模板根目录
 func GetTemplateRoot(templateType string) fs.FS {
 	switch templateType {
@@ -51,6 +57,8 @@ func GetTemplateRoot(templateType string) fs.FS {
 		return CronRoot()
 	case "unified":
 		return UnifiedRoot()
+	case "clean":
+		return CleanRoot()
 	default: // web-service
 		return Root()
 	}

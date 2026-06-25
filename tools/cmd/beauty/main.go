@@ -57,7 +57,7 @@ func main() {
 					&cli.StringFlag{
 						Name:    "template",
 						Aliases: []string{"t"},
-						Usage:   "项目模板类型",
+						Usage:   "项目模板类型: unified|web-service|grpc-service|cron-service|clean",
 						Value:   "unified",
 					},
 					&cli.StringFlag{

@@ -20,6 +20,8 @@ package group
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -401,10 +403,7 @@ func (s *Store) Banned(groupID string) ([]string, error) {
 	}
 	gs.mu.RLock()
 	defer gs.mu.RUnlock()
-	out := make([]string, 0, len(gs.banned))
-	for u := range gs.banned {
-		out = append(out, u)
-	}
+	out := slices.Collect(maps.Keys(gs.banned))
 	return out, nil
 }
 

@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/rushteam/beauty/pkg/ctxkey"
 )
 
 // Resource 资源类型(业务自定义枚举值)。用 int 避免字符串拼写差异,便于索引。
@@ -193,17 +195,14 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-type ctxKey struct{}
+var userIDKey = ctxkey.New[string]()
 
 // WithUserID 把 userID 注入 ctx,供中间件读取。
 func WithUserID(ctx context.Context, uid string) context.Context {
-	return context.WithValue(ctx, ctxKey{}, uid)
+	return ctxkey.With(ctx, userIDKey, uid)
 }
 
 // UserIDFromCtx 从 ctx 读出 WithUserID 注入的 userID。无则返回空串。
 func UserIDFromCtx(ctx context.Context) string {
-	if v, ok := ctx.Value(ctxKey{}).(string); ok {
-		return v
-	}
-	return ""
+	return ctxkey.MustGet(ctx, userIDKey)
 }

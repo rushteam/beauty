@@ -20,6 +20,7 @@ package inbox
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -124,16 +125,7 @@ func (s *Store) List(ownerID string, afterSeq int64, limit int) []Message {
 	if afterSeq > 0 {
 		// box 按 seq 升序。找第一个 seq >= afterSeq 的位置,
 		// 该位置即为"seq<afterSeq 的子区间"的右端(不含),从 start-1 向下降序输出。
-		lo, hi := 0, len(box)
-		for lo < hi {
-			mid := (lo + hi) / 2
-			if box[mid].Seq < afterSeq {
-				lo = mid + 1
-			} else {
-				hi = mid
-			}
-		}
-		start = lo
+		start = lowerBoundSeq(box, afterSeq)
 	}
 	end := max(start-limit, 0)
 	out := make([]Message, 0, start-end)
@@ -168,18 +160,10 @@ func (s *Store) MarkOneRead(ownerID string, seq int64) bool {
 	defer s.mu.Unlock()
 	box := s.byUser[ownerID]
 	// 二分找 seq。
-	lo, hi := 0, len(box)
-	for lo < hi {
-		mid := (lo + hi) / 2
-		if box[mid].Seq < seq {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	if lo < len(box) && box[lo].Seq == seq {
-		if !box[lo].Read {
-			box[lo].Read = true
+	idx := lowerBoundSeq(box, seq)
+	if idx < len(box) && box[idx].Seq == seq {
+		if !box[idx].Read {
+			box[idx].Read = true
 		}
 		return true
 	}
@@ -205,19 +189,11 @@ func (s *Store) Delete(ownerID string, seq int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	box := s.byUser[ownerID]
-	lo, hi := 0, len(box)
-	for lo < hi {
-		mid := (lo + hi) / 2
-		if box[mid].Seq < seq {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	if lo >= len(box) || box[lo].Seq != seq {
+	idx := lowerBoundSeq(box, seq)
+	if idx >= len(box) || box[idx].Seq != seq {
 		return false
 	}
-	s.byUser[ownerID] = append(box[:lo], box[lo+1:]...)
+	s.byUser[ownerID] = append(box[:idx], box[idx+1:]...)
 	return true
 }
 
@@ -226,4 +202,10 @@ func (s *Store) Count(ownerID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.byUser[ownerID])
+}
+
+// lowerBoundSeq 返回 box(按 Seq 升序)中第一个 Seq >= target 的索引,
+// 全部小于 target 时返回 len(box)。等价于 C++ lower_bound,基于 sort.Search。
+func lowerBoundSeq(box []*Message, target int64) int {
+	return sort.Search(len(box), func(i int) bool { return box[i].Seq >= target })
 }

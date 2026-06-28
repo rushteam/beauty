@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/ctxkey"
 	"github.com/rushteam/beauty/pkg/safe"
 )
 
@@ -40,8 +41,8 @@ import (
 // 超过则放弃剩余任务,避免单个慢任务拖垮关停。可用 WithDrainTimeout 覆盖。
 const defaultDrainTimeout = 10 * time.Second
 
-// contextKey 用于把 Registry 注入 ctx。
-type contextKey struct{}
+// registryKey 用于把 Registry 注入 ctx。
+var registryKey = ctxkey.New[*Registry]()
 
 // Registry 一个请求级延寿任务注册表。
 // 一个 Registry 对应一次请求:Defer 投递任务,Wait 等待全部完成。
@@ -93,13 +94,12 @@ func New(opts ...Option) *Registry {
 // 通常在中间件里包裹每个请求:ctx = afterwork.WithRegistry(ctx, reg),
 // 处理完后 afterwork.Wait(ctx) 等待延寿任务。
 func WithRegistry(ctx context.Context, reg *Registry) context.Context {
-	return context.WithValue(ctx, contextKey{}, reg)
+	return ctxkey.With(ctx, registryKey, reg)
 }
 
 // FromContext 从 ctx 取出 Registry。没有则返回 nil(此时 Defer 为空操作)。
 func FromContext(ctx context.Context) *Registry {
-	reg, _ := ctx.Value(contextKey{}).(*Registry)
-	return reg
+	return ctxkey.MustGet(ctx, registryKey)
 }
 
 // Defer 投递一个延寿任务到 ctx 关联的 Registry。

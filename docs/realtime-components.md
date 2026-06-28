@@ -44,6 +44,8 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/afterwork` | 请求级后台任务延寿(waitUntil 语义) | 响应后发邮件 / 写审计 / 触发 webhook | 8303 |
 | `pkg/handler` | 声明式 HTTP handler 包装器(auth+inject+afterwork+错误归一化) | 业务函数只写 (ctx,req)=>(resp,err) | 8303 |
 | `pkg/ratelimit` | 按键限流(令牌桶 + 滑动窗口)+ HTTP 中间件 | 防刷屏 / API 限流 / 按用户/IP 隔离 | 8304 |
+| `pkg/txn` | 跨域事务协调(两阶段提交 Prepare/Commit/Rollback) | 扣钱包+写存档 原子化 / 任一失败全回滚 | 8305 |
+| `pkg/ctxkey` | 类型安全 context key(泛型 Key[T]) | 统一各包 contextKey 定义 / 防 key 冲突 | — |
 
 ### 业务实体(pkg/domain/)
 
@@ -699,6 +701,45 @@ owners, admins, members, _ := s.Members("g1") // 按角色分组
 owner 不能直接退出(须先 `TransferOwner`)。详见 `examples/group`——
 该 demo 还组合了 `pkg/domain/inbox`(成员间离线私聊)+ `pkg/ratelimit`(发消息限流)。
 
+## 速查:pkg/txn（跨域事务协调 / 两阶段提交）
+
+让 wallet/storage/notification 等域包在一个逻辑事务边界内原子提交或全部回滚。
+各域无需感知 txn——业务层实现 `Participant` 接口(Prepare/Commit/Rollback)
+并 `Enlist` 到 `Coordinator`,`Run` 负责两阶段编排:
+
+```go
+coord := txn.New()
+coord.Enlist("wallet", walletStaging)   // 实现 Participant
+coord.Enlist("bag", bagStaging)
+err := coord.Run(ctx, func() error {
+    // 在 staging 视图上操作(Prepare 已深拷贝),不直接改主库
+    if walletStaging.gold < price { return errors.New("没钱") } // 触发 Rollback
+    walletStaging.gold -= price
+    bagStaging.items[item]++
+    return nil
+})
+// Run 返回 nil → 已 Commit;返回 err → 已 Rollback(主库不变)
+```
+
+阶段顺序:Prepare(顺序,任一失败逆序回滚已 Prepare 的)→ body → Commit(顺序,
+best-effort:某域 Commit 失败仍继续后续,返回聚合错误供补偿)。Run 串行(一次一事务)。
+`ParticipantFunc` 是函数形式(轻量)。`examples/txn` 演示内存快照 staging。
+
+## 速查:pkg/ctxkey（类型安全 context key）
+
+统一各包重复的 `type contextKey struct{}` + `ctx.Value(k).(T)` 模式。泛型
+`Key[T]` 编译期约束存取类型,`New[T]()` 每次分配独立标识(同 T 多 Key 不冲突):
+
+```go
+var userKey = ctxkey.New[auth.User]()       // 包级 var 调一次
+ctx = ctxkey.With(ctx, userKey, user)       // 注入
+u, ok := ctxkey.Get(ctx, userKey)           // 取出(类型安全)
+u := ctxkey.MustGet(ctx, userKey)           // 不存在返回零值
+```
+
+beauty 的 auth/requestid/callbacks/ratelimit/audit/afterwork/metadata/errors
+均已改用本包,消除手写类型断言与 key 冲突风险。
+
 ## 速查:examples/clan（用现有原语组合出公会,不新增包）
 
 证明 `pkg/` 原语组合已覆盖公会场景,无需新包:
@@ -711,7 +752,7 @@ owner 不能直接退出(须先 `TransferOwner`)。详见 `examples/group`——
 
 ## 风格约定
 
-十九个包遵循统一约定,便于混用:
+二十一个包遵循统一约定,便于混用:
 
 - **纯标准库**——除 `pkg/ws/session` 复用 `pkg/ws`(依赖 `coder/websocket`)、
   `pkg/domain/tournament` 复用 `robfig/cron/v3`(cron 解析)外,其余包零第三方依赖,
@@ -750,5 +791,5 @@ owner 不能直接退出(须先 `TransferOwner`)。详见 `examples/group`——
   `EdgeRuntime.waitUntil` + `withSupabase({auth, deps}, handler)` 声明式包装模式。
 - demo:`examples/{match,session,presence,router,leaderboard,scheduler,matchmaker,
   audit,wallet,notification,tournament,party,storage,relationship,token,dberr,webhook,
-  resume,status,chat,ephemeral,clan,afterwork,group}/main.go`。
+  resume,status,chat,ephemeral,clan,afterwork,group,txn}/main.go`。
 - 测试:各包 `*_test.go`,均通过 `go test -race -count=3`。

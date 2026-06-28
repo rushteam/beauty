@@ -22,7 +22,10 @@ package metadata
 
 import (
 	"context"
+	"maps"
 	"strings"
+
+	"github.com/rushteam/beauty/pkg/ctxkey"
 )
 
 // 预定义的透传键，与 HTTP Header 名称一致（小写）。
@@ -35,7 +38,7 @@ const (
 	KeyUserID     = "x-user-id"     // 当前用户 ID，鉴权后透传
 )
 
-type contextKey struct{}
+var mdKey = ctxkey.New[MD]()
 
 // MD 是服务间透传的元数据集合，键统一小写。
 // 零值可直接使用。
@@ -61,18 +64,12 @@ func (m MD) Del(key string) {
 
 // Clone 返回当前 MD 的深拷贝。
 func (m MD) Clone() MD {
-	c := make(MD, len(m))
-	for k, v := range m {
-		c[k] = v
-	}
-	return c
+	return maps.Clone(m)
 }
 
 // Merge 将 other 中的键值合并到 m，重复键以 other 为准。
 func (m MD) Merge(other MD) {
-	for k, v := range other {
-		m[k] = v
-	}
+	maps.Copy(m, other)
 }
 
 // NewContext 将 md 附加到 ctx 并返回新 ctx。
@@ -80,16 +77,16 @@ func (m MD) Merge(other MD) {
 func NewContext(ctx context.Context, md MD) context.Context {
 	existing := FromContext(ctx)
 	if len(existing) == 0 {
-		return context.WithValue(ctx, contextKey{}, md.Clone())
+		return ctxkey.With(ctx, mdKey, md.Clone())
 	}
 	merged := existing.Clone()
 	merged.Merge(md)
-	return context.WithValue(ctx, contextKey{}, merged)
+	return ctxkey.With(ctx, mdKey, merged)
 }
 
 // FromContext 从 ctx 中取出 MD；若不存在返回空 MD（非 nil，可直接读写）。
 func FromContext(ctx context.Context) MD {
-	if md, ok := ctx.Value(contextKey{}).(MD); ok {
+	if md, ok := ctxkey.Get(ctx, mdKey); ok {
 		return md
 	}
 	return MD{}

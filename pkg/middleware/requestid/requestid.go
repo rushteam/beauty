@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/rushteam/beauty/pkg/ctxkey"
 	"github.com/rushteam/beauty/pkg/utils/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -12,19 +13,16 @@ import (
 const Header = "X-Request-ID"
 const metaKey = "x-request-id"
 
-type contextKey struct{}
+var reqIDKey = ctxkey.New[string]()
 
 // FromContext extracts the request ID from ctx.
 func FromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(contextKey{}).(string); ok {
-		return v
-	}
-	return ""
+	return ctxkey.MustGet(ctx, reqIDKey)
 }
 
 // NewContext returns a copy of ctx with the given request ID attached.
 func NewContext(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, contextKey{}, id)
+	return ctxkey.With(ctx, reqIDKey, id)
 }
 
 // HTTPMiddleware injects or propagates X-Request-ID for HTTP handlers.

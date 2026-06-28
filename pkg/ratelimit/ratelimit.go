@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/rushteam/beauty/pkg/ctxkey"
 )
 
 // Limiter 限流器接口。按 key 隔离(每个 key 独立计数)。
@@ -26,18 +28,17 @@ type Limiter interface {
 	Allow(key string) (allowed bool, retryAfter time.Duration)
 }
 
-// contextKey 用于把 Limiter 注入 ctx(供 handler 声明式接入)。
-type contextKey struct{}
+// limiterKey 用于把 Limiter 注入 ctx(供 handler 声明式接入)。
+var limiterKey = ctxkey.New[Limiter]()
 
 // WithLimiter 把 limiter 装入 ctx。供 pkg/handler 的 WithRatelimit 使用。
 func WithLimiter(ctx context.Context, l Limiter) context.Context {
-	return context.WithValue(ctx, contextKey{}, l)
+	return ctxkey.With(ctx, limiterKey, l)
 }
 
 // FromContext 从 ctx 取出 Limiter(没有则 nil)。
 func FromContext(ctx context.Context) Limiter {
-	l, _ := ctx.Value(contextKey{}).(Limiter)
-	return l
+	return ctxkey.MustGet(ctx, limiterKey)
 }
 
 // --- 令牌桶 ---

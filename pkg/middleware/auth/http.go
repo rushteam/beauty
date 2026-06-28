@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
+
+	"github.com/rushteam/beauty/pkg/ctxkey"
 )
 
 // HTTPMiddleware 返回 HTTP 认证中间件
@@ -85,15 +88,14 @@ func handleAuthError(w http.ResponseWriter, err error) {
 
 // GetUserFromContext 从上下文中获取用户信息
 func GetUserFromContext(ctx context.Context) (User, bool) {
-	user, ok := ctx.Value(userContextKey).(User)
-	return user, ok
+	return ctxkey.Get(ctx, userContextKey)
 }
 
 // WithUser 将用户信息注入上下文,返回新 ctx。
 // 供声明式 handler 包装器(pkg/handler)在认证策略通过后把 User 装入 ctx,
 // 业务函数随后用 GetUserFromContext 取出。与 HTTPMiddleware 内部使用同一 key。
 func WithUser(ctx context.Context, user User) context.Context {
-	return context.WithValue(ctx, userContextKey, user)
+	return ctxkey.With(ctx, userContextKey, user)
 }
 
 // RequireAuth 创建需要认证的中间件（用于特定路由）
@@ -132,18 +134,9 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 
 			// 检查用户是否拥有任一所需角色
 			userRoles := user.Roles()
-			hasRole := false
-			for _, requiredRole := range roles {
-				for _, userRole := range userRoles {
-					if userRole == requiredRole {
-						hasRole = true
-						break
-					}
-				}
-				if hasRole {
-					break
-				}
-			}
+			hasRole := slices.ContainsFunc(roles, func(required string) bool {
+				return slices.Contains(userRoles, required)
+			})
 
 			if !hasRole {
 				http.Error(w, "Forbidden", http.StatusForbidden)

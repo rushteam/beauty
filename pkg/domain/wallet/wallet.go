@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -152,11 +153,7 @@ func (w *Wallet) LedgerByID(ownerID string, id int64) *Ledger {
 func (w *Wallet) Accounts() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	out := make([]string, 0, len(w.accounts))
-	for id := range w.accounts {
-		out = append(out, id)
-	}
-	return out
+	return slices.Collect(maps.Keys(w.accounts))
 }
 
 // SetBalance 直接覆盖 owner 的余额(用于从 DB 全量加载初始快照)。

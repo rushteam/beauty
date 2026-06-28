@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
+
+	"github.com/rushteam/beauty/pkg/ctxkey"
 )
 
 var (
@@ -19,9 +22,7 @@ var (
 	ErrTokenExpired = errors.New("token expired")
 )
 
-type contextKey struct{}
-
-var userContextKey = contextKey{}
+var userContextKey = ctxkey.New[User]()
 
 // User 用户信息接口
 type User interface {
@@ -60,12 +61,7 @@ func (u *DefaultUser) Roles() []string                  { return u.roles }
 func (u *DefaultUser) Metadata() map[string]any { return u.metadata }
 
 func (u *DefaultUser) HasRole(role string) bool {
-	for _, r := range u.roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(u.roles, role)
 }
 
 func (u *DefaultUser) SetMetadata(key string, value any) {

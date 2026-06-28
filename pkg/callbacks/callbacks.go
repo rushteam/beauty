@@ -33,6 +33,8 @@ package callbacks
 import (
 	"context"
 	"sync"
+
+	"github.com/rushteam/beauty/pkg/ctxkey"
 )
 
 // Timing 表示回调时机。
@@ -77,7 +79,7 @@ func AppendGlobalHandlers(hs ...Handler) {
 	globalHandlers = append(globalHandlers, hs...)
 }
 
-type ctxKey struct{}
+var handlersKey = ctxkey.New[[]Handler]()
 
 // WithHandlers 把局部 handler 附加到 ctx；它们与全局 handler 合并生效，
 // 作用范围为该 ctx 派生的调用链。
@@ -85,16 +87,16 @@ func WithHandlers(ctx context.Context, hs ...Handler) context.Context {
 	if len(hs) == 0 {
 		return ctx
 	}
-	existing, _ := ctx.Value(ctxKey{}).([]Handler)
+	existing, _ := ctxkey.Get(ctx, handlersKey)
 	merged := make([]Handler, 0, len(existing)+len(hs))
 	merged = append(merged, existing...)
 	merged = append(merged, hs...)
-	return context.WithValue(ctx, ctxKey{}, merged)
+	return ctxkey.With(ctx, handlersKey, merged)
 }
 
 // effective 返回当前生效的 handler：全局 + ctx 局部。
 func effective(ctx context.Context) []Handler {
-	local, _ := ctx.Value(ctxKey{}).([]Handler)
+	local, _ := ctxkey.Get(ctx, handlersKey)
 	globalMu.RLock()
 	g := globalHandlers
 	globalMu.RUnlock()

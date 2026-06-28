@@ -28,16 +28,26 @@ type Message struct {
 type Sink func(m Message) bool
 
 // SinkRegistry 把 presence.ID 解析到 Sink。业务维护 session -> Sink 的映射。
+// 只负责本节点 session:跨节点 session( id.Node != localNode)由 Forwarder 处理。
 type SinkRegistry interface {
 	Lookup(sessionID string) Sink
 }
 
+// Forwarder 把消息转发到其他节点。跨节点投递时调用:把目标 ids + 消息交给业务,
+// 业务通过 RPC/消息总线送达目标节点,目标节点再用本地 Router 投递。
+// 参考 Nakama message_router.go 的 remotesend 语义。
+type Forwarder interface {
+	Forward(node string, ids []presence.ID, m Message) int
+}
+
 // Router 按 presence IDs / stream / 全员 投递消息,并支持攒批。
 type Router struct {
-	registry SinkRegistry
-	tracker  *presence.Tracker // 可为 nil:不按 stream 投递
-	deferMu  sync.Mutex
-	deferred []deferredItem
+	registry   SinkRegistry
+	tracker    *presence.Tracker // 可为 nil:不按 stream 投递
+	localNode  string            // 本节点名;空=不启用跨节点(所有 id 视为本地)
+	forwarder  Forwarder         // 跨节点转发器;nil=跨节点 id 直接丢弃
+	deferMu    sync.Mutex
+	deferred   []deferredItem
 }
 
 type deferredItem struct {
@@ -45,9 +55,33 @@ type deferredItem struct {
 	msg     Message
 }
 
+// Option 配置 Router。
+type Option func(*config)
+
+type config struct {
+	localNode string
+	forwarder Forwarder
+}
+
+// WithLocalNode 设置本节点名。非空时启用跨节点路由:id.Node != localNode 的
+// presence 走 Forwarder 转发。空(默认)= 不启用跨节点,所有 id 视为本地。
+func WithLocalNode(name string) Option { return func(c *config) { c.localNode = name } }
+
+// WithForwarder 设置跨节点转发器。配合 WithLocalNode 使用。
+func WithForwarder(f Forwarder) Option { return func(c *config) { c.forwarder = f } }
+
 // New 创建 Router。tracker 可为 nil(此时 SendToStream 不可用,会返回 0)。
-func New(registry SinkRegistry, tracker *presence.Tracker) *Router {
-	return &Router{registry: registry, tracker: tracker}
+func New(registry SinkRegistry, tracker *presence.Tracker, opts ...Option) *Router {
+	cfg := &config{}
+	for _, o := range opts {
+		o(cfg)
+	}
+	return &Router{
+		registry:  registry,
+		tracker:   tracker,
+		localNode: cfg.localNode,
+		forwarder: cfg.forwarder,
+	}
 }
 
 // SetTracker 在构造后注入/替换 tracker(用于解耦初始化顺序)。
@@ -58,16 +92,25 @@ func (r *Router) SetTracker(t *presence.Tracker) {
 }
 
 // SendToPresenceIDs 把消息投递给指定 presence IDs 对应的会话。
-// 返回成功投递的数量。接收者已下线(Sink 返回 false)的不计入。
+// 返回成功投递的数量(含本地 Sink 成功 + 远端 Forwarder 报告的成功数)。
+// id.Node 为空或等于 localNode 视为本地;否则走 Forwarder(未配置则丢弃)。
 func (r *Router) SendToPresenceIDs(ids []presence.ID, m Message) int {
 	delivered := 0
+	// 按 node 分组:本地走 Sink,远端走 Forwarder(攒一批一次转发)。
+	remote := make(map[string][]presence.ID)
 	for _, id := range ids {
-		sink := r.registry.Lookup(id.SessionID)
-		if sink == nil {
+		if r.localNode == "" || id.Node == "" || id.Node == r.localNode {
+			sink := r.registry.Lookup(id.SessionID)
+			if sink != nil && sink(m) {
+				delivered++
+			}
 			continue
 		}
-		if sink(m) {
-			delivered++
+		remote[id.Node] = append(remote[id.Node], id)
+	}
+	if r.forwarder != nil {
+		for node, nodeIDs := range remote {
+			delivered += r.forwarder.Forward(node, nodeIDs, m)
 		}
 	}
 	return delivered
@@ -90,6 +133,7 @@ func (r *Router) SendToSessionIDs(sessionIDs []string, m Message) int {
 
 // SendToStream 把消息投递给某流的全部在场成员。
 // 依赖 presence.Tracker;未配置时返回 0。includeHidden 控制是否含隐藏成员。
+// 跨节点成员(id.Node != localNode)走 Forwarder 转发。
 func (r *Router) SendToStream(stream presence.Stream, m Message, includeHidden bool) int {
 	r.deferMu.Lock()
 	tracker := r.tracker
@@ -101,17 +145,12 @@ func (r *Router) SendToStream(stream presence.Stream, m Message, includeHidden b
 	if len(members) == 0 {
 		return 0
 	}
-	delivered := 0
+	// 复用 SendToPresenceIDs 的分组逻辑。
+	ids := make([]presence.ID, 0, len(members))
 	for _, p := range members {
-		sink := r.registry.Lookup(p.ID.SessionID)
-		if sink == nil {
-			continue
-		}
-		if sink(m) {
-			delivered++
-		}
+		ids = append(ids, p.ID)
 	}
-	return delivered
+	return r.SendToPresenceIDs(ids, m)
 }
 
 // QueueDeferred 把一条消息加入攒批队列,稍后由 FlushDeferred 一次性投递。

@@ -1,4 +1,4 @@
-// Webhook 示例：注册端点（事件过滤 + 签名），按事件触发通知。
+// Webhook 示例：注册端点（事件过滤 + 签名 + 幂等去重 + DLQ），按事件触发通知。
 package main
 
 import (
@@ -10,8 +10,12 @@ import (
 )
 
 func main() {
+	store := webhook.NewMemStore()
+	dlq := webhook.NewMemDLQ()
 	n := webhook.New(
 		webhook.WithRetries(3),
+		webhook.WithStore(store),   // 启用幂等去重 + 投递状态追踪
+		webhook.WithDLQ(dlq),       // 启用死信队列:重试耗尽后入队,可 Replay
 		webhook.WithErrorHandler(func(ep webhook.Endpoint, ev webhook.Event, err error) {
 			fmt.Printf("webhook failed: url=%s event=%s err=%v\n", ep.URL, ev.Type, err)
 		}),
@@ -27,9 +31,15 @@ func main() {
 	})
 
 	type order struct{ OrderID string }
-	n.Notify(context.Background(), webhook.Event{Type: "order.created", Payload: order{"A-1"}}) // 不匹配
-	n.Notify(context.Background(), webhook.Event{Type: "order.paid", Payload: order{"A-2"}})    // 匹配 → 触发
+	// 同一 EventID 投两次:幂等去重,只投一次。
+	n.Notify(context.Background(), webhook.Event{Type: "order.paid", EventID: "evt-1", Payload: order{"A-2"}})
+	n.Notify(context.Background(), webhook.Event{Type: "order.paid", EventID: "evt-1", Payload: order{"A-2"}})
 
-	time.Sleep(time.Second) // 等异步投递（示例用）
+	time.Sleep(time.Second) // 等异步投递(示例用)
+	fmt.Printf("delivery records: %d\n", len(store.Records()))
+	fmt.Printf("dead letters: %d\n", dlq.Len())
+	// 失败的投递可重放:
+	// ok, err := n.Replay(context.Background())
 	fmt.Println("done")
 }
+

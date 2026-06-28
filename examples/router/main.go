@@ -34,10 +34,21 @@ func (r *sinkRegistry) set(sid string, sink router.Sink) {
 	r.mu.Unlock()
 }
 
+// forwarder 把跨节点消息打印到日志(模拟 RPC/消息总线转发到远端节点)。
+type logForwarder struct{}
+
+func (logForwarder) Forward(node string, ids []presence.ID, m router.Message) int {
+	println("forward to node", node, ":", len(ids), "recipients, msg:", string(m.Data))
+	return len(ids)
+}
+
 func main() {
 	tr := presence.New(nil, 256)
 	regs := &sinkRegistry{sinks: make(map[string]router.Sink)}
-	rtr := router.New(regs, tr)
+	rtr := router.New(regs, tr,
+		router.WithLocalNode("node-a"),
+		router.WithForwarder(logForwarder{}),
+	)
 
 	mux := http.NewServeMux()
 
@@ -55,11 +66,33 @@ func main() {
 		w.Write([]byte("joined"))
 	})
 
-	// /say?channel=room1&msg=hello  群发给频道所有人。
+	// /joinRemote?session=s9&user=bob&channel=room1&node=node-b  模拟远端在场成员。
+	// 不注册本地 sink(会话在远端);Node 字段需由 presence 同步层写入 tracker,
+	// 本 demo 仅演示 /send 路由直接构造带 Node 的 ID 触发跨节点转发。
+	mux.HandleFunc("/joinRemote", func(w http.ResponseWriter, req *http.Request) {
+		q := req.URL.Query()
+		stream := presence.Stream{Mode: 1, Subject: q.Get("channel")}
+		tr.Track(q.Get("session"), stream, presence.Meta{UserID: q.Get("user")})
+		w.Write([]byte("remote tracked (see /send for cross-node delivery)"))
+	})
+
+	// /say?channel=room1&msg=hello  群发给频道所有人(含跨节点)。
 	mux.HandleFunc("/say", func(w http.ResponseWriter, req *http.Request) {
 		q := req.URL.Query()
 		stream := presence.Stream{Mode: 1, Subject: q.Get("channel")}
 		n := rtr.SendToStream(stream, router.Message{Data: []byte(q.Get("msg"))}, false)
+		w.Write([]byte("delivered to " + itoa(n)))
+	})
+
+	// /send?session=s9&node=node-b&msg=hi  按 presence ID 定点投递(可跨节点)。
+	mux.HandleFunc("/send", func(w http.ResponseWriter, req *http.Request) {
+		q := req.URL.Query()
+		id := presence.ID{
+			SessionID: q.Get("session"),
+			Stream:    presence.Stream{Mode: 1, Subject: "direct"},
+			Node:      q.Get("node"),
+		}
+		n := rtr.SendToPresenceIDs([]presence.ID{id}, router.Message{Data: []byte(q.Get("msg"))})
 		w.Write([]byte("delivered to " + itoa(n)))
 	})
 

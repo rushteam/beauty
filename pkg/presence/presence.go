@@ -25,10 +25,12 @@ type Stream struct {
 	Label   string // 子分类(如节点名或分区)
 }
 
-// ID 唯一标识一个在场条目:会话 + 所在流。
+// ID 唯一标识一个在场条目:会话 + 所在流 + 所在节点。
+// Node 为空表示本节点;非空表示该会话驻留在 Node 节点(跨节点路由用)。
 type ID struct {
 	SessionID string
 	Stream    Stream
+	Node      string
 }
 
 // Meta 是在场的元数据。

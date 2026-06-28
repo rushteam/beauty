@@ -1,10 +1,9 @@
 // Package txn 提供跨域事务协调:让 wallet/storage/notification 等域包
 // 在一个逻辑事务边界内原子提交或全部回滚。
 //
-// 背景:beauty 各域包(wallet/storage/account)各自管理状态,但游戏服务器常需
+// 背景:beauty 各域包(wallet/storage/account)各自管理状态,但应用常需
 // "原子地:扣钱包 + 写存档 + 发通知"——任一步失败,前面已改的要回滚。
-// 借鉴 Nakama core_multi.go 在单个 pgx.Tx 内协调多域更新的模式,但 beauty
-// 是 DB-agnostic,因此做成通用的两阶段提交协调器(Two-Phase Commit):
+// beauty 是 DB-agnostic,因此做成通用的两阶段提交协调器(Two-Phase Commit):
 //
 //   - Prepare:各 Participant 校验能否提交,并把变更暂存到 staging(不落库);
 //   - 全部 Prepare 成功 → 依次 Commit(落库);

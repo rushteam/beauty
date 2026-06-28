@@ -1,10 +1,10 @@
 // Package notification 提供离线通知队列:用户不在线时存通知,上线后拉取,
 // 与 pkg/router 的实时路由互补——router 投在线者,notification 投离线者。
 //
-// 设计参考 Nakama server/core_notification.go:
+// 设计要点:
 //   - persistent 标志区分持久通知(存 DB+在线投)与瞬时通知(仅在线投);
 //   - 离线通知按 (userID, seq) 有序存储,游标分页避免重复推送;
-//   - 无 read/unread 状态机——删除即消失,简化并发(参考 Nakama 只删不改)。
+// - 无 read/unread 状态机——删除即消失,简化并发(只删不改)。
 //
 // 与 pkg/router 的分工:Send 时若用户在线(通过 liveSink)即时投递,
 // 持久通知无论在线与否都存一份,供后续拉取/审计。

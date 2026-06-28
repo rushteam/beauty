@@ -2,7 +2,7 @@
 // 成员变更时广播给全员。与 pkg/match 的权威状态机互补——party 是用户意愿驱动的
 // 临时协作组(好友开黑、小队、临时房间),状态由成员操作驱动,无固定帧率 tick。
 //
-// 设计参考 Nakama server/party_handler.go:
+// 设计要点:
 //   - Leader 唯一,可 Promote 转让、Remove 踢人;
 //   - JoinRequests 队列:private party 需 Leader Accept;open party 自动加入;
 //   - 座位预留(Reserve/Release):处理"加入中"与"已加入"的竞态,支持容量限制;

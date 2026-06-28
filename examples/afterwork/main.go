@@ -1,6 +1,6 @@
 // afterwork + handler 示例:声明式 handler + 响应后副作用。
 //
-// 演示 supabase waitUntil 语义在 beauty 的落地:
+// 演示 waitUntil 语义在 beauty 的落地:
 //   - POST /order:用 pkg/handler 声明式包装(auth + inject + afterwork),
 //     handler 返回响应后,afterwork.Defer 投递的"发邮件/写审计"在响应返回后跑完;
 //   - GET /health:无 body、无 auth 的极简 handler。

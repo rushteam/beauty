@@ -1,7 +1,6 @@
 // Package handler 提供声明式 HTTP handler 包装器:把 auth 策略 + 资源注入 +
 // 错误归一化从业务 handler 上移到包装器,handler 只关心 (ctx, req) => (resp, error)。
 //
-// 借鉴 supabase edge-runtime 的 withSupabase({auth:'user'}, handler) 模式:
 // 声明式声明"这个 handler 需要什么"(认证策略、依赖),由包装器统一注入,
 // 业务函数保持纯净——只接收 ctx 和解析好的请求,返回响应或 error。
 //
@@ -68,14 +67,14 @@ type AuthPolicy func(ctx context.Context, r *http.Request) (auth.User, error)
 
 // Handler 包装后的 http.Handler。实现 http.Handler 接口,可直接挂到 mux。
 type Handler[I any, O any] struct {
-	method     string
-	fn         Func[I, O]
-	auth       AuthPolicy
-	deps       map[string]any
-	afterMW    bool
-	afterOpts  []afterwork.Option
-	rlLimiter  ratelimit.Limiter
-	rlKeyFn    ratelimit.KeyFunc
+	method    string
+	fn        Func[I, O]
+	auth      AuthPolicy
+	deps      map[string]any
+	afterMW   bool
+	afterOpts []afterwork.Option
+	rlLimiter ratelimit.Limiter
+	rlKeyFn   ratelimit.KeyFunc
 }
 
 // Option 配置 Handler。
@@ -209,7 +208,7 @@ func MustGet[T any](ctx context.Context, name string) T {
 	v, ok := Get[T](ctx, name)
 	if !ok {
 		var zero T
-		panic("handler: dependency "+name+" not found or wrong type, want "+reflect.TypeOf(zero).String())
+		panic("handler: dependency " + name + " not found or wrong type, want " + reflect.TypeOf(zero).String())
 	}
 	return v
 }

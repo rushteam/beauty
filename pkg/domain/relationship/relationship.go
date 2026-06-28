@@ -2,7 +2,7 @@
 // 支持好友(双向)、关注(单向)、拉黑(单向隔离)、群组成员(带角色)等多种语义,
 // 通过状态编码 + position 游标实现高效查询与分页。
 //
-// 设计参考 Nakama server/core_group.go + core_friend.go:
+// 设计要点:
 //   - 边模型:edge = (source, destination, state, position, metadata);
 //   - state 用 int 编码:数值大小即权限级别(无 RBAC 开销),如 0=成员 1=admin 2=owner;
 //   - 单向 block 与好友关系共存:block 时删除对方非 block 边,好友请求前检查 block;
@@ -59,7 +59,7 @@ func New() *Graph {
 }
 
 // AddEdge 添加一条有向边。position 为分页游标(建议用创建时间 nano)。
-// 若 Source 被 Destination 拉黑,拒绝(参考 Nakama 好友请求前检查 block)。
+// 若 Source 被 Destination 拉黑,拒绝(好友请求前检查 block)。
 func (g *Graph) AddEdge(e Edge) error {
 	if e.Source == "" || e.Destination == "" {
 		return errors.New("relationship: empty source/destination")
@@ -102,7 +102,7 @@ func (g *Graph) RemoveEdge(source, dest string) error {
 	return ErrNotFound
 }
 
-// Block 拉黑:建立单向 block 边,并删除自己对对方的非 block 边(参考 Nakama)。
+// Block 拉黑:建立单向 block 边,并删除自己对对方的非 block 边。
 func (g *Graph) Block(source, dest string, position int64) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()

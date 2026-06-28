@@ -4,7 +4,7 @@
 // chat 是"给频道的历史信"(按 channelID 游标)。IM 频道消息需要持久化 + 历史拉取 +
 // 游标分页,区别于 pkg/match 的实时(不持久)与 pkg/router 的投递(不存历史)。
 //
-// 设计参考 Nakama server/channel.go 的 channel message:
+// channel message:
 //   - 每条消息有 channel 内单调递增的 message_id(游标);
 //   - Before(messageID, limit) 返回该 ID 之前的历史(翻页往前看);
 //   - 频道有容量上限,超限删最旧(message_id 不因截断回退,保持单调);

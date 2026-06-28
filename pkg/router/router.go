@@ -5,8 +5,6 @@
 // Router 额外支持"按在场 ID 定点投递"和"按流投递(借助 presence.Tracker)",
 // 以及攒批(SendDeferred)减少系统调用。
 //
-// 设计参考 Nakama server/message_router.go 的 MessageRouter 接口。
-//
 // 零值不可用,用 New 构造。Router 并发安全。
 package router
 
@@ -35,19 +33,18 @@ type SinkRegistry interface {
 
 // Forwarder 把消息转发到其他节点。跨节点投递时调用:把目标 ids + 消息交给业务,
 // 业务通过 RPC/消息总线送达目标节点,目标节点再用本地 Router 投递。
-// 参考 Nakama message_router.go 的 remotesend 语义。
 type Forwarder interface {
 	Forward(node string, ids []presence.ID, m Message) int
 }
 
 // Router 按 presence IDs / stream / 全员 投递消息,并支持攒批。
 type Router struct {
-	registry   SinkRegistry
-	tracker    *presence.Tracker // 可为 nil:不按 stream 投递
-	localNode  string            // 本节点名;空=不启用跨节点(所有 id 视为本地)
-	forwarder  Forwarder         // 跨节点转发器;nil=跨节点 id 直接丢弃
-	deferMu    sync.Mutex
-	deferred   []deferredItem
+	registry  SinkRegistry
+	tracker   *presence.Tracker // 可为 nil:不按 stream 投递
+	localNode string            // 本节点名;空=不启用跨节点(所有 id 视为本地)
+	forwarder Forwarder         // 跨节点转发器;nil=跨节点 id 直接丢弃
+	deferMu   sync.Mutex
+	deferred  []deferredItem
 }
 
 type deferredItem struct {

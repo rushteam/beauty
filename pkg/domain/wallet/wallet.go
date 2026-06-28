@@ -2,7 +2,7 @@
 // 采用"不可变事务日志(append-only ledger) + 当前余额派生"双模型,
 // 通过 changeset 差值更新原子校验,避免超扣/超发。
 //
-// 设计参考 Nakama server/core_wallet.go:
+// 设计要点:
 //   - users.wallet 存当前余额(快读),wallet_ledger 存只追加账本(可审计);
 //   - 每次 ApplyWallets 在同一锁内读余额→应用 changeset→校验非负→写余额+追加账本;
 //   - changeset 存差值而非绝对值,天然支持 "<0 即超扣" 的原子检查。
@@ -39,8 +39,8 @@ type WalletMap map[string]int64
 
 // Account 是一个账户的运行时状态:当前余额(账本派生)+ 历史账本引用。
 type Account struct {
-	Balance WalletMap     // 当前余额(只读快照)
-	ledgers []*Ledger     // 完整账本(追加,不删)
+	Balance WalletMap // 当前余额(只读快照)
+	ledgers []*Ledger // 完整账本(追加,不删)
 }
 
 // Wallet 管理所有账户的余额与账本。
@@ -62,7 +62,7 @@ func New() *Wallet {
 // Apply 对 owner 应用一个 changeset,原子校验非负后写入余额并追加账本。
 // 返回应用后的新余额(该 changeset 涉及的货币)。失败时余额与账本不变。
 //
-// 流程(参考 core_wallet.go ApplyWallets):
+// 流程(参考 ApplyWallets 语义):
 //  1. 读当前余额
 //  2. 逐项应用 changeset 计算新值
 //  3. 任一项 <0 → ErrInsufficientBalance,回滚

@@ -115,6 +115,7 @@ my-service/
 - **配置中心**: 统一 `conf.New(url)` 接入本地文件与远程配置，支持热加载
 - **中间件**: recovery、cors、compress、health、auth、限流、熔断、超时
 - **实时推送**: 内置 SSE（`pkg/sse`）与 WebSocket（`pkg/ws`）封装，开箱即用
+- **实时服务原语**: 28 个可独立组合的实时组件（会话/在场/路由/匹配/排名/调度/钱包/审计/通知/事务等），纯标准库实现，详见下文 [Realtime Components](#realtime-components)
 - **流程编排**: 轻量 DAG 执行器（`pkg/dag`），拓扑分层 + 层内并行
 - **可观测性**: 内置 OpenTelemetry 链路追踪与指标收集（HTTP/gRPC 请求指标由 otelhttp/otelgrpc 自动采集）
 - **动态日志**: 运行时通过 HTTP 接口调整日志级别，无需重启
@@ -506,6 +507,57 @@ beauty.WithGrpcServer(":9090", register,
 )
 ```
 
+## Realtime Components
+
+beauty 在 `pkg/ws` / `pkg/sse` 之上提供一组**可独立组合**的实时服务原语，覆盖长连接会话、在线状态、消息路由、匹配组队、排行榜、任务调度、虚拟账户、操作审计、离线通知、周期榜单、临时小队、版本化存储、社交图谱、频道历史、会话令牌、DB 错误翻译、可靠 Webhook、断线重连、状态广播、短期 TTL KV、跨域事务等典型场景。均为纯标准库实现，遵循 beauty 风格（泛型 + 函数式 Option + 中文 doc）。
+
+包按"通用 vs 业务"分两个命名空间：
+
+- **`pkg/`** — 通用实时原语（不预设业务语义）
+- **`pkg/domain/`** — 业务实体（预设了业务模型：货币 / 通知 / 小队 / 赛季榜 / 存档 / 社交 / 频道）
+
+### 通用原语（pkg/）
+
+| 包 | 一句话 | 典型场景 |
+|----|--------|----------|
+| `pkg/match` | 有状态实时会话原语（actor 模型） | 游戏房间 / 权威对战 / 协作编辑 |
+| `pkg/ws/session` | WebSocket 有状态会话高阶封装 | 长连接业务 / IM 单聊 |
+| `pkg/presence` | 在线状态双索引 + 事件总线 | 频道成员 / 在线广播 / 候选池 |
+| `pkg/router` | 多语义消息路由 + 攒批 | 群发 / 定点投递 / 批量下发 |
+| `pkg/leaderboard` | 排行榜内存排名缓存（堆排序） | "我的名次" / TopN 高频读 |
+| `pkg/scheduler` | 工作池 + 运行时 Pause/Resume | 发奖 / 批量通知 / 过期清理 |
+| `pkg/matchmaker` | 基于属性匹配的组队 | PVP 组队 / 匹配大厅 |
+| `pkg/audit` | 操作审计（仅记成功 + 异步落盘） | 合规 / 运维审计 |
+| `pkg/token` | dual token（JWT HS256）+ 黑名单注销 | 登录态签发 / 续签 / 踢出 |
+| `pkg/dberr` | DB 错误码翻译（DB-agnostic → *Status） | 仓储层错误归一为业务码 |
+| `pkg/webhook` | 事件通知 + 幂等去重 + DLQ | 外部系统回调 / at-least-once |
+| `pkg/resume` | 断线重连在场还原（token + presence） | 掉线不掉状态 / 自动重连 |
+| `pkg/presence/status` | 状态变化广播给关注者 | 好友上下线通知 / status event |
+| `pkg/ephemeral` | 短期 TTL KV（纯内存 + 过期清扫） | 验证码 / 临时数据 / 缓存 |
+| `pkg/afterwork` | 请求级后台任务延寿（waitUntil 语义） | 响应后发邮件 / 写审计 / 触发 webhook |
+| `pkg/handler` | 声明式 HTTP handler 包装器 | 业务函数只写 `(ctx,req)=>(resp,err)` |
+| `pkg/ratelimit` | 按键限流（令牌桶 + 滑动窗口）+ HTTP 中间件 | 防刷屏 / API 限流 / 按用户/IP 隔离 |
+| `pkg/txn` | 跨域事务协调（两阶段提交 Prepare/Commit/Rollback） | 扣钱包+写存档 原子化 / 任一失败全回滚 |
+| `pkg/ctxkey` | 类型安全 context key（泛型 `Key[T]`） | 统一各包 contextKey 定义 / 防 key 冲突 |
+
+### 业务实体（pkg/domain/）
+
+| 包 | 一句话 | 典型场景 |
+|----|--------|----------|
+| `pkg/domain/wallet` | 不可变账本 + 余额派生（差值更新） | 虚拟货币 / 积分 / 库存 |
+| `pkg/domain/notification` | 持久/瞬时二分 + 离线拉取 | 离线消息 / 系统通知 |
+| `pkg/domain/tournament` | 锦标赛（leaderboard + cron 重置） | 赛季榜 / 每日挑战 |
+| `pkg/domain/party` | 无权威小队（Leader + 加入审核） | 好友开黑 / 临时小队 |
+| `pkg/domain/storage` | 版本化 KV + OCC 乐观锁 | 游戏存档 / 用户配置 |
+| `pkg/domain/relationship` | 社交图谱（二部有向图 + 状态编码） | 好友 / 关注 / 拉黑 / 群组 |
+| `pkg/domain/chat` | 频道持久消息 + 游标分页 | IM 频道历史 / 翻页 |
+| `pkg/domain/inbox` | 收件箱（序列号游标 + 已读状态） | 私信 / 系统收件箱 |
+| `pkg/domain/group` | 群组（成员 + 封禁 + 角色） | 群聊 / 公会 / 兴趣小组 |
+
+各包各司其职，无强耦合：可以只用 `ws/session` 做一个 echo 房间，也可以把 `presence` + `router` + `ws/session` 串起来做一个 IM 频道，用 `match` + `matchmaker` 做权威对战大厅，再用 `domain/wallet` + `domain/notification` + `audit` 补齐账户、通知与合规，用 `txn` 把跨域写操作原子化。每个包在 `examples/<name>/` 下都有可运行的 demo。
+
+详见 [docs/realtime-components.md](docs/realtime-components.md)。
+
 ## Documentation
 
 | 文档 | 内容 |
@@ -522,6 +574,7 @@ beauty.WithGrpcServer(":9090", register,
 | [docs/grpc-service-discovery.md](docs/grpc-service-discovery.md) | 服务注册与发现 |
 | [docs/grpc-client-discovery.md](docs/grpc-client-discovery.md) | gRPC 客户端发现 |
 | [docs/auth-ratelimit.md](docs/auth-ratelimit.md) | 认证与限流详解 |
+| [docs/realtime-components.md](docs/realtime-components.md) | 实时服务原语总览（21 类组件 + 组合范式 + demo 端口） |
 
 ## Contributing
 

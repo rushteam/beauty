@@ -3,7 +3,7 @@
 //
 // 适用场景:IM 频道成员、游戏房间在场、在线状态广播、匹配器候选池等。
 //
-// 设计参考 Nakama server/tracker.go 的双索引 presence 树:
+// 双索引 presence 树:
 //   - presencesByStream:  按 流 → 查成员(广播用)
 //   - presencesBySession: 按 会话 → 查所在流(下线清理用)
 // 一次 Track/Untrack 同步更新两棵索引,双向查询均 O(1)。

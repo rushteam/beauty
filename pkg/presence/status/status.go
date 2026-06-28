@@ -4,7 +4,7 @@
 // 给同流成员;本包订阅 presence 事件,查"谁关注了状态变化的人"(走 relationship
 // 的反向查询 Watchers),再把 status notification 走 router 投递给关注者的会话。
 //
-// 设计参考 Nakama server/core_status.go 的 status event:用户上下线/进出流时,
+// status event:用户上下线/进出流时,
 // 服务端自动给关注者推一条 status notification(不只是一条 join/leave,而是
 // "这个朋友现在在线/在哪个频道")。
 //

@@ -1,7 +1,7 @@
 // Package resume 提供断线重连的在场状态还原:客户端用 refresh token 重连,
 // 服务端换出 userID,查 presence 看用户还在哪些流,返回流列表让客户端自动重连。
 //
-// 设计参考 Nakama server/core_session.go 的 session resume:断线后 presence 不立即
+// session resume:断线后 presence 不立即
 // 清除(给一个宽限期),重连时把该会话仍持有的流回给客户端,客户端按列表重新 join,
 // 实现"掉线不掉状态"的体验。
 //

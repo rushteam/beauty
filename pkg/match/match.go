@@ -3,7 +3,7 @@
 // 所有输入(业务数据、成员变更、同步信号)经带缓冲 channel 串行消费,
 // 状态封装在 goroutine 内,无需锁。
 //
-// 设计参考 Nakama match_handler.go 的单 goroutine + ticker + 背压降级模式。
+// 单 goroutine + ticker + 背压降级模式。
 // 适用场景:游戏房间、权威对战、协作编辑、实时同步状态机等需要
 // "固定帧率 + 串行状态更新 + 慢消费降级"的长连接会话。
 //
@@ -204,7 +204,7 @@ func (m *Match[S, I, O]) Start(ctx context.Context) error {
 }
 
 // QueueInput 非阻塞投递一条输入。会话已停止或队列满时返回 false(丢弃)。
-// 丢弃而非阻塞:慢消费不应拖垮生产端,参考 Nakama match_handler 的背压策略。
+// 丢弃而非阻塞:慢消费不应拖垮生产端,背压策略。
 // 输入在 inputCh 中累积,由下一次 tick 批量 drain 并交给 Handler.Tick。
 func (m *Match[S, I, O]) QueueInput(in I) bool {
 	if m.stopped.Load() {
@@ -398,7 +398,7 @@ func (m *Match[S, I, O]) drainAndTick(ctx context.Context) {
 }
 
 // queueCall 把一个调用排入 callCh 串行执行。
-// 队列满(过载)时停止会话,避免滞后无限堆积。参考 Nakama match_handler.go:250-265。
+// 队列满(过载)时停止会话,避免滞后无限堆积。
 func (m *Match[S, I, O]) queueCall(f func(*Match[S, I, O])) bool {
 	if m.stopped.Load() {
 		return false

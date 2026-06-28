@@ -1,7 +1,7 @@
 // Package storage 提供版本化的对象存储原语:owner + collection + key + value + version,
 // 通过乐观并发控制(OCC)保证并发写不覆盖,支持三种写语义与懒淘汰索引。
 //
-// 设计参考 Nakama server/core_storage.go:
+// 设计要点:
 //   - 对象的 version = value 的 MD5 摘要,写时 If-Match 校验(乐观锁);
 //   - 三种写模式:IfMatch(version 匹配才写,否则冲突)、IfNotExist(version="" 仅当不存在)、
 //     LastWriteWins(version="*" 无条件 upsert);
@@ -140,7 +140,7 @@ func (s *Storage) Write(op WriteOp, now int64) (*Object, error) {
 }
 
 // WriteBatch 批量写。按 collection→key→owner 排序后依次应用,避免死锁。
-// 全部成功才提交;任一失败则已应用的回滚(参考 Nakama 事务语义)。
+// 全部成功才提交;任一失败则已应用的回滚(事务语义)。
 func (s *Storage) WriteBatch(ops []WriteOp, now int64) ([]*Object, error) {
 	if now == 0 {
 		now = time.Now().UnixNano()

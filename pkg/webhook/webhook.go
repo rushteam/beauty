@@ -6,7 +6,7 @@
 //   - 投递状态追踪:Store 记录每次投递的最终状态(delivered/failed);
 //   - DLQ:重试耗尽后投递入死信队列,供后续重放(Replay)。
 //
-// 设计参考 Nakama server/runtime/event_queue.go 的 at-least-once + 去重语义。
+// at-least-once + 去重语义。
 package webhook
 
 import (

@@ -8,7 +8,7 @@
 // 两者结构相似但语义不同:notification 无已读状态(通知发出即视为送达),
 // inbox 必须有已读/未读(用户要区分"新消息")。复用同一套游标分页约定。
 //
-// 设计参考 Nakama 的 inbox/chat 持久化语义:
+// inbox/chat 持久化语义:
 //   - Send 写入收件人信箱,分配全局 ID + 用户内单调 Seq;
 //   - List 游标分页(afterSeq=0 取最新,翻页用上一批最小 seq);
 //   - MarkRead 标记已读(单条或到某 seq 为止);

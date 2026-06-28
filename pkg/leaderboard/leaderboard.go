@@ -1,7 +1,7 @@
 // Package leaderboard 提供排行榜的内存排名缓存:用堆排序维护每个榜的有序结构,
 // O(log N) 查"我的名次"、按名次取记录,避免高频读时每次 ORDER BY 击穿数据库。
 //
-// 设计参考 Nakama server/leaderboard_rank_cache.go:
+// 设计要点:
 //   - 每个榜 + 过期周期维护一个独立的 RankCache;
 //   - Fill 全量加载、Insert/Delete 增量维护、Get 按主人查名次;
 //   - 黑名单机制:某些超大或写频繁的榜可不进缓存,退化为不缓存(本包表现为 Get 返回 -1)。

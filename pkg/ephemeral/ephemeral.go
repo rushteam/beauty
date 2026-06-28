@@ -3,7 +3,7 @@
 // 与 pkg/domain/storage 互补:storage 是版本化 KV + OCC(重,用于存档/配置),
 // 本包是轻量过期缓存(用于匹配房间临时数据 / 短期 token 缓存 / 排行榜快照 / 验证码)。
 //
-// 设计参考 Nakama 的 ephemeral storage 语义:
+// ephemeral storage 语义:
 //   - Set(key, value, ttl):ttl 到点自动过期,Get 返回 (value, ok);
 //   - 底层 map + 单 goroutine 定时清扫(参考 pkg/token 的 gc 模式);
 //   - 并发安全(sync.RWMutex + channel-driven gc)。

@@ -8,7 +8,7 @@
 //   - 关闭握手:Close 只发一次 close 帧,CloseRead 返回的 ctx 取消即代表对端断开;
 //   - 写超时保护:每条写用独立带超时的 ctx,慢客户端不拖垮会话。
 //
-// 设计参考 Nakama server/session_ws.go 的 Consume/processOutgoing/pingNow,
+// Consume/processOutgoing/pingNow,
 // 适配 coder/websocket 的 context-based API。
 //
 // 使用:

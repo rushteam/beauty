@@ -5,7 +5,7 @@
 // 事件驱动(手动 Submit),且支持运行时暂停/恢复回调处理——适合"回调可能很重、
 // 需要在业务高峰期暂停处理"的场景(如发奖、批量通知、过期清理)。
 //
-// 设计参考 Nakama server/leaderboard_scheduler.go 的工作池 + Pause/Resume 模型。
+// 工作池 + Pause/Resume 模型。
 //
 // 零值不可用,用 New 构造。
 package scheduler

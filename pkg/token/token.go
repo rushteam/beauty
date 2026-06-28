@@ -2,7 +2,7 @@
 // 采用 dual token 模式(短命 session + 长命 refresh,分离密钥)+ 黑名单注销,
 // 补齐 pkg/middleware/auth(只做验证)缺失的"签发/续签/注销"半边。
 //
-// 设计参考 Nakama server/core_session.go + session_cache.go:
+// 设计要点:
 //   - SessionToken claims: user_id + username + vars + token_id + exp + iat;
 //   - refresh token 用独立密钥签发,携带 vars 以便续签时保留原值;
 //   - 注销走黑名单:按 token_id 注销单会话,或按全局时间戳踢所有旧 token;

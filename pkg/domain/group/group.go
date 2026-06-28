@@ -13,7 +13,7 @@
 // StatePending(申请中)。group 在其上加业务规则(如 owner 唯一、admin 可踢人、
 // banlist 用户不能加入)。
 //
-// 设计参考 Nakama core_group.go:Group 为一等实体,成员状态可流转。
+// 设计要点:Group 为一等实体,成员状态可流转。
 // 零值不可用,用 New 构造。Store 并发安全。
 package group
 

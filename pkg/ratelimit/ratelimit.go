@@ -1,7 +1,7 @@
 // Package ratelimit 提供基于键的限流原语:令牌桶 + 滑动窗口两种实现,
 // 外加 HTTP 中间件,可与 pkg/handler 组合(声明式 WithRatelimit)。
 //
-// 设计要点(参考 Nakama 的 per-user 限流 + 通用 token bucket):
+// 设计要点(per-user 限流 + 通用 token bucket):
 //   - Limiter 接口:Allow(key) (allowed, retryAfter),按 key 隔离(如按 userID / IP);
 //   - TokenBucket:固定速率补令牌,允许突发;无锁化设计用 sync.Map + 互斥桶;
 //   - SlidingWindow:滑动窗口(精确),用时间戳 deque;

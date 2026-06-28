@@ -1,7 +1,7 @@
 // Package audit 提供操作审计日志:结构化记录"谁在何时对什么资源做了什么操作",
 // 仅记录成功的请求(失败请求走普通日志),用于合规与运维审计。
 //
-// 设计参考 Nakama server/console_audit.go:
+// 设计要点:
 //   - gRPC/HTTP 拦截器在 handler 成功后写一条 AuditEntry;
 //   - Entry 含 Resource + Action 枚举 + UserID + 结构化 Metadata;
 //   - 仅 err==nil 且状态码 < 500 才记(失败由 logger 负责);
@@ -93,7 +93,7 @@ func New(sink Sink, opts ...Option) *Audit {
 }
 
 // Record 记录一条审计条目。非阻塞:队列满时丢弃。
-// 仅在业务确认操作成功后调用(参考 Nakama 仅记 err==nil)。
+// 仅在业务确认操作成功后调用(仅记 err==nil)。
 func (a *Audit) Record(ctx context.Context, e Entry) {
 	a.mu.Lock()
 	a.seq++

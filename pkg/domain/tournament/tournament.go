@@ -1,7 +1,7 @@
 // Package tournament 提供锦标赛(时间窗排行榜):在 pkg/leaderboard 之上
 // 增加"按 cron 表达式周期性重置"的能力,每周期一个独立榜单,到期自动滚动到下一周期。
 //
-// 设计参考 Nakama server/core_tournament.go:
+// 设计要点:
 //   - Tournament = Leaderboard + 时间窗(start/end/resetSchedule);
 //   - 每个周期用 expiryTime(下一次重置的 unix 秒)作为 leaderboard.RankCache 的
 //     expiry 维度,天然实现"每周期独立榜单",无需显式清榜;
@@ -82,7 +82,7 @@ func New(id string, order leaderboard.SortOrder, resetCron string, opts ...Optio
 }
 
 // currentExpiry 计算当前时间所属周期的 expiry(下一次重置点)。
-// 参考 Nakama calculateTournamentDeadlines:找"上一个 reset 点 + duration 仍覆盖 now"的周期。
+// 找"上一个 reset 点 + duration 仍覆盖 now"的周期。
 func (t *Tournament) currentExpiry(now time.Time) int64 {
 	next := t.schedule.Next(now) // 下一次重置
 	if t.durationSec <= 0 {

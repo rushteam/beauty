@@ -1,7 +1,7 @@
 // Package dberr 把数据库驱动错误翻译为 pkg/errors 的 *Status,
 // 让仓储层只抛原生 driver error,中间件/网关层统一拿到带业务码的错误。
 //
-// 设计参考 Nakama server/db_error.go + storage.go 的错误翻译层:
+// 错误翻译层:
 //   - 驱动层只产 error,业务层调 Translate(err) 得到带 Code 的 *Status;
 //   - 翻译分两步:Driver.Classify(err) → ErrClass(枚举),再按表映射到 Code;
 //   - ErrClass 是 DB 无关的稳定分类(唯一约束、外键、可空、死锁、超时、连接断开...),
@@ -105,7 +105,7 @@ func (t *Translator) Is(err error, class ErrClass) bool {
 }
 
 // defaultTable 默认 ErrClass → Code 映射(可被 WithMapping 覆盖)。
-// 参考 Nakama db_error.go 的语义:冲突→409、不存在→404、超时→504、连接→503。
+// 语义:冲突→409、不存在→404、超时→504、连接→503。
 func defaultTable() map[ErrClass]perr.Code {
 	return map[ErrClass]perr.Code{
 		ClassUnknown:          perr.CodeInternal,

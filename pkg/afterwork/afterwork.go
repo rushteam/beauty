@@ -1,6 +1,5 @@
 // Package afterwork 提供请求级后台任务延寿(waitUntil 语义)。
 //
-// 借鉴 supabase edge-runtime 的 EdgeRuntime.waitUntil(promise):
 // 响应可以立即返回,但被 waitUntil 注册的后台任务会继续跑完——
 // 运行时不会在响应后立刻杀掉它。这是"请求级后台任务延寿"。
 //
@@ -50,19 +49,19 @@ var registryKey = ctxkey.New[*Registry]()
 type Registry struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
-	tasks   int              // 已投递且未完成数
-	done    chan struct{}    // 在 Wait 返回后关闭,供幂等复用
-	stopped bool             // 是否已 Stop
-	drain   time.Duration    // Wait 的最大等待时长
-	onPanic func(error)      // 任务 panic 回调(可空)
+	tasks   int           // 已投递且未完成数
+	done    chan struct{} // 在 Wait 返回后关闭,供幂等复用
+	stopped bool          // 是否已 Stop
+	drain   time.Duration // Wait 的最大等待时长
+	onPanic func(error)   // 任务 panic 回调(可空)
 }
 
 // Option 配置 Registry。
 type Option func(*config)
 
 type config struct {
-	drain    time.Duration
-	onPanic  func(error)
+	drain   time.Duration
+	onPanic func(error)
 }
 
 // WithDrainTimeout 设置 Wait 的最大等待时长。<=0 表示无上限(慎用)。

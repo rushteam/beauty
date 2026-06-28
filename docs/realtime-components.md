@@ -41,6 +41,9 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/resume` | 断线重连在场还原(token+presence) | 掉线不掉状态 / 自动重连 | 8298 |
 | `pkg/presence/status` | 状态变化广播给关注者 | 好友上下线通知 / status event | 8299 |
 | `pkg/ephemeral` | 短期 TTL KV(纯内存 + 过期清扫) | 验证码 / 临时数据 / 缓存 | 8302 |
+| `pkg/afterwork` | 请求级后台任务延寿(waitUntil 语义) | 响应后发邮件 / 写审计 / 触发 webhook | 8303 |
+| `pkg/handler` | 声明式 HTTP handler 包装器(auth+inject+afterwork+错误归一化) | 业务函数只写 (ctx,req)=>(resp,err) | 8303 |
+| `pkg/ratelimit` | 按键限流(令牌桶 + 滑动窗口)+ HTTP 中间件 | 防刷屏 / API 限流 / 按用户/IP 隔离 | 8304 |
 
 ### 业务实体(pkg/domain/)
 
@@ -53,6 +56,8 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/domain/storage` | 版本化 KV + OCC 乐观锁 | 游戏存档 / 用户配置 | 8293 |
 | `pkg/domain/relationship` | 社交图谱(二部有向图 + 状态编码) | 好友 / 关注 / 拉黑 / 群组 | 8294 |
 | `pkg/domain/chat` | 频道持久消息 + 游标分页 | IM 频道历史 / 翻页 | 8300 |
+| `pkg/domain/inbox` | 点对点离线消息收件箱(已读/未读 + ACK) | 离线私聊 / 离线赠礼 / 战绩推送 | 8304 |
+| `pkg/domain/group` | 群组实体(角色/邀请审核/公告/banlist) | 公会 / 群聊 / 家族 | 8304 |
 
 > 另有 `examples/clan`(端口 8301)演示用 relationship + tournament + wallet 组合出公会语义,不新增包。
 
@@ -107,6 +112,12 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 
 **完整组合:匹配大厅**——`matchmaker.Add` 入队,匹配回调里 `presence.Track`
 把队员加入同一流并 `match.Start` 开房,房间产出经 `router.SendToStream` 下发。
+
+**HTTP 支线:声明式 handler + 响应后副作用**——业务函数只写
+`(ctx, req) => (resp, error)`,`pkg/handler` 负责认证策略(`WithAuth`)、
+依赖注入(`WithInject`)、错误归一化(`errors.WriteHTTP`);响应返回后
+`pkg/afterwork` 的 `Wait()` 把 `Defer` 投递的副作用(发邮件 / 写审计 /
+触发 `pkg/webhook`)跑完。见 `examples/afterwork`。
 
 ## 速查:pkg/match（有状态实时会话）
 
@@ -557,6 +568,137 @@ s.Delete("code:138xxxx"); s.Len()
 底层 `map + 单 goroutine 定时清扫 + Get 惰性删除`(参考 `pkg/token` 的 gc 模式)。
 value 类型 `any`(像 sync.Map,一个 Store 存多种类型)。详见 `examples/ephemeral`。
 
+## 速查:pkg/afterwork（请求级后台任务延寿 / waitUntil）
+
+借鉴 supabase edge-runtime 的 `EdgeRuntime.waitUntil(promise)`:响应可以立即返回,
+但被 `Defer` 注册的后台任务会继续跑完——运行时不会在响应后立刻杀掉它。
+与 `pkg/safe.Go` 的区别:safe.Go 是全局 fire-and-forget,无生命周期绑定;
+afterwork 把任务绑定到请求 ctx,响应返回后由框架调用 `Wait()` 等待全部跑完(带上限)。
+
+```go
+// 中间件接入:为每个请求建 Registry,handler 返回后 Wait()。
+h := afterwork.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    afterwork.Defer(r.Context(), func(ctx context.Context) {
+        _ = webhook.Notify(ctx, event) // 响应返回后跑完
+    })
+    w.Write([]byte("ok"))
+}))
+
+// 非 HTTP 场景或测试:独立 Registry。
+reg := afterwork.New(afterwork.WithDrainTimeout(10*time.Second))
+ctx := afterwork.WithRegistry(context.Background(), reg)
+afterwork.Defer(ctx, func(context.Context) { /* ... */ })
+reg.Wait() // 阻塞至全部完成或 drain timeout
+```
+
+要点:任务 panic 被 `pkg/safe` 恢复(可接 `WithPanicHandler`);任务 ctx 用
+`context.WithoutCancel` 派生——请求 ctx 取消时任务**不应**被立即杀死,响应后仍跑完。
+`Wait()` 幂等;`Stop()` 是 `Wait()` 的别名。详见 `examples/afterwork`。
+
+## 速查:pkg/handler（声明式 HTTP handler 包装器）
+
+借鉴 supabase `withSupabase({auth:'user'}, handler)`:把 auth 策略 + 资源注入 +
+错误归一化从业务 handler 上移到包装器,业务函数只写 `(ctx, req) => (resp, error)`。
+是 `pkg/middleware/auth` + `pkg/afterwork` + `pkg/errors` + DI 组合成的 ergonomic 装饰器。
+
+```go
+type CreateReq struct{ Sku string `json:"sku"` }
+type CreateResp struct{ OrderID string `json:"order_id"` }
+
+h := handler.New[CreateReq, CreateResp]("POST",
+    func(ctx context.Context, req *CreateReq) (*CreateResp, error) {
+        user, _ := auth.GetUserFromContext(ctx)          // WithAuth 注入
+        db  := handler.MustGet[*sql.DB](ctx, "db")       // WithInject 注入
+        id, err := createOrder(ctx, db, user.ID(), req.Sku)
+        if err != nil { return nil, err }
+        afterwork.Defer(ctx, func(c context.Context) {   // WithAfterwork 挂载
+            _ = webhook.Notify(c, orderEvent{id})
+        })
+        return &CreateResp{OrderID: id}, nil
+    },
+    handler.WithAuth(myAuthPolicy),       // 认证+授权,User 注入 ctx
+    handler.WithInject("db", orderDB),    // 命名依赖注入
+    handler.WithAfterwork(),              // 响应后延寿
+)
+mux.Handle("/orders", h)                  // h 即 http.Handler
+```
+
+要点:返回 `*Status` 原样经 `errors.WriteHTTP` 写出;普通 error 兜底 500。
+`Get[T](ctx, name)` 取依赖(类型不符返回 ok=false),`MustGet` 启动期早炸。
+`WithMethod` 校验方法;nil 响应返回 204。详见 `examples/afterwork`。
+
+## 速查:pkg/ratelimit（按键限流 + HTTP 中间件）
+
+通用横切限流原语,两种算法:`TokenBucket`(固定速率补令牌,允许突发)与
+`SlidingWindow`(滑动窗口精确计数)。按 key 隔离(每用户/IP 独立计数),
+超限返回 429 + `Retry-After`。与 `pkg/handler` 声明式组合:`WithRatelimit`。
+
+```go
+tb := ratelimit.NewTokenBucket(5, 1)         // 突发5,1/s 补
+defer tb.Stop()
+tb.Allow("user:alice")                       // (true,0) 突发内放行;超限 (false,retryAfter)
+
+// HTTP 中间件:按客户端 IP 限流。
+h := ratelimit.Middleware(tb, ratelimit.ClientIP)(myHandler)
+
+// 声明式接入 pkg/handler:限流在 auth 之前(超限不解析 body)。
+handler.New("POST", fn, handler.WithRatelimit(tb, byUserID))
+
+// 滑动窗口:50ms 内最多 3 次。
+sw := ratelimit.NewSlidingWindow(3, 50*time.Millisecond)
+```
+
+后台 gc 清理长时间无活动的 key(默认 5min idle / 1min 扫一次),避免内存泄漏。
+`burst<=0`/`rate<=0`/`limit<=0` 视为不限(Allow 永远 true)。详见 `examples/group`。
+
+## 速查:pkg/domain/inbox（点对点离线消息收件箱）
+
+与 `pkg/domain/notification` 互补:notification 是"系统→用户"单向通知(无已读状态),
+inbox 是"用户→用户"点对点离线消息,**带已读/未读 + ACK**(像邮件收件箱)。
+离线私聊、离线赠礼、离线战绩推送用本包。
+
+```go
+s := inbox.New(liveSink)                     // liveSink 可 nil(纯离线留存)
+m := s.Send(ctx, "alice", "bob", "chat", `{"text":"hi"}`)
+//  → Message{ID, OwnerID:"alice", FromID:"bob", Seq:1, Read:false}
+
+list := s.List("alice", 0, 10)               // 降序最新 N 条;afterSeq=0 取最新
+page2 := s.List("alice", list[len-1].Seq, 10) // 向后翻页
+
+n := s.UnreadCount("alice")                  // 红点数
+s.MarkRead("alice", 3)                        // 标记 seq<=3 已读,返回新标记数
+s.MarkOneRead("alice", 5)                     // 单条 ACK
+s.Delete("alice", 3)                          // 删单条
+```
+
+`Seq` 在信箱内单调递增,驱逐后不回退(像 notification seq)。`List` 返回值是拷贝,
+外部改不影响内部。`WithMaxPerBox` 默认 500。详见 `examples/group`。
+
+## 速查:pkg/domain/group（群组实体:角色/审核/公告/banlist）
+
+把 `examples/clan` 里现场组合的公会语义沉淀成包。群组是一等实体:owner(唯一)/
+admin/member 三级角色,申请-审批工作流,公告,最大人数,封禁名单。内部用
+`pkg/domain/relationship.Graph` 存成员边(source=groupID,dest=userID,State=角色),
+在其上加业务规则(owner 唯一、admin 不能踢同级、banned 不能加入)。
+
+```go
+s := group.New()
+s.Create(group.Group{ID:"g1", Name:"公会", OwnerID:"alice", MaxMembers:50})
+s.Join("g1", "bob")                           // 直接加入
+s.Request("g1", "carol")                      // 申请(待审核)
+s.Approve("g1", "alice", "carol")             // owner/admin 审批
+s.Promote("g1", "alice", "bob")               // 提为 admin(仅 owner)
+s.Kick("g1", "alice", "bob")                  // 踢人(admin 不能踢同级/owner)
+s.Ban("g1", "alice", "bob")                   // 封禁(立即移除成员关系)
+s.TransferOwner("g1", "alice", "bob")         // 转让群主(旧 owner 降 admin)
+s.SetAnnouncement("g1", "alice", "欢迎")       // 公告(仅 owner/admin)
+owners, admins, members, _ := s.Members("g1") // 按角色分组
+```
+
+角色编码复用 relationship 常量(`RoleOwner`/`RoleAdmin`/`RoleMember`/`RolePending`)。
+owner 不能直接退出(须先 `TransferOwner`)。详见 `examples/group`——
+该 demo 还组合了 `pkg/domain/inbox`(成员间离线私聊)+ `pkg/ratelimit`(发消息限流)。
+
 ## 速查:examples/clan（用现有原语组合出公会,不新增包）
 
 证明 `pkg/` 原语组合已覆盖公会场景,无需新包:
@@ -569,7 +711,7 @@ value 类型 `any`(像 sync.Map,一个 Store 存多种类型)。详见 `examples
 
 ## 风格约定
 
-十四个包遵循统一约定,便于混用:
+十九个包遵循统一约定,便于混用:
 
 - **纯标准库**——除 `pkg/ws/session` 复用 `pkg/ws`(依赖 `coder/websocket`)、
   `pkg/domain/tournament` 复用 `robfig/cron/v3`(cron 解析)外,其余包零第三方依赖,
@@ -604,7 +746,9 @@ value 类型 `any`(像 sync.Map,一个 Store 存多种类型)。详见 `examples
   `core_tournament.go` / `party_handler.go` / `core_storage.go` /
   `core_group.go` / `core_friend.go` / `core_session.go` / `session_cache.go` /
   `db_error.go` / `runtime/event_queue.go`。
+- `pkg/afterwork` / `pkg/handler` 设计来源:supabase edge-runtime 的
+  `EdgeRuntime.waitUntil` + `withSupabase({auth, deps}, handler)` 声明式包装模式。
 - demo:`examples/{match,session,presence,router,leaderboard,scheduler,matchmaker,
   audit,wallet,notification,tournament,party,storage,relationship,token,dberr,webhook,
-  resume,status,chat,ephemeral,clan}/main.go`。
+  resume,status,chat,ephemeral,clan,afterwork,group}/main.go`。
 - 测试:各包 `*_test.go`,均通过 `go test -race -count=3`。

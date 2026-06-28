@@ -89,6 +89,13 @@ func GetUserFromContext(ctx context.Context) (User, bool) {
 	return user, ok
 }
 
+// WithUser 将用户信息注入上下文,返回新 ctx。
+// 供声明式 handler 包装器(pkg/handler)在认证策略通过后把 User 装入 ctx,
+// 业务函数随后用 GetUserFromContext 取出。与 HTTPMiddleware 内部使用同一 key。
+func WithUser(ctx context.Context, user User) context.Context {
+	return context.WithValue(ctx, userContextKey, user)
+}
+
 // RequireAuth 创建需要认证的中间件（用于特定路由）
 func RequireAuth(auth *AuthMiddleware) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

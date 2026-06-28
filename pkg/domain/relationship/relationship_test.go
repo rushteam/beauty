@@ -2,6 +2,7 @@ package relationship_test
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
@@ -67,6 +68,38 @@ func TestGraph_AddFriendBlocked(t *testing.T) {
 	if friends := g.Friends("a"); friends != nil {
 		t.Fatalf("no friend edge should exist, got %v", friends)
 	}
+}
+
+func TestGraph_Watchers(t *testing.T) {
+	g := relationship.New()
+	// a 关注 b/c,b 与 d 互为好友,c 关注 a。
+	_ = g.AddEdge(relationship.Edge{Source: "a", Destination: "b", State: relationship.StateActive, Position: 1})
+	_ = g.AddEdge(relationship.Edge{Source: "a", Destination: "c", State: relationship.StateActive, Position: 2})
+	_ = g.AddFriend("b", "d", 3)
+	_ = g.AddEdge(relationship.Edge{Source: "c", Destination: "a", State: relationship.StateActive, Position: 4})
+
+	// 谁关注/好友了 b?a(关注)+ d(好友)。
+	w := g.Watchers("b", -1)
+	if len(w) != 2 {
+		t.Fatalf("watchers of b: want 2, got %d (%v)", len(w), w)
+	}
+	if !containsStr(w, "a") || !containsStr(w, "d") {
+		t.Fatalf("watchers of b should be a,d, got %v", w)
+	}
+	// 谁关注 a?c。
+	wa := g.Watchers("a", -1)
+	if len(wa) != 1 || wa[0] != "c" {
+		t.Fatalf("watchers of a: want [c], got %v", wa)
+	}
+	// 无人关注 c。
+	if wc := g.Watchers("c", -1); len(wc) != 1 || wc[0] != "a" {
+		// a 关注了 c → a 是 c 的 watcher。修正预期。
+		t.Fatalf("watchers of c: want [a], got %v", wc)
+	}
+}
+
+func containsStr(s []string, v string) bool {
+	return slices.Contains(s, v)
 }
 
 func TestGraph_BlockRemovesExistingEdge(t *testing.T) {

@@ -3,17 +3,17 @@
 beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,提供了一组
 **可独立组合**的实时服务原语,覆盖长连接会话、在线状态、消息路由、匹配组队、
 排行榜缓存、任务调度、虚拟账户、操作审计、离线通知、周期榜单、临时小队、
-版本化存储、社交图谱、会话令牌、DB 错误翻译、可靠 Webhook 十六类典型场景。
-它们均借鉴 [Nakama](https://github.com/heroiclabs/nakama) 游戏服务器的工程模型,
-落地为 beauty 风格(泛型 + 函数式 Option + 中文 doc + 纯标准库)。
+版本化存储、社交图谱、会话令牌、DB 错误翻译、可靠 Webhook、断线重连、状态广播、
+频道历史、短期 TTL KV 二十一类典型场景。它们均借鉴 [Nakama](https://github.com/heroiclabs/nakama)
+游戏服务器的工程模型,落地为 beauty 风格(泛型 + 函数式 Option + 中文 doc + 纯标准库)。
 
 包按"通用 vs 业务"分两个命名空间:
 
 - **`pkg/`** —— 通用实时原语(不预设业务语义):会话、在场、路由、匹配、排名、调度、审计、
-  令牌、DB 错误翻译、Webhook。这些是"频道/路由/状态机/排名/鉴权/错误归一"级别的工具,
-  不绑定具体业务实体。
-- **`pkg/domain/`** —— 业务实体(预设了业务模型):账户、通知、派对、锦标赛、存储、关系。
-  这些包带"业务实体"语义(货币/通知/小队/赛季榜/存档/社交),归拢到 `domain`
+  令牌、DB 错误翻译、Webhook、断线重连、状态广播、短期 TTL KV。
+  这些是"频道/路由/状态机/排名/鉴权/错误归一/重连/缓存"级别的工具,不绑定具体业务实体。
+- **`pkg/domain/`** —— 业务实体(预设了业务模型):账户、通知、派对、锦标赛、存储、关系、聊天。
+  这些包带"业务实体"语义(货币/通知/小队/赛季榜/存档/社交/频道),归拢到 `domain`
   便于识别与隔离,import 路径统一 `pkg/domain/<name>`。
 
 各包各司其职,无强耦合:你可以只用 `session` 做一个 echo 房间,也可以把
@@ -38,6 +38,9 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/token` | dual token(JWT HS256)+ 黑名单注销 | 登录态签发 / 续签 / 踢出 | 8295 |
 | `pkg/dberr` | DB 错误码翻译(DB-agnostic → *Status) | 仓储层错误归一为业务码 | 8296 |
 | `pkg/webhook` | 事件通知 + 幂等去重 + DLQ | 外部系统回调 / at-least-once | 8297 |
+| `pkg/resume` | 断线重连在场还原(token+presence) | 掉线不掉状态 / 自动重连 | 8298 |
+| `pkg/presence/status` | 状态变化广播给关注者 | 好友上下线通知 / status event | 8299 |
+| `pkg/ephemeral` | 短期 TTL KV(纯内存 + 过期清扫) | 验证码 / 临时数据 / 缓存 | 8302 |
 
 ### 业务实体(pkg/domain/)
 
@@ -49,6 +52,9 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/domain/party` | 无权威小队(Leader + 加入审核) | 好友开黑 / 临时小队 | 8292 |
 | `pkg/domain/storage` | 版本化 KV + OCC 乐观锁 | 游戏存档 / 用户配置 | 8293 |
 | `pkg/domain/relationship` | 社交图谱(二部有向图 + 状态编码) | 好友 / 关注 / 拉黑 / 群组 | 8294 |
+| `pkg/domain/chat` | 频道持久消息 + 游标分页 | IM 频道历史 / 翻页 | 8300 |
+
+> 另有 `examples/clan`(端口 8301)演示用 relationship + tournament + wallet 组合出公会语义,不新增包。
 
 > demo 源码均在 `examples/<pkg>/main.go`,单文件、约 50 行,可直接 `go run`。
 
@@ -463,6 +469,104 @@ store.Records()                       // 投递状态快照
 接口:`Store`(MarkDelivered/RecordDelivered/RecordFailed)、`DLQ`(Push/Pop/Len)。
 内存实现 `MemStore`/`MemDLQ` 开箱即用。详见 `examples/webhook`。
 
+## 速查:pkg/resume（断线重连在场还原）
+
+补齐登录态的最后一块:把 `pkg/token` 与 `pkg/presence` 织成"掉线不掉状态"。
+客户端用 refresh token 重连 → 服务端换出 userID + 查还在哪些流 → 回给客户端自动重连。
+约定:业务在 `Issue` 时把 `tokenID` 作为 `presence.Track` 的 sessionID(或建立映射),
+本包按此约定查询。
+
+```go
+r := resume.New(
+    resume.WithTokenManager(tm),   // *token.Manager
+    resume.WithTracker(tr),         // *presence.Tracker
+)
+// 断线重连:refresh token → 还原在场快照。
+info, err := r.Resolve(refreshToken)   // → PresenceInfo{UserID,TokenID,Streams}
+// 用新 sessionID 把流重新登记(模拟客户端用新连接重连)。
+r.MarkOnline("new-"+info.TokenID, info.UserID, "alice", info.Streams, false)
+// 或不走 token,直接按 sessionID 查在场(业务自管 sessionID 场景)。
+info, _ = r.ResolveBySessionID("sess-99")
+```
+
+错误透传:`ErrInvalidToken` / `ErrExpired` / `ErrRevoked` / `ErrKicked`(均为 token 包
+同名错误别名)+ `ErrNotConfigured`。详见 `examples/resume`。
+
+## 速查:pkg/presence/status（状态变化广播给关注者）
+
+`pkg/presence.Listener` 只在同流内广播 join/leave;本包订阅 presence 事件,查"谁关注了
+状态变化的人"(走 `relationship.Watchers` 反向查询),把 status notification 走 `router`
+投递给关注者会话。串起 `relationship + presence + router`。
+
+```go
+g := relationship.New()
+rtr := router.New(regs, nil)
+disp := status.New(
+    status.WithWatcherFinder(g),     // 反向查关注者(relationship.Graph 已实现 Watchers)
+    status.WithNotifier(func(sids []string, p []byte) int {
+        return rtr.SendToSessionIDs(sids, router.Message{Data: p, Reliable: true})
+    }),
+)
+// 用 disp.OnPresence 作 presence.Listener:presence 事件 → status 通知。
+tr := presence.New(disp.OnPresence, 256)
+tr.Track("s1", stream, presence.Meta{UserID:"alice"})  // alice 上线 → 关注者收 online
+tr.Untrack("s1", stream, "alice")                       // alice 全部流离开 → 关注者收 offline
+// 手动触发(不经 presence 事件):
+disp.Dispatch("alice", status.StateOffline, nil)
+```
+
+`relationship.Graph.Watchers(userID, stateFilter)` 反向查"谁把 userID 作为 destination
+建了非 block 边"。多图谱可叠加(`WithWatcherFinder` 多次调用,自动去重)。
+详见 `examples/status`。
+
+## 速查:pkg/domain/chat（频道持久消息 + 游标分页）
+
+与 `pkg/domain/notification` 互补:notification 按 userID 游标(个人离线信),
+chat 按 channelID 游标(频道历史)。IM 频道消息需要持久化 + 历史拉取 + 翻页,
+区别于 `pkg/match` 的实时(不持久)与 `pkg/router` 的投递(不存历史)。
+
+```go
+s := chat.New(chat.WithMaxPerChannel(500))
+m := s.Post("room1", "alice", "hi", time.Now().UnixNano())  // → *Message{ID,MsgID}
+s.Post("room1", "bob", "yo", now)
+
+s.Latest("room1", 20)        // 最新 20 条(降序)
+s.Before("room1", 8, 20)     // msgID<8 的历史(往前翻,降序)
+s.After("room1", 5, 20)      // msgID>5 的新消息(增量拉,升序)
+s.LastMsgID("room1")         // 最新 msgID(增量拉取游标基点)
+s.Count("room1"); s.Delete("room1", m.ID)
+```
+
+`MsgID` 频道内单调,超容量删最旧也不回退(参考 notification 的 seq 设计)。
+实时投递与持久化解耦:本包只存历史,实时扇出由 `pkg/router` 负责。详见 `examples/chat`。
+
+## 速查:pkg/ephemeral（短期 TTL KV）
+
+`pkg/domain/storage` 的轻量版:不版本化、不持久,纯内存 + 到点自动过期。
+用于验证码 / 匹配房间临时数据 / 短期 token 缓存 / 排行榜快照。
+
+```go
+s := ephemeral.New()
+defer s.Stop()                          // 停止清扫 goroutine(幂等)
+s.Set("code:138xxxx", "123456", 5*time.Minute)
+v, ok := s.Get("code:138xxxx")          // → ("123456", true);过期返回 (nil,false) 并惰性删除
+s.Delete("code:138xxxx"); s.Len()
+// ttl<=0 不存储;overwrite 用更短 TTL 会按新 TTL 过期。
+```
+
+底层 `map + 单 goroutine 定时清扫 + Get 惰性删除`(参考 `pkg/token` 的 gc 模式)。
+value 类型 `any`(像 sync.Map,一个 Store 存多种类型)。详见 `examples/ephemeral`。
+
+## 速查:examples/clan（用现有原语组合出公会,不新增包）
+
+证明 `pkg/` 原语组合已覆盖公会场景,无需新包:
+- `relationship` 做成员与角色(leader=StateOwner / member=StateActive);
+- `tournament` 做公会战赛季榜(cron 重置 + 排名);
+- `wallet` 做公会基金(捐赠/发放);
+- `party` 做公会内小队(临时组队)。
+
+路由:`/create` `/join` `/members` `/donate` `/fund` `/score` `/ranking`。详见 `examples/clan`。
+
 ## 风格约定
 
 十四个包遵循统一约定,便于混用:
@@ -501,5 +605,6 @@ store.Records()                       // 投递状态快照
   `core_group.go` / `core_friend.go` / `core_session.go` / `session_cache.go` /
   `db_error.go` / `runtime/event_queue.go`。
 - demo:`examples/{match,session,presence,router,leaderboard,scheduler,matchmaker,
-  audit,wallet,notification,tournament,party,storage,relationship,token,dberr,webhook}/main.go`。
+  audit,wallet,notification,tournament,party,storage,relationship,token,dberr,webhook,
+  resume,status,chat,ephemeral,clan}/main.go`。
 - 测试:各包 `*_test.go`,均通过 `go test -race -count=3`。

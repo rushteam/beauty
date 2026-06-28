@@ -211,6 +211,24 @@ func (g *Graph) Friends(source string) []string {
 	return out
 }
 
+// Watchers 反向查询:谁把 userID 作为 destination 建立了 active 边(关注者/好友)。
+// 用于"用户上下线时通知谁"——即 status event 的订阅者发现。
+// stateFilter==-1 不过滤;否则只返回该 state(如 StateActive=好友/关注,不含 block)。
+func (g *Graph) Watchers(userID string, stateFilter int) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []string
+	for source, m := range g.edges {
+		if e, ok := m[userID]; ok && e.State != StateBlocked {
+			if stateFilter != -1 && e.State != stateFilter {
+				continue
+			}
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
 // Edge 查询单条边。不存在返回 ErrNotFound。
 func (g *Graph) Edge(source, dest string) (Edge, error) {
 	g.mu.Lock()

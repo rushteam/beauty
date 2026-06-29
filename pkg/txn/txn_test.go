@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/txn"
 )
@@ -189,7 +190,7 @@ func (p *prepareTracker) Prepare(context.Context) error {
 	*p.order = append(*p.order, p.name)
 	return nil
 }
-func (p *prepareTracker) Commit(context.Context) error  { return nil }
+func (p *prepareTracker) Commit(context.Context) error   { return nil }
 func (p *prepareTracker) Rollback(context.Context) error { return nil }
 
 func TestRun_Empty_NoOp(t *testing.T) {
@@ -233,4 +234,143 @@ func TestRun_RunsSerially(t *testing.T) {
 	if maxInflight.Load() > 1 {
 		t.Fatalf("Run should be serial, max inflight=%d", maxInflight.Load())
 	}
+}
+
+func TestOnCommit_RunsAfterAllCommit(t *testing.T) {
+	var (
+		hookRan   atomic.Bool
+		commitSeq []string
+		mu        sync.Mutex
+	)
+	record := func(s string) { mu.Lock(); commitSeq = append(commitSeq, s); mu.Unlock() }
+	a := &seqParticipant{name: "a", onCommit: func() { record("commit-a") }}
+	b := &seqParticipant{name: "b", onCommit: func() { record("commit-b") }}
+	c := txn.New()
+	c.Enlist("a", a)
+	c.Enlist("b", b)
+	c.OnCommit(func(ctx context.Context) error {
+		record("hook")
+		hookRan.Store(true)
+		return nil
+	})
+	err := c.Run(context.Background(), func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 钩子异步,等一下。
+	waitTrue(t, &hookRan, "post-commit hook should run")
+	mu.Lock()
+	defer mu.Unlock()
+	// 全部 commit 在 hook 前。
+	want := []string{"commit-a", "commit-b", "hook"}
+	if len(commitSeq) != len(want) {
+		t.Fatalf("seq len want %d, got %v", len(want), commitSeq)
+	}
+	for i, s := range want {
+		if commitSeq[i] != s {
+			t.Fatalf("seq[%d] want %s, got %v", i, s, commitSeq)
+		}
+	}
+}
+
+func TestOnCommit_NotRunOnPrepareFail(t *testing.T) {
+	var hookRan atomic.Bool
+	c := txn.New()
+	c.Enlist("a", &fakeParticipant{name: "a", prepareOK: true, commitOK: true})
+	c.Enlist("b", &fakeParticipant{name: "b", prepareOK: false, commitOK: true})
+	c.OnCommit(func(ctx context.Context) error { hookRan.Store(true); return nil })
+	_ = c.Run(context.Background(), func() error { return nil })
+	// Prepare 失败,钩子不应执行。钩子异步,给窗口确保它真的没跑。
+	if !waitFalse(&hookRan) {
+		t.Fatal("post-commit hook should NOT run on prepare failure")
+	}
+}
+
+func TestOnCommit_NotRunOnBodyFail(t *testing.T) {
+	var hookRan atomic.Bool
+	c := txn.New()
+	c.Enlist("a", &fakeParticipant{name: "a", prepareOK: true, commitOK: true})
+	c.OnCommit(func(ctx context.Context) error { hookRan.Store(true); return nil })
+	_ = c.Run(context.Background(), func() error { return errors.New("body boom") })
+	if !waitFalse(&hookRan) {
+		t.Fatal("post-commit hook should NOT run on body failure")
+	}
+}
+
+func TestOnCommit_NotRunOnCommitFail(t *testing.T) {
+	var hookRan atomic.Bool
+	c := txn.New()
+	c.Enlist("a", &fakeParticipant{name: "a", prepareOK: true, commitOK: false}) // commit 失败
+	c.Enlist("b", &fakeParticipant{name: "b", prepareOK: true, commitOK: true})
+	c.OnCommit(func(ctx context.Context) error { hookRan.Store(true); return nil })
+	_ = c.Run(context.Background(), func() error { return nil })
+	if !waitFalse(&hookRan) {
+		t.Fatal("post-commit hook should NOT run when commit fails")
+	}
+}
+
+func TestOnCommit_HookPanicRecovered(t *testing.T) {
+	var hookRan atomic.Bool
+	c := txn.New()
+	c.Enlist("a", &fakeParticipant{name: "a", prepareOK: true, commitOK: true})
+	c.OnCommit(func(ctx context.Context) error { hookRan.Store(true); panic("boom") })
+	// 不应 panic,不应返回错。
+	err := c.Run(context.Background(), func() error { return nil })
+	if err != nil {
+		t.Fatalf("Run should not return error on hook panic: %v", err)
+	}
+	waitTrue(t, &hookRan, "hook should have run (and panicked, recovered)")
+}
+
+func TestOnCommit_RegisteredInBody(t *testing.T) {
+	// 钩子可在 body 内注册(此时 Prepare 已完成,但 Commit 未开始)。
+	var hookRan atomic.Bool
+	c := txn.New()
+	c.Enlist("a", &fakeParticipant{name: "a", prepareOK: true, commitOK: true})
+	err := c.Run(context.Background(), func() error {
+		c.OnCommit(func(ctx context.Context) error { hookRan.Store(true); return nil })
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitTrue(t, &hookRan, "hook registered in body should run after commit")
+}
+
+// seqParticipant 记录 Commit 调用顺序的假 Participant。
+type seqParticipant struct {
+	name     string
+	onCommit func()
+}
+
+func (p *seqParticipant) Prepare(context.Context) error { return nil }
+func (p *seqParticipant) Commit(context.Context) error {
+	if p.onCommit != nil {
+		p.onCommit()
+	}
+	return nil
+}
+func (p *seqParticipant) Rollback(context.Context) error { return nil }
+
+// waitTrue 轮询等待 b 为 true(钩子异步执行)。
+func waitTrue(t *testing.T, b *atomic.Bool, msg string) {
+	t.Helper()
+	for range 100 {
+		if b.Load() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
+// waitFalse 给异步钩子一个窗口,确认它没被触发。返回 true 表示确实没跑。
+func waitFalse(b *atomic.Bool) bool {
+	for range 50 {
+		if b.Load() {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return !b.Load()
 }

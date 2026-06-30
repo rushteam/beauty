@@ -4,7 +4,7 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 **可独立组合**的实时服务原语,覆盖长连接会话、在线状态、消息路由、匹配组队、
 排行榜缓存、任务调度、虚拟账户、操作审计、离线通知、周期榜单、临时小队、
 版本化存储、社交图谱、会话令牌、DB 错误翻译、可靠 Webhook、断线重连、状态广播、
-频道历史、短期 TTL KV 二十一类典型场景,落地为 beauty 风格(泛型 + 函数式 Option + 中文 doc + 纯标准库)。
+频道历史、短期 TTL KV 二十二类典型场景,落地为 beauty 风格(泛型 + 函数式 Option + 中文 doc + 纯标准库)。
 
 包按"通用 vs 业务"分两个命名空间:
 
@@ -44,6 +44,7 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/handler` | 声明式 HTTP handler 包装器(auth+inject+afterwork+错误归一化) | 业务函数只写 (ctx,req)=>(resp,err) | 8303 |
 | `pkg/ratelimit` | 按键限流(令牌桶 + 滑动窗口)+ HTTP 中间件 | 防刷屏 / API 限流 / 按用户/IP 隔离 | 8304 |
 | `pkg/txn` | 跨域事务协调(两阶段提交 Prepare/Commit/Rollback) | 扣钱包+写存档 原子化 / 任一失败全回滚 | 8305 |
+| `pkg/loadbalance` | 负载均衡算法(一致性哈希 + 平滑加权轮询 + 轮询) | 会话粘性 / 带状态分片 / 按容量分发 | 8306 |
 | `pkg/ctxkey` | 类型安全 context key(泛型 Key[T]) | 统一各包 contextKey 定义 / 防 key 冲突 | — |
 
 ### 业务实体(pkg/domain/)
@@ -749,7 +750,7 @@ beauty 的 auth/requestid/callbacks/ratelimit/audit/afterwork/metadata/errors
 
 ## 风格约定
 
-二十一个包遵循统一约定,便于混用:
+二十二个包遵循统一约定,便于混用:
 
 - **纯标准库**——除 `pkg/ws/session` 复用 `pkg/ws`(依赖 `coder/websocket`)、
   `pkg/domain/tournament` 复用 `robfig/cron/v3`(cron 解析)外,其余包零第三方依赖,
@@ -779,5 +780,5 @@ beauty 的 auth/requestid/callbacks/ratelimit/audit/afterwork/metadata/errors
 
 - demo:`examples/{match,session,presence,router,leaderboard,scheduler,matchmaker,
   audit,wallet,notification,tournament,party,storage,relationship,token,dberr,webhook,
-  resume,status,chat,ephemeral,clan,afterwork,group,txn}/main.go`。
+  resume,status,chat,ephemeral,clan,afterwork,group,txn,loadbalance}/main.go`。
 - 测试:各包 `*_test.go`,均通过 `go test -race -count=3`。

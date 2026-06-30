@@ -7,11 +7,11 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"log/slog"
 
+	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
@@ -35,7 +35,7 @@ func WithDiscoveryInsecure() ServiceDiscoveryOption {
 type LoadBalanceStrategy int
 
 const (
-	RoundRobin         LoadBalanceStrategy = iota
+	RoundRobin LoadBalanceStrategy = iota
 	Random
 	WeightedRoundRobin
 	LeastConnections
@@ -53,10 +53,9 @@ type ServiceDiscoveryClient struct {
 	retryPolicy *RetryPolicy // nil 表示使用 DefaultRetryPolicy
 
 	strategyVal LoadBalanceStrategy
-	rrIndex     atomic.Int64 // RoundRobin 游标，原子操作避免锁内写
-	wrrIndex    int          // WeightedRoundRobin 游标，受 mu.Lock 保护
-	wrrRemain   int          // 当前节点剩余配额
-	wrrServices []wrrEntry   // 权重表，服务列表变化时重建
+	// RR/WRR 复用 pkg/loadbalance;LeastConnections 依赖 grpc conn 状态,保留在此。
+	rr  *loadbalance.RoundRobin[serviceNode]
+	wrr *loadbalance.WeightedRoundRobin[serviceNode]
 
 	dialOpts           []grpc.DialOption
 	unaryInterceptors  []grpc.UnaryClientInterceptor
@@ -81,9 +80,30 @@ type ServiceDiscoveryClient struct {
 	bgWg      sync.WaitGroup
 }
 
-type wrrEntry struct {
+// serviceNode 适配 discover.ServiceInfo 到 loadbalance.Node 接口。
+// 权重从 ServiceInfo.Metadata["weight"] 解析(默认 100);权重语义是调用方约定,
+// 不应写进 discover 包,故 adapter 放此处。
+type serviceNode struct {
 	service discover.ServiceInfo
 	weight  int
+}
+
+func (n serviceNode) ID() string  { return n.service.Addr }
+func (n serviceNode) Weight() int { return n.weight }
+
+// toServiceNodes 把 []discover.ServiceInfo 转成 []serviceNode,解析权重。
+func toServiceNodes(services []discover.ServiceInfo) []serviceNode {
+	nodes := make([]serviceNode, 0, len(services))
+	for _, s := range services {
+		w := 100
+		if v, ok := s.Metadata["weight"]; ok {
+			if p, err := strconv.Atoi(v); err == nil && p > 0 {
+				w = p
+			}
+		}
+		nodes = append(nodes, serviceNode{service: s, weight: w})
+	}
+	return nodes
 }
 
 // ServiceDiscoveryOption 服务发现客户端选项
@@ -110,6 +130,8 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		retryDelay:    time.Second,
 		drainTimeout:  5 * time.Second,
 	}
+	c.rr = loadbalance.NewRoundRobin[serviceNode](nil)
+	c.wrr = loadbalance.NewWeightedRoundRobin[serviceNode](nil)
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -360,20 +382,27 @@ func isNonRetryable(err error) bool {
 	return false
 }
 
-// selectService 根据策略选择服务实例，调用方持有 mu.RLock 或已复制 slice
+// selectService 根据策略选择服务实例。RR/WRR 复用 pkg/loadbalance,
+// LeastConnections 依赖 grpc conn 状态,保留在此。Random 直接 rand 取。
 func (c *ServiceDiscoveryClient) selectService(services []discover.ServiceInfo) *discover.ServiceInfo {
 	if len(services) == 0 {
 		return nil
 	}
 	switch c.strategyVal {
 	case RoundRobin:
-		// atomic 自增，不需要写锁
-		idx := int(c.rrIndex.Add(1)) % len(services)
-		return &services[idx]
+		n, ok := c.rr.Next()
+		if !ok {
+			return nil
+		}
+		return &n.service
 	case Random:
 		return &services[rand.IntN(len(services))]
 	case WeightedRoundRobin:
-		return c.weightedRoundRobin(services)
+		n, ok := c.wrr.Next()
+		if !ok {
+			return nil
+		}
+		return &n.service
 	case LeastConnections:
 		return c.leastConnections(services)
 	default:
@@ -381,37 +410,12 @@ func (c *ServiceDiscoveryClient) selectService(services []discover.ServiceInfo) 
 	}
 }
 
-// weightedRoundRobin 平滑加权轮询（Nginx smooth WRR）
-func (c *ServiceDiscoveryClient) weightedRoundRobin(services []discover.ServiceInfo) *discover.ServiceInfo {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// 服务列表变化时重建权重表
-	if len(c.wrrServices) != len(services) {
-		c.wrrServices = make([]wrrEntry, len(services))
-		for i, s := range services {
-			w := 100
-			if v, ok := s.Metadata["weight"]; ok {
-				if p, err := strconv.Atoi(v); err == nil && p > 0 {
-					w = p
-				}
-			}
-			c.wrrServices[i] = wrrEntry{service: s, weight: w}
-		}
-		c.wrrIndex = 0
-		c.wrrRemain = 0
-	}
-
-	// 当前节点还有配额
-	if c.wrrRemain > 0 {
-		c.wrrRemain--
-		return &c.wrrServices[c.wrrIndex].service
-	}
-
-	// 移动到下一个节点
-	c.wrrIndex = (c.wrrIndex + 1) % len(c.wrrServices)
-	c.wrrRemain = c.wrrServices[c.wrrIndex].weight - 1
-	return &c.wrrServices[c.wrrIndex].service
+// rebuildBalancers 在服务列表变化时重建 RR/WRR 内部状态。
+// 无条件重建(相比旧实现仅按 len 判断),修复"列表长度不变但内容变化"不重建的 bug。
+func (c *ServiceDiscoveryClient) rebuildBalancers(services []discover.ServiceInfo) {
+	nodes := toServiceNodes(services)
+	c.rr.Update(nodes)
+	c.wrr.Update(nodes)
 }
 
 // leastConnections 优先选择尚未建立连接的节点；若均已连接则选第一个 READY 节点，兜底随机。
@@ -491,7 +495,7 @@ func (c *ServiceDiscoveryClient) refreshServices(ctx context.Context) error {
 	filtered := c.filterServices(services)
 	c.mu.Lock()
 	c.services = filtered
-	c.wrrServices = nil // 触发权重表重建
+	c.rebuildBalancers(filtered)
 	c.mu.Unlock()
 	return nil
 }
@@ -542,7 +546,7 @@ func (c *ServiceDiscoveryClient) applyServiceUpdate(services []discover.ServiceI
 
 	c.mu.Lock()
 	c.services = filtered
-	c.wrrServices = nil
+	c.rebuildBalancers(filtered)
 
 	activeAddrs := make(map[string]bool, len(filtered))
 	for _, s := range filtered {

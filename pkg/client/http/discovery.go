@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	governancecb "github.com/rushteam/beauty/pkg/governance/circuitbreaker"
+	governancerouter "github.com/rushteam/beauty/pkg/governance/router"
 	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/utils/selector"
@@ -85,6 +87,18 @@ func WithHTTPRetryOnDifferentNode(on bool) HTTPDiscoveryOption {
 	return func(c *discoveryConfig) { c.retryOnDiffNode = on }
 }
 
+// WithHTTPCircuitBreaker 设置节点级熔断器。transport 选实例前过 Available 检查,
+// 跳过已熔断节点;请求结束自动 Report 结果。默认 NoopBreaker(不熔断)。
+func WithHTTPCircuitBreaker(cb governancecb.CircuitBreaker) HTTPDiscoveryOption {
+	return func(c *discoveryConfig) { c.breaker = cb }
+}
+
+// WithHTTPServiceRouter 设置路由过滤层。transport 选实例前过 router.Filter,
+// 用于灰度/地域亲和等。默认 NoopRouter(不过滤)。
+func WithHTTPServiceRouter(r governancerouter.ServiceRouter) HTTPDiscoveryOption {
+	return func(c *discoveryConfig) { c.router = r }
+}
+
 // ServiceDiscoveryHTTPClient 基于服务发现的 HTTP 客户端。是 discoveryTransport(RoundTripper)
 // 的薄包装:持有 *http.Client(Transport=discoveryTransport),提供便捷的 Do/DoWith/NewRequest。
 //
@@ -108,6 +122,8 @@ func NewServiceDiscoveryHTTPClient(discovery discover.Discovery, serviceName str
 		retryDelay:      time.Second,
 		retryOnDiffNode: true,
 		timeout:         30 * time.Second,
+		breaker:         governancecb.NoopBreaker{},
+		router:          governancerouter.NoopRouter{},
 	}
 	for _, opt := range opts {
 		opt(&cfg)

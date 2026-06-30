@@ -11,6 +11,9 @@ import (
 
 	"log/slog"
 
+	"github.com/rushteam/beauty/pkg/governance/bannednodes"
+	governancecb "github.com/rushteam/beauty/pkg/governance/circuitbreaker"
+	governancerouter "github.com/rushteam/beauty/pkg/governance/router"
 	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -73,6 +76,10 @@ type ServiceDiscoveryClient struct {
 	// 连接排空
 	drainTimeout time.Duration
 
+	// 服务治理:节点级熔断 + 路由过滤。默认 NoopBreaker/NoopRouter,零开销。
+	breaker governancecb.CircuitBreaker
+	router  governancerouter.ServiceRouter
+
 	// 后台 goroutine 生命周期
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -129,6 +136,8 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		maxRetries:    1,
 		retryDelay:    time.Second,
 		drainTimeout:  5 * time.Second,
+		breaker:       governancecb.NoopBreaker{},
+		router:        governancerouter.NoopRouter{},
 	}
 	c.rr = loadbalance.NewRoundRobin[serviceNode](nil)
 	c.wrr = loadbalance.NewWeightedRoundRobin[serviceNode](nil)
@@ -175,6 +184,23 @@ func WithDiscoveryVersionFilter(versions ...string) ServiceDiscoveryOption {
 func WithDiscoveryLabelFilter(filter *ServiceLabelFilter) ServiceDiscoveryOption {
 	return func(c *ServiceDiscoveryClient) {
 		c.labelFilter = filter
+	}
+}
+
+// WithCircuitBreaker 设置节点级熔断器。selectService 选实例前先过 Available 检查,
+// 跳过已熔断节点;Call 调用结束自动 Report 结果。默认 NoopBreaker(不熔断)。
+func WithCircuitBreaker(cb governancecb.CircuitBreaker) ServiceDiscoveryOption {
+	return func(c *ServiceDiscoveryClient) {
+		c.breaker = cb
+	}
+}
+
+// WithServiceRouter 设置路由过滤层。selectService 选实例前先过 router.Filter,
+// 用于灰度/地域亲和等。默认 NoopRouter(不过滤)。与 WithDiscoveryLabelFilter 区别:
+// labelFilter 在缓存层过滤(refreshServices 时),router 在选实例时过滤(每次 selectService)。
+func WithServiceRouter(r governancerouter.ServiceRouter) ServiceDiscoveryOption {
+	return func(c *ServiceDiscoveryClient) {
+		c.router = r
 	}
 }
 
@@ -318,7 +344,7 @@ func (c *ServiceDiscoveryClient) GetClient(ctx context.Context) (*grpc.ClientCon
 		return nil, fmt.Errorf("no instances found for service %s", c.serviceName)
 	}
 
-	service := c.selectService(services)
+	service := c.selectService(ctx, services)
 	if service == nil {
 		return nil, fmt.Errorf("no suitable instance for service %s", c.serviceName)
 	}
@@ -328,20 +354,35 @@ func (c *ServiceDiscoveryClient) GetClient(ctx context.Context) (*grpc.ClientCon
 // Call 调用服务方法，支持指数退避重试（带 ±25% jitter）。
 // maxRetries 为额外重试次数，0 表示不重试，总调用次数为 maxRetries+1。
 // context.Canceled / context.DeadlineExceeded 不重试，直接返回。
+// Call 调用服务方法，支持指数退避重试（带 ±25% jitter）。
+// maxRetries 为额外重试次数，0 表示不重试，总调用次数为 maxRetries+1。
+// context.Canceled / context.DeadlineExceeded 不重试，直接返回。
+// 重试链内:失败节点自动加入 bannednodes(本次请求不再重复选)+ 反馈给熔断器(跨请求熔断)。
 func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, resp any, opts ...grpc.CallOption) error {
+	// 注入 bannednodes 列表,供重试链内 Ban 使用。若调用方已注入则沿用。
+	if !bannednodesInjected(ctx) {
+		ctx = bannednodes.WithBannedNodes(ctx)
+	}
 	attempts := c.maxRetries + 1
 	var lastErr error
 	for i := 0; i < attempts; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		conn, err := c.GetClient(ctx)
+		service, conn, err := c.getClientAndService(ctx)
 		if err != nil {
 			lastErr = err
-		} else if err = conn.Invoke(ctx, method, req, resp, opts...); err == nil {
-			return nil
 		} else {
-			lastErr = err
+			start := time.Now()
+			if err = conn.Invoke(ctx, method, req, resp, opts...); err == nil {
+				c.breaker.Report(service, time.Since(start), nil)
+				return nil
+			} else {
+				lastErr = err
+				// 失败反馈:ban 本次请求 + 熔断器记录
+				bannednodes.Ban(ctx, service.Addr)
+				c.breaker.Report(service, time.Since(start), err)
+			}
 		}
 
 		// 不可重试错误：调用方已取消或超时
@@ -364,6 +405,37 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 	return fmt.Errorf("failed after %d retries: %w", c.maxRetries, lastErr)
 }
 
+// bannednodesInjected 检查 ctx 是否已注入 bannednodes 列表。
+func bannednodesInjected(ctx context.Context) bool {
+	return bannednodes.IsInjected(ctx)
+}
+
+// getClientAndService 选实例并建/取连接,返回 service(含地址)+ conn。
+// 供 Call 内部使用,以便失败时拿到节点地址做 Ban/Report。
+func (c *ServiceDiscoveryClient) getClientAndService(ctx context.Context) (*discover.ServiceInfo, *grpc.ClientConn, error) {
+	c.autoStart()
+	c.mu.RLock()
+	services := c.services
+	c.mu.RUnlock()
+	if len(services) == 0 {
+		if err := c.refreshServices(ctx); err != nil {
+			return nil, nil, fmt.Errorf("no instances found for service %s", c.serviceName)
+		}
+		c.mu.RLock()
+		services = c.services
+		c.mu.RUnlock()
+	}
+	if len(services) == 0 {
+		return nil, nil, fmt.Errorf("no instances found for service %s", c.serviceName)
+	}
+	service := c.selectService(ctx, services)
+	if service == nil {
+		return nil, nil, fmt.Errorf("no suitable instance for service %s", c.serviceName)
+	}
+	conn, err := c.getOrCreateConn(service)
+	return service, conn, err
+}
+
 // isNonRetryable 判断错误是否不应重试
 func isNonRetryable(err error) bool {
 	if err == nil {
@@ -382,32 +454,99 @@ func isNonRetryable(err error) bool {
 	return false
 }
 
-// selectService 根据策略选择服务实例。RR/WRR 复用 pkg/loadbalance,
-// LeastConnections 依赖 grpc conn 状态,保留在此。Random 直接 rand 取。
-func (c *ServiceDiscoveryClient) selectService(services []discover.ServiceInfo) *discover.ServiceInfo {
+// selectService 根据策略选择服务实例。流程:
+//  1. router 过滤(灰度/地域亲和等);
+//  2. bannednodes 过滤(本次请求已失败的节点不重复选);
+//  3. 负载均衡选节点 + 熔断 Available 检查,不可用则重选(最多 len 次防死循环)。
+//
+// RR/WRR 复用 pkg/loadbalance,LeastConnections 依赖 grpc conn 状态保留在此,Random 直接 rand 取。
+func (c *ServiceDiscoveryClient) selectService(ctx context.Context, services []discover.ServiceInfo) *discover.ServiceInfo {
 	if len(services) == 0 {
 		return nil
 	}
+	// RR/WRR 内部状态基于全量 services 建,选节点时尝试上限用全量长度,
+	// 确保能轮到候选集内的节点(router/banned 过滤后子集可能很小)。
+	maxAttempts := len(services)
+	// 1. 路由过滤
+	if c.router != nil {
+		services = c.router.Filter(c.serviceName, services)
+		if len(services) == 0 {
+			return nil
+		}
+	}
+	// 2. bannednodes 过滤(单次请求内已失败的节点)
+	candidates := filterBanned(ctx, services)
+	if len(candidates) == 0 {
+		// 全部被 ban:退回全量,避免请求无法进行(bannednodes 只是优化,非硬约束)
+		candidates = services
+	}
+
+	// 3. 负载均衡选 + 熔断检查
 	switch c.strategyVal {
 	case RoundRobin:
-		n, ok := c.rr.Next()
-		if !ok {
-			return nil
-		}
-		return &n.service
+		return pickWithBreaker(ctx, c.breaker, maxAttempts, func() (discover.ServiceInfo, bool) {
+			n, ok := c.rr.Next()
+			if !ok {
+				return discover.ServiceInfo{}, false
+			}
+			return n.service, true
+		}, candidates)
 	case Random:
-		return &services[rand.IntN(len(services))]
+		// 从候选里挑 Available 的
+		for _, idx := range rand.Perm(len(candidates)) {
+			s := candidates[idx]
+			if c.breaker.Available(&s) {
+				return &s
+			}
+		}
+		return nil
 	case WeightedRoundRobin:
-		n, ok := c.wrr.Next()
+		return pickWithBreaker(ctx, c.breaker, maxAttempts, func() (discover.ServiceInfo, bool) {
+			n, ok := c.wrr.Next()
+			if !ok {
+				return discover.ServiceInfo{}, false
+			}
+			return n.service, true
+		}, candidates)
+	case LeastConnections:
+		return c.leastConnections(candidates)
+	default:
+		return &candidates[0]
+	}
+}
+
+// pickWithBreaker 从负载均衡器选节点,跳过熔断/被ban的节点。
+// 最多尝试 maxAttempts 次(=候选数),防死循环。候选集用于校验选出的节点是否仍可用。
+func pickWithBreaker(ctx context.Context, breaker governancecb.CircuitBreaker, maxAttempts int, next func() (discover.ServiceInfo, bool), candidates []discover.ServiceInfo) *discover.ServiceInfo {
+	candidateSet := make(map[string]bool, len(candidates))
+	for _, s := range candidates {
+		candidateSet[s.Addr] = true
+	}
+	for range maxAttempts {
+		s, ok := next()
 		if !ok {
 			return nil
 		}
-		return &n.service
-	case LeastConnections:
-		return c.leastConnections(services)
-	default:
-		return &services[0]
+		// 选出的节点必须在候选集内(未被 ban)且熔断器放行
+		if !candidateSet[s.Addr] {
+			continue
+		}
+		if breaker.Available(&s) {
+			return &s
+		}
 	}
+	return nil
+}
+
+// filterBanned 过滤掉本次请求(ctx)已禁用的节点。未注入 bannednodes 时原样返回。
+func filterBanned(ctx context.Context, services []discover.ServiceInfo) []discover.ServiceInfo {
+	out := services[:0:0] // 新切片,避免改原切片
+	for _, s := range services {
+		if !bannednodes.IsBanned(ctx, s.Addr) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // rebuildBalancers 在服务列表变化时重建 RR/WRR 内部状态。

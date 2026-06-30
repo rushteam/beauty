@@ -13,6 +13,9 @@ import (
 
 	"log/slog"
 
+	"github.com/rushteam/beauty/pkg/governance/bannednodes"
+	governancecb "github.com/rushteam/beauty/pkg/governance/circuitbreaker"
+	governancerouter "github.com/rushteam/beauty/pkg/governance/router"
 	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/utils/selector"
@@ -57,6 +60,9 @@ type discoveryConfig struct {
 	retryDelay      time.Duration
 	retryOnDiffNode bool
 	timeout         time.Duration // http.Client 超时(仅 client 层生效)
+	// 服务治理:节点级熔断 + 路由过滤。默认 NoopBreaker/NoopRouter,零开销。
+	breaker governancecb.CircuitBreaker
+	router  governancerouter.ServiceRouter
 }
 
 // NewDiscoveryTransport 创建服务发现 RoundTripper。
@@ -69,6 +75,8 @@ func NewDiscoveryTransport(discovery discover.Discovery, serviceName string, opt
 		maxRetries:      1,
 		retryDelay:      time.Second,
 		retryOnDiffNode: true,
+		breaker:         governancecb.NoopBreaker{},
+		router:          governancerouter.NoopRouter{},
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -86,6 +94,12 @@ func NewDiscoveryTransport(discovery discover.Discovery, serviceName string, opt
 func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	t.autoStart()
+
+	// 注入 bannednodes(若调用方未注入),供重试链内 Ban 失败节点用
+	if !bannednodes.IsInjected(ctx) {
+		ctx = bannednodes.WithBannedNodes(ctx)
+		req = req.WithContext(ctx)
+	}
 
 	origPath := req.URL.Path
 	origMethod := req.Method
@@ -125,8 +139,13 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 		if i == 0 {
 			firstReq = curReq
 		}
+		// 选中节点地址(供失败时 Ban + Report)
+		nodeAddr := curReq.Host
+		nodeInfo := &discover.ServiceInfo{Addr: nodeAddr}
+		start := time.Now()
 		resp, err := t.base.RoundTrip(curReq)
 		if err == nil && !shouldRetryStatus(resp.StatusCode) {
+			t.breaker.Report(nodeInfo, time.Since(start), nil)
 			return resp, nil
 		}
 		if resp != nil {
@@ -136,6 +155,11 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 			lastErr = err
 		} else {
 			lastErr = fmt.Errorf("server error: %s", resp.Status)
+		}
+		// 失败反馈:ban 本次请求 + 熔断器记录
+		if nodeAddr != "" {
+			bannednodes.Ban(ctx, nodeAddr)
+			t.breaker.Report(nodeInfo, time.Since(start), lastErr)
 		}
 		if isHTTPNonRetryable(err, resp) {
 			// 4xx:返回 resp 不带 error(调用方判断状态码);纯 ctx 错误返回 error。
@@ -187,7 +211,7 @@ func (t *discoveryTransport) buildReq(ctx context.Context, orig *http.Request, m
 		return firstReq, nil
 	}
 	// 选实例
-	node := t.selectService(t.snapshot())
+	node := t.selectService(ctx, t.snapshot())
 	if node == nil {
 		return nil, fmt.Errorf("no suitable instance for service %s", t.serviceName)
 	}
@@ -208,34 +232,94 @@ func (t *discoveryTransport) buildReq(ctx context.Context, orig *http.Request, m
 	return curReq, nil
 }
 
-// selectService 根据策略选实例。RR/WRR 复用 pkg/loadbalance,Random 直接 rand 取。
-func (t *discoveryTransport) selectService(services []discover.ServiceInfo) *httpServiceNode {
+// selectService 根据策略选实例。流程:router 过滤 → bannednodes 过滤 → 负载均衡选 + 熔断 Available 检查。
+// RR/WRR 复用 pkg/loadbalance,Random 直接 rand 取。
+func (t *discoveryTransport) selectService(ctx context.Context, services []discover.ServiceInfo) *httpServiceNode {
 	if len(services) == 0 {
 		return nil
 	}
-	switch t.strategy {
-	case HTTPRoundRobin:
-		n, ok := t.rr.Next()
-		if !ok {
+	// RR/WRR 内部状态基于全量 services 建,选节点时尝试上限用全量长度,
+	// 确保能轮到候选集内的节点(router/banned 过滤后子集可能很小)。
+	maxAttempts := len(services)
+	// 1. 路由过滤
+	if t.router != nil {
+		services = t.router.Filter(t.serviceName, services)
+		if len(services) == 0 {
 			return nil
 		}
-		return &n
+	}
+	// 2. bannednodes 过滤
+	candidates := filterHTTPBanned(ctx, services)
+	if len(candidates) == 0 {
+		candidates = services // 全被 ban 则退回全量
+	}
+
+	switch t.strategy {
+	case HTTPRoundRobin:
+		return pickHTTPWithBreaker(ctx, t.breaker, maxAttempts, func() (httpServiceNode, bool) {
+			n, ok := t.rr.Next()
+			if !ok {
+				return httpServiceNode{}, false
+			}
+			return n, true
+		}, candidates)
 	case HTTPRandom:
-		nodes := toHTTPServiceNodes(services)
+		nodes := toHTTPServiceNodes(candidates)
 		if len(nodes) == 0 {
 			return nil
 		}
-		return &nodes[rand.IntN(len(nodes))]
+		// 从候选里挑 Available 的
+		for _, idx := range rand.Perm(len(nodes)) {
+			n := nodes[idx]
+			if t.breaker.Available(&n.service) {
+				return &n
+			}
+		}
+		return nil
 	case HTTPWeightedRoundRobin:
-		n, ok := t.wrr.Next()
+		return pickHTTPWithBreaker(ctx, t.breaker, maxAttempts, func() (httpServiceNode, bool) {
+			n, ok := t.wrr.Next()
+			if !ok {
+				return httpServiceNode{}, false
+			}
+			return n, true
+		}, candidates)
+	default:
+		n := httpServiceNode{service: candidates[0], weight: 100, scheme: "http"}
+		return &n
+	}
+}
+
+// pickHTTPWithBreaker 从负载均衡器选节点,跳过熔断/被ban的节点。最多 maxAttempts 次防死循环。
+func pickHTTPWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker, maxAttempts int, next func() (httpServiceNode, bool), candidates []discover.ServiceInfo) *httpServiceNode {
+	candidateSet := make(map[string]bool, len(candidates))
+	for _, s := range candidates {
+		candidateSet[s.Addr] = true
+	}
+	for range maxAttempts {
+		n, ok := next()
 		if !ok {
 			return nil
 		}
-		return &n
-	default:
-		n := httpServiceNode{service: services[0], weight: 100, scheme: "http"}
-		return &n
+		if !candidateSet[n.service.Addr] {
+			continue
+		}
+		if breaker.Available(&n.service) {
+			return &n
+		}
 	}
+	return nil
+}
+
+// filterHTTPBanned 过滤掉本次请求已禁用的节点。未注入 bannednodes 时原样返回。
+func filterHTTPBanned(ctx context.Context, services []discover.ServiceInfo) []discover.ServiceInfo {
+	out := services[:0:0]
+	for _, s := range services {
+		if !bannednodes.IsBanned(ctx, s.Addr) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // rebuildBalancers 在服务列表变化时无条件重建 RR/WRR。

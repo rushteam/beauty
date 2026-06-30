@@ -111,7 +111,7 @@ my-service/
 **核心特性**：
 - **多协议支持**: HTTP、gRPC、Cron 三种服务类型
 - **代码生成**: 基于 Protocol Buffers 自动生成 gRPC 代码
-- **服务发现**: 支持多种注册中心（etcd / nacos / consul / polaris / k8s）
+- **服务发现**: 支持多种注册中心（etcd / nacos / consul / polaris / k8s），gRPC 与 HTTP 客户端均内置服务发现 + 负载均衡（轮询 / 加权轮询 / 随机）+ 重试换节点
 - **配置中心**: 统一 `conf.New(url)` 接入本地文件与远程配置，支持热加载
 - **中间件**: recovery、cors、compress、health、auth、限流、熔断、超时
 - **实时推送**: 内置 SSE（`pkg/sse`）与 WebSocket（`pkg/ws`）封装，开箱即用

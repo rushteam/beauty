@@ -244,3 +244,71 @@ func TestAdaptiveController_Concurrent(t *testing.T) {
 		t.Errorf("inFlight should drain to 0, got %d", c.Stats()["a"].InFlight)
 	}
 }
+
+// TestAdaptiveController_ErrorLockoutRecovers 回归:连续错误锁定后,过恢复间隔应放行探测,
+// 探测成功则解锁。修复"连续错误 → 永久拒绝、无法恢复"的 bug。
+func TestAdaptiveController_ErrorLockoutRecovers(t *testing.T) {
+	c := overloadctrl.NewAdaptiveController(
+		overloadctrl.WithErrorThreshold(3),
+		overloadctrl.WithErrorRecoveryInterval(20*time.Millisecond),
+	)
+	ctx := context.Background()
+	for range 3 {
+		tok, _ := c.Acquire(ctx, "a")
+		tok.OnResponse(ctx, errors.New("e"))
+	}
+	// 锁定态:间隔未到,拒绝
+	if _, err := c.Acquire(ctx, "a"); err == nil {
+		t.Fatal("should reject before recovery interval")
+	}
+	time.Sleep(25 * time.Millisecond)
+	// 间隔已到,放行一个探测
+	tok, err := c.Acquire(ctx, "a")
+	if err != nil {
+		t.Fatalf("should allow a probe after interval, got %v", err)
+	}
+	// 探测成功 → 解锁
+	tok.OnResponse(ctx, nil)
+	if _, err := c.Acquire(ctx, "a"); err != nil {
+		t.Fatalf("probe success should unlock, got %v", err)
+	}
+}
+
+// TestAdaptiveController_ErrorLockoutSingleProbe 锁定态只放行一个探测,并发第二个请求仍被拒。
+func TestAdaptiveController_ErrorLockoutSingleProbe(t *testing.T) {
+	c := overloadctrl.NewAdaptiveController(
+		overloadctrl.WithErrorThreshold(1),
+		overloadctrl.WithErrorRecoveryInterval(10*time.Millisecond),
+	)
+	ctx := context.Background()
+	tok, _ := c.Acquire(ctx, "a")
+	tok.OnResponse(ctx, errors.New("e"))
+	time.Sleep(15 * time.Millisecond)
+	if _, err := c.Acquire(ctx, "a"); err != nil {
+		t.Fatalf("first probe should pass, got %v", err)
+	}
+	if _, err := c.Acquire(ctx, "a"); err == nil {
+		t.Fatal("second concurrent probe should be rejected")
+	}
+}
+
+// TestAdaptiveController_ErrorLockoutProbeFailRelocks 探测失败应重新锁定一个恢复间隔。
+func TestAdaptiveController_ErrorLockoutProbeFailRelocks(t *testing.T) {
+	c := overloadctrl.NewAdaptiveController(
+		overloadctrl.WithErrorThreshold(1),
+		overloadctrl.WithErrorRecoveryInterval(10*time.Millisecond),
+	)
+	ctx := context.Background()
+	tok, _ := c.Acquire(ctx, "a")
+	tok.OnResponse(ctx, errors.New("e"))
+	time.Sleep(15 * time.Millisecond)
+	probe, err := c.Acquire(ctx, "a")
+	if err != nil {
+		t.Fatalf("probe should pass, got %v", err)
+	}
+	probe.OnResponse(ctx, errors.New("still failing")) // 探测失败
+	// 立即再试:仍在锁定态(新一轮冷却未到)
+	if _, err := c.Acquire(ctx, "a"); err == nil {
+		t.Fatal("should re-lock after failed probe")
+	}
+}

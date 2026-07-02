@@ -11,6 +11,10 @@
 // 和 lastRTT。当 lastRTT > k*minRTT(k 默认 2.0,表示延迟翻倍)且 inFlight 超过
 // minInflight(默认 10)时,认为过载,拒绝请求。错误率过高(连续错误)也收紧。
 // 反馈闭环:OnResponse 更新 lastRTT/minRTT/inFlight/错误计数。
+//
+// 恢复:延迟梯度触发的拒绝会随在途请求自然排空(inFlight 降到 minInflight 以下)自动放开;
+// 连续错误触发的锁定态则每隔 errRecovInterval(默认 5s)放行一个探测请求,探测成功解锁、
+// 失败续锁——确保节点不会因连续错误被永久拒绝。
 package overloadctrl
 
 import (
@@ -56,20 +60,24 @@ type addrState struct {
 	inFlight int // 当前在途请求数
 	// 错误追踪
 	consecutiveErrors uint32
+	errLockedAt       time.Time // 连续错误达阈值、进入锁定态的时刻(用于冷却放行探测)
+	errProbeInflight  bool      // 锁定态是否已放行一个探测请求
 	// 配置快照(从 controller 复制,避免热路径读 controller 锁)
-	minInflight  int
-	rttMultiple  float64
-	rttWindow    int
-	errThreshold uint32
+	minInflight      int
+	rttMultiple      float64
+	rttWindow        int
+	errThreshold     uint32
+	errRecovInterval time.Duration
 }
 
 // config 配置(不导出,通过 Option 设置)。
 type config struct {
-	rttMultiple  float64 // 延迟梯度阈值:lastRTT > rttMultiple*minRTT 视为过载
-	minInflight  int     // inFlight 低于此值不触发(避免低负载误判)
-	rttWindow    int     // minRTT 采样窗口大小
-	errThreshold uint32  // 连续错误达此值也拒绝(独立于延迟)
-	onDrop       func(addr string)
+	rttMultiple      float64       // 延迟梯度阈值:lastRTT > rttMultiple*minRTT 视为过载
+	minInflight      int           // inFlight 低于此值不触发(避免低负载误判)
+	rttWindow        int           // minRTT 采样窗口大小
+	errThreshold     uint32        // 连续错误达此值也拒绝(独立于延迟)
+	errRecovInterval time.Duration // 错误锁定后每隔多久放行一个探测请求(默认 5s)
+	onDrop           func(addr string)
 }
 
 // Option 配置 AdaptiveController。
@@ -88,6 +96,13 @@ func WithRTTWindow(n int) Option { return func(c *config) { c.rttWindow = n } }
 // WithErrorThreshold 设置连续错误阈值(默认 5),达此值直接拒绝。
 func WithErrorThreshold(n uint32) Option { return func(c *config) { c.errThreshold = n } }
 
+// WithErrorRecoveryInterval 设置错误锁定后的探测放行间隔(默认 5s)。
+// 连续错误达阈值进入锁定态后,每隔此间隔放行一个探测请求;探测成功则解除锁定,
+// 失败则继续锁定。避免节点因连续错误被永久拒绝、无法恢复。
+func WithErrorRecoveryInterval(d time.Duration) Option {
+	return func(c *config) { c.errRecovInterval = d }
+}
+
 // WithOnDrop 设置请求被拒时的回调(打 metric/日志用)。
 func WithOnDrop(fn func(addr string)) Option { return func(c *config) { c.onDrop = fn } }
 
@@ -101,10 +116,11 @@ type AdaptiveController struct {
 // NewAdaptiveController 创建自适应限流器。
 func NewAdaptiveController(opts ...Option) *AdaptiveController {
 	cfg := config{
-		rttMultiple:  2.0,
-		minInflight:  10,
-		rttWindow:    20,
-		errThreshold: 5,
+		rttMultiple:      2.0,
+		minInflight:      10,
+		rttWindow:        20,
+		errThreshold:     5,
+		errRecovInterval: 5 * time.Second,
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -126,11 +142,12 @@ func (c *AdaptiveController) getOrCreate(addr string) *addrState {
 		return s
 	}
 	s = &addrState{
-		minInflight:  c.cfg.minInflight,
-		rttMultiple:  c.cfg.rttMultiple,
-		rttWindow:    c.cfg.rttWindow,
-		errThreshold: c.cfg.errThreshold,
-		rttSamples:   make([]time.Duration, 0, c.cfg.rttWindow),
+		minInflight:      c.cfg.minInflight,
+		rttMultiple:      c.cfg.rttMultiple,
+		rttWindow:        c.cfg.rttWindow,
+		errThreshold:     c.cfg.errThreshold,
+		errRecovInterval: c.cfg.errRecovInterval,
+		rttSamples:       make([]time.Duration, 0, c.cfg.rttWindow),
 	}
 	c.states[addr] = s
 	return s
@@ -142,10 +159,22 @@ func (c *AdaptiveController) Acquire(_ context.Context, addr string) (Token, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 连续错误超阈,直接拒
+	// 连续错误超阈,进入锁定态。每隔 errRecovInterval 放行一个探测请求,
+	// 探测结果由 OnResponse 反馈(成功清零解锁,失败重置计时继续锁定),
+	// 避免节点因连续错误被永久拒绝、无法恢复。
 	if s.consecutiveErrors >= s.errThreshold {
-		c.fireOnDrop(addr)
-		return nil, ErrOverloaded
+		canProbe := !s.errProbeInflight &&
+			s.errRecovInterval > 0 &&
+			!s.errLockedAt.IsZero() &&
+			time.Since(s.errLockedAt) >= s.errRecovInterval
+		if !canProbe {
+			c.fireOnDrop(addr)
+			return nil, ErrOverloaded
+		}
+		// 放行一个探测请求
+		s.errProbeInflight = true
+		s.inFlight++
+		return &adaptiveToken{controller: c, addr: addr, start: time.Now()}, nil
 	}
 	// 延迟梯度:有 minRTT 基线 + lastRTT 飙升 + 在途请求足够多时拒绝
 	if s.minRTT > 0 && s.inFlight >= s.minInflight {
@@ -210,11 +239,22 @@ func (t *adaptiveToken) OnResponse(_ context.Context, err error) {
 	}
 	s.minRTT = min
 
-	// 错误计数
+	// 错误计数与锁定态恢复
 	if err != nil {
 		s.consecutiveErrors++
+		// 若这是锁定态放行的探测,探测失败 → 重置计时,继续锁定下一个 errRecovInterval。
+		if s.errProbeInflight {
+			s.errProbeInflight = false
+			s.errLockedAt = time.Now()
+		} else if s.consecutiveErrors >= s.errThreshold && s.errLockedAt.IsZero() {
+			// 刚跨过阈值,进入锁定态,从此刻开始计冷却。
+			s.errLockedAt = time.Now()
+		}
 	} else {
+		// 成功(含锁定态探测成功)→ 清零错误计数并解除锁定。
 		s.consecutiveErrors = 0
+		s.errProbeInflight = false
+		s.errLockedAt = time.Time{}
 	}
 }
 
@@ -256,6 +296,8 @@ func (c *AdaptiveController) Reset() {
 		s.minRTT = 0
 		s.lastRTT = 0
 		s.consecutiveErrors = 0
+		s.errLockedAt = time.Time{}
+		s.errProbeInflight = false
 		s.rttSamples = s.rttSamples[:0]
 		s.mu.Unlock()
 	}

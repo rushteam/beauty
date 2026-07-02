@@ -169,12 +169,14 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 `pkg/afterwork` 的 `Wait()` 把 `Defer` 投递的副作用(发邮件 / 写审计 /
 触发 `pkg/webhook`)跑完。见 `examples/afterwork`。
 
-**直播玩法组合:PK 房间**——用扩展原语搭一个直播 PK 后端:`versus` 管
-双方倒计时对抗计分与胜负判定;观众刷礼物的高频请求先经 `idempotency`(幂等键
-去重,防重复扣礼物)+ `counter`(每人每分钟送礼配额,防刷),折算的分数
-`versus.Add` 进比分,同时 `tally` 聚合"点赞/人气"高频计数批量落地;分数变化
-经 `versus` 的事件流(内部复用 `stream`)或 `eventbus` 广播给通知/榜单模块;
-`momentum` 追踪连击特效与实时热度。见 `examples/live-pk`(组合 demo)。
+**直播玩法组合:多房间 PK**——用扩展原语搭一个多房间直播 PK 后端:每局
+`versus` 管双方倒计时对抗计分与胜负判定,多局用 roomID→Match 的 map 并行,
+`keyedmutex` 按房间串行化 start/结算等结构性操作、房间之间互不阻塞;`idgen`
+生成房间 ID。观众刷礼物的高频请求先经 `counter`(每人每分钟送礼配额,防刷)
++ `idempotency`(幂等键去重,防重复扣礼物),折算的分数 `versus.Add` 进比分,
+同时 `tally` 聚合"点赞/人气"高频计数批量落地;单房间分数变化经 `versus` 的
+事件流(内部复用 `stream`)桥接到 SSE 推给客户端,全局 PK 生命周期(开始/结束)
+经 `eventbus` 广播给通知/榜单等下游模块解耦接入。见 `examples/live-pk`(组合 demo)。
 
 ## 速查:pkg/match（有状态实时会话）
 

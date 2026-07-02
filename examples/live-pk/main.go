@@ -1,19 +1,22 @@
-// live-pk 组合 demo:直播 PK 后端,展示多个原语如何协作。
+// live-pk 组合 demo:多房间直播 PK 后端,展示多个原语如何协作。
 //
 // 组合的原语:
-//   - pkg/versus       —— PK 房间:双方倒计时对抗计分、到点定胜负、事件流
+//   - pkg/versus       —— 每个 PK 房间:双方倒计时对抗计分、到点定胜负、事件流
 //   - pkg/idempotency  —— 送礼幂等:同一 giftID 重复请求只计一次(防网络重试重复扣礼物)
 //   - pkg/counter      —— 送礼配额:每用户每分钟送礼次数上限(防刷)
 //   - pkg/tally        —— 高频人气聚合:点赞海量 +1 内存合并、批量落地
+//   - pkg/keyedmutex   —— 按房间的细粒度锁:同房间 start/结算 串行,不同房间并行
+//   - pkg/eventbus     —— 全局 PK 生命周期事件(开始/结束),供榜单/通知模块订阅
 //   - pkg/idgen        —— 生成 PK 房间 ID
 //
 // 运行:go run ./examples/live-pk  然后:
 //
-//	curl localhost:8310/start                  # 开一局 PK(A vs B,20s)
-//	curl -N localhost:8310/watch               # SSE 订阅实时比分(另开终端)
-//	curl "localhost:8310/gift?user=u1&side=A&val=100&gift=g1"   # 送礼加分
-//	curl localhost:8310/like                   # 点赞(高频聚合)
-//	curl localhost:8310/snapshot               # 当前比分快照
+//	curl localhost:8310/start                                  # 开一局 PK,返回 room
+//	curl -N "localhost:8310/watch?room=<room>"                 # SSE 订阅该房间实时比分
+//	curl "localhost:8310/gift?room=<room>&user=u1&side=A&val=100&gift=g1"
+//	curl "localhost:8310/like?room=<room>"                     # 点赞(高频聚合)
+//	curl "localhost:8310/snapshot?room=<room>"                 # 当前比分快照
+//	curl localhost:8310/rooms                                  # 所有进行中的房间
 package main
 
 import (
@@ -25,20 +28,31 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/pkg/counter"
+	"github.com/rushteam/beauty/pkg/eventbus"
 	"github.com/rushteam/beauty/pkg/idempotency"
 	"github.com/rushteam/beauty/pkg/idgen"
+	"github.com/rushteam/beauty/pkg/keyedmutex"
 	"github.com/rushteam/beauty/pkg/tally"
 	"github.com/rushteam/beauty/pkg/versus"
 )
+
+// pkLifecycle 是 eventbus 上广播的全局 PK 生命周期事件负载。
+type pkLifecycle struct {
+	Room   string
+	Winner string
+	Scores map[string]int64
+}
 
 type server struct {
 	ids       *idgen.Generator
 	giftDedup *idempotency.Store[int64]
 	quota     *counter.Counter
 	likes     *tally.Tally[int64]
+	roomLock  *keyedmutex.KeyedMutex     // 按房间串行 start/结算等结构性操作
+	bus       *eventbus.Bus[pkLifecycle] // 全局 PK 生命周期事件
 
-	mu    sync.Mutex
-	match *versus.Match // 当前进行中的 PK(简化:同时只一局)
+	mu    sync.RWMutex
+	rooms map[string]*versus.Match // roomID → 房间(支持多局并行)
 }
 
 const (
@@ -52,15 +66,23 @@ func main() {
 		ids:       gen,
 		giftDedup: idempotency.New[int64](idempotency.WithTTL(10 * time.Minute)),
 		quota:     counter.New(time.Minute),
-		likes: tally.New(func(ctx context.Context, batch map[string]int64) {
-			for room, n := range batch {
-				fmt.Printf("[tally] 房间 %s 点赞 +%d 批量落地\n", room, n)
-			}
-		}, tally.WithFlushInterval(2*time.Second)),
+		roomLock:  keyedmutex.New(),
+		bus:       eventbus.New[pkLifecycle](),
+		rooms:     make(map[string]*versus.Match),
 	}
+	s.likes = tally.New(func(ctx context.Context, batch map[string]int64) {
+		for room, n := range batch {
+			fmt.Printf("[tally] 房间 %s 点赞 +%d 批量落地\n", room, n)
+		}
+	}, tally.WithFlushInterval(2*time.Second))
 	defer s.giftDedup.Stop()
 	defer s.quota.Stop()
 	defer s.likes.Stop()
+
+	// 订阅全局 PK 事件:演示榜单/通知等下游模块如何解耦接入。
+	s.bus.Subscribe("pk.ended", func(topic string, e pkLifecycle) {
+		fmt.Printf("[eventbus] 房间 %s 结束,胜者=%q 比分=%v(→ 可推送通知/更新榜单)\n", e.Room, e.Winner, e.Scores)
+	})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/start", s.handleStart)
@@ -68,44 +90,49 @@ func main() {
 	mux.HandleFunc("/like", s.handleLike)
 	mux.HandleFunc("/snapshot", s.handleSnapshot)
 	mux.HandleFunc("/watch", s.handleWatch)
+	mux.HandleFunc("/rooms", s.handleRooms)
 
 	fmt.Println("live-pk demo 监听 :8310")
-	fmt.Println("  /start  /gift?user=&side=&val=&gift=  /like  /snapshot  /watch(SSE)")
+	fmt.Println("  /start  /gift?room=&user=&side=&val=&gift=  /like?room=  /snapshot?room=  /watch?room=  /rooms")
 	http.ListenAndServe(":8310", mux)
 }
 
-// /start 开一局 PK。
+// /start 开一局新 PK,返回房间 ID(支持多局并行)。
 func (s *server) handleStart(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.match != nil && s.match.Snapshot().Running {
-		http.Error(w, "已有进行中的 PK", http.StatusConflict)
-		return
-	}
 	id := fmt.Sprintf("pk-%d", s.ids.MustNext())
+
+	// 按房间加锁:同房间的结构性操作串行(此处 start 是新房间,主要演示 keyedmutex 用法)。
+	unlock := s.roomLock.Lock(id)
+	defer unlock()
+
 	m := versus.New(id, []string{"A", "B"},
 		versus.WithDuration(pkDuration),
 		versus.WithOnEnd(func(res versus.Result) {
-			fmt.Printf("[versus] PK %s 结束: 比分=%v winner=%q tie=%v\n", res.ID, res.Scores, res.Winner, res.Tie)
+			// 到点结算:广播全局事件 + 清理房间(延迟一会儿给 SSE 收尾)。
+			s.bus.Publish("pk.ended", pkLifecycle{Room: res.ID, Winner: res.Winner, Scores: res.Scores})
+			s.removeRoomLater(res.ID)
 		}))
-	s.match = m
+	s.mu.Lock()
+	s.rooms[id] = m
+	s.mu.Unlock()
+
 	_ = m.Start()
-	writeJSON(w, map[string]any{"pk_id": id, "duration": pkDuration.String()})
+	s.bus.Publish("pk.started", pkLifecycle{Room: id})
+	writeJSON(w, map[string]any{"room": id, "duration": pkDuration.String()})
 }
 
-// /gift 送礼加分:幂等去重 + 配额 + 计分。
+// /gift 送礼加分:配额防刷 + 幂等去重 + 计分。
 func (s *server) handleGift(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	user, side, giftID := q.Get("user"), q.Get("side"), q.Get("gift")
+	room, user, side, giftID := q.Get("room"), q.Get("user"), q.Get("side"), q.Get("gift")
 	val := parseInt(q.Get("val"), 1)
 	if user == "" || (side != "A" && side != "B") || giftID == "" {
-		http.Error(w, "需要 user, side(A|B), gift, val", http.StatusBadRequest)
+		http.Error(w, "需要 room, user, side(A|B), gift, val", http.StatusBadRequest)
 		return
 	}
-
-	m := s.currentMatch()
+	m := s.room(room)
 	if m == nil {
-		http.Error(w, "没有进行中的 PK", http.StatusNotFound)
+		http.Error(w, "房间不存在或已结束", http.StatusNotFound)
 		return
 	}
 
@@ -115,8 +142,8 @@ func (s *server) handleGift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2) 幂等:同一 giftID 重复请求只计一次(网络重试安全)。返回该次加分后的比分。
-	score, err, shared := s.giftDedup.Do("gift:"+giftID, func() (int64, error) {
+	// 2) 幂等:同一 giftID 重复请求只计一次(网络重试安全)。giftID 全局唯一,含房间维度。
+	score, err, shared := s.giftDedup.Do("gift:"+room+":"+giftID, func() (int64, error) {
 		return m.Add(side, val)
 	})
 	if err != nil {
@@ -124,37 +151,48 @@ func (s *server) handleGift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"side": side, "side_score": score,
+		"room": room, "side": side, "side_score": score,
 		"replayed": shared, // true=重复请求,未重复加分
 	})
 }
 
 // /like 点赞:高频,只做聚合计数(不逐笔落地)。
 func (s *server) handleLike(w http.ResponseWriter, r *http.Request) {
-	m := s.currentMatch()
-	room := "none"
-	if m != nil {
-		room = m.Snapshot().ID
+	room := r.URL.Query().Get("room")
+	if s.room(room) == nil {
+		http.Error(w, "房间不存在或已结束", http.StatusNotFound)
+		return
 	}
 	s.likes.Add(room, 1)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// /snapshot 当前比分快照。
+// /snapshot 某房间当前比分快照。
 func (s *server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	m := s.currentMatch()
+	m := s.room(r.URL.Query().Get("room"))
 	if m == nil {
-		http.Error(w, "没有进行中的 PK", http.StatusNotFound)
+		http.Error(w, "房间不存在或已结束", http.StatusNotFound)
 		return
 	}
 	writeJSON(w, m.Snapshot())
 }
 
-// /watch SSE 订阅实时比分变化(把 versus 事件流桥接到 SSE)。
+// /rooms 列出所有进行中的房间及其比分。
+func (s *server) handleRooms(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	out := make([]versus.Snapshot, 0, len(s.rooms))
+	for _, m := range s.rooms {
+		out = append(out, m.Snapshot())
+	}
+	s.mu.RUnlock()
+	writeJSON(w, out)
+}
+
+// /watch SSE 订阅某房间实时比分变化(把 versus 事件流桥接到 SSE)。
 func (s *server) handleWatch(w http.ResponseWriter, r *http.Request) {
-	m := s.currentMatch()
+	m := s.room(r.URL.Query().Get("room"))
 	if m == nil {
-		http.Error(w, "没有进行中的 PK", http.StatusNotFound)
+		http.Error(w, "房间不存在或已结束", http.StatusNotFound)
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -185,10 +223,29 @@ func (s *server) handleWatch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) currentMatch() *versus.Match {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.match
+// room 按 ID 取房间(读锁)。
+func (s *server) room(id string) *versus.Match {
+	if id == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rooms[id]
+}
+
+// removeRoomLater 结算后延迟清理房间(给 /watch 收尾时间),用 keyedmutex 串行化清理。
+func (s *server) removeRoomLater(id string) {
+	go func() {
+		time.Sleep(2 * time.Second)
+		unlock := s.roomLock.Lock(id)
+		defer unlock()
+		s.mu.Lock()
+		if m, ok := s.rooms[id]; ok {
+			m.Close()
+			delete(s.rooms, id)
+		}
+		s.mu.Unlock()
+	}()
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

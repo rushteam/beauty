@@ -4,7 +4,10 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 **可独立组合**的实时服务原语,覆盖长连接会话、在线状态、消息路由、匹配组队、
 排行榜缓存、任务调度、虚拟账户、操作审计、离线通知、周期榜单、临时小队、
 版本化存储、社交图谱、会话令牌、DB 错误翻译、可靠 Webhook、断线重连、状态广播、
-频道历史、短期 TTL KV 二十二类典型场景,落地为 beauty 风格(泛型 + 函数式 Option + 中文 doc + 纯标准库)。
+频道历史、短期 TTL KV 等场景,并扩展了**并发控制 / 可靠性 / 游戏 & 直播 / 空间地理**
+一批横切原语(幂等、细粒度锁、退避、Saga、事件总线、延迟队列、计数聚合、雪花 ID、
+状态机、直播 PK、连击热度、A* 寻路、空间索引、Geohash),落地为 beauty 风格
+(泛型 + 函数式 Option + 中文 doc + 纯标准库)。
 
 包按"通用 vs 业务"分两个命名空间:
 
@@ -46,6 +49,51 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | `pkg/txn` | 跨域事务协调(两阶段提交 Prepare/Commit/Rollback) | 扣钱包+写存档 原子化 / 任一失败全回滚 | 8305 |
 | `pkg/loadbalance` | 负载均衡算法(一致性哈希 + 平滑加权轮询 + 轮询) | 会话粘性 / 带状态分片 / 按容量分发 | 8306 |
 | `pkg/ctxkey` | 类型安全 context key(泛型 Key[T]) | 统一各包 contextKey 定义 / 防 key 冲突 | — |
+
+### 扩展原语:并发 / 可靠性 / 游戏 & 直播(pkg/)
+
+在"连接↔会话↔在场↔路由"四层之外,下列原语解决**并发控制、正确性、游戏/直播玩法**的横切需求。均纯标准库、泛型 + 函数式 Option,可独立使用或与上表组合。
+
+| 包 | 一句话 | 典型场景 | demo |
+|----|--------|----------|------|
+| **并发 & 可靠性** | | | |
+| `pkg/idempotency` | 幂等执行(去重 + singleflight 并发合并 + TTL) | 防重复扣款/发奖 · 请求去重 · 缓存击穿保护 | ✓ |
+| `pkg/keyedmutex` | 按 key 的细粒度锁(引用计数自动回收) | 同账户/房间/订单串行 · 不同实体并行 | ✓ |
+| `pkg/backoff` | 指数退避 + 抖动(Full/Equal/None/比例) | 重试可靠性 · 打散重试风暴 | ✓ |
+| `pkg/saga` | 跨服务 Saga 编排(顺序正向 + 逆序补偿 + 重试) | 抽卡/下单/兑换 跨服务最终一致 | ✓ |
+| `pkg/eventbus` | 泛型进程内事件总线(按主题 + 回调) | 模块间事件解耦 · 一事件多订阅者 | ✓ |
+| **调度 & 计数** | | | |
+| `pkg/delayqueue` | 定点单次延迟触发(最小堆 + 可取消/改期) | 开局倒计时 · buff 到期 · 订单超时 · 匹配兜底 | ✓ |
+| `pkg/counter` | 滑动窗口计数 / 时间窗配额 | 每日抽卡上限 · 分钟弹幕限频 · 防刷 | ✓ |
+| `pkg/tally` | 高频累计聚合 + 批量刷写 | 直播点赞/刷礼物 · 埋点计数(削写放大) | ✓ |
+| `pkg/idgen` | 分布式唯一 ID(Snowflake,64 位趋势递增) | 对局 ID · 订单号 · 消息序号 · 数据库主键 | ✓ |
+| **状态机 & 游戏玩法** | | | |
+| `pkg/fsm` | 泛型有限状态机(转移校验 + Enter/Leave 钩子) | 对局/房间/订单状态流转 · 防非法跳转 | ✓ |
+| `pkg/versus` | 限时多方对抗计分(倒计时 + 定胜负 + 事件流) | 直播 PK · 团战 · 答题赛 · 拉票 | ✓ |
+| `pkg/momentum` | 连击 + 热度时间衰减(半衰期指数冷却) | 直播连击特效 · 实时热度榜 | ✓ |
+| **空间 & 地理** | | | |
+| `pkg/pathfind` | 网格 A* 寻路(障碍 + 权重 + 对角) | 塔防 · SLG · 点击移动 · 怪物追击 | ✓ |
+| `pkg/spatial` | 网格空间索引(Nearby / KNN) | 附近的人 · MMO AOI · 大地图分区 | ✓ |
+| `pkg/geohash` | 经纬度地理编码(编码/邻居/覆盖查询/距离) | LBS 附近的人/店铺(前缀检索) | ✓ |
+
+> 这批原语的 demo 均在 `examples/<pkg>/main.go`,单文件可直接 `go run`。
+
+**互补关系速记**(避免选错件):
+
+| 需求 | 用这个 | 而不是 | 因为 |
+|------|--------|--------|------|
+| "同 key 只执行一次" | `idempotency` | `keyedmutex` | 前者复用首次结果;后者每次都执行,只是串行 |
+| "同 key 串行执行每次" | `keyedmutex` | `idempotency` | 见上,反向 |
+| "窗口内累计次数(配额)" | `counter` | `ratelimit` | ratelimit 控速率(令牌桶),counter 控总量 |
+| "高频写削峰后落地" | `tally` | `wallet` | wallet 逐笔精确账本;tally 可聚合、批量、容忍丢尾 |
+| "带衰减的实时热度" | `momentum` | `counter`/`leaderboard` | 前二者不衰减,momentum 反映"当下多热" |
+| "定点单次触发" | `delayqueue` | `scheduler`/`cron` | scheduler 即时、cron 周期,delayqueue 一次性 |
+| "同进程多域原子" | `txn` | `saga` | txn 是同进程 2PC(可回滚);saga 是跨服务补偿 |
+| "跨服务最终一致" | `saga` | `txn` | 见上,反向 |
+| "平面地图坐标" | `spatial` | `geohash` | spatial 平面 x/y(游戏地图);geohash 地球经纬度(LBS) |
+| "真实经纬度 LBS" | `geohash` | `spatial` | 见上,反向 |
+| "channel 单源扇出" | `stream` | `eventbus` | stream 所有订阅者同一份流;eventbus 多主题回调式 |
+| "多主题事件解耦" | `eventbus` | `stream` | 见上,反向 |
 
 ### 业务实体(pkg/domain/)
 
@@ -120,6 +168,13 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 依赖注入(`WithInject`)、错误归一化(`errors.WriteHTTP`);响应返回后
 `pkg/afterwork` 的 `Wait()` 把 `Defer` 投递的副作用(发邮件 / 写审计 /
 触发 `pkg/webhook`)跑完。见 `examples/afterwork`。
+
+**直播玩法组合:PK 房间**——用扩展原语搭一个直播 PK 后端:`versus` 管
+双方倒计时对抗计分与胜负判定;观众刷礼物的高频请求先经 `idempotency`(幂等键
+去重,防重复扣礼物)+ `counter`(每人每分钟送礼配额,防刷),折算的分数
+`versus.Add` 进比分,同时 `tally` 聚合"点赞/人气"高频计数批量落地;分数变化
+经 `versus` 的事件流(内部复用 `stream`)或 `eventbus` 广播给通知/榜单模块;
+`momentum` 追踪连击特效与实时热度。见 `examples/live-pk`(组合 demo)。
 
 ## 速查:pkg/match（有状态实时会话）
 

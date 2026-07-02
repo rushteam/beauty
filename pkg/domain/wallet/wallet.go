@@ -47,15 +47,28 @@ type Account struct {
 type Wallet struct {
 	mu       sync.Mutex
 	accounts map[string]*Account
-	seq      atomic.Int64 // ledger ID 生成器
+	seq      atomic.Int64        // ledger ID 生成器
+	txIndex  map[string]txResult // txID → 首次成功结果(幂等去重,append-only)
+}
+
+// txResult 缓存一次成功 ApplyTx 的结果,用于同 txID 重放。
+type txResult struct {
+	affected WalletMap
+	ledgerID int64
 }
 
 // ErrInsufficientBalance 余额不足(超扣)。Changeset 不会被应用。
 var ErrInsufficientBalance = errors.New("wallet: insufficient balance")
 
+// ErrEmptyTxID ApplyTx 传入空 txID。
+var ErrEmptyTxID = errors.New("wallet: empty txID")
+
 // New 创建空钱包。
 func New() *Wallet {
-	w := &Wallet{accounts: make(map[string]*Account)}
+	w := &Wallet{
+		accounts: make(map[string]*Account),
+		txIndex:  make(map[string]txResult),
+	}
 	return w
 }
 
@@ -105,6 +118,80 @@ func (w *Wallet) Apply(ownerID string, changeset WalletMap, metadata string, now
 	return affected, l, nil
 }
 
+// ApplyTx 是带幂等键的 Apply:同一 txID 重复调用只应用一次,后续调用返回首次
+// 成功的结果(相同 affected + 同一账本)而不再改动余额。用于防止网络重试 /
+// 客户端重发导致的重复扣款、重复发奖。
+//
+// 语义:
+//   - txID 为空 → ErrEmptyTxID;
+//   - txID 首次出现 → 等价 Apply,成功后记录结果,返回 (affected, ledger, false);
+//   - txID 已成功过 → 不执行,返回缓存的 (affected, ledger, true);
+//   - 首次执行失败(如余额不足)→ 不记录 txID,同 txID 下次仍可重试。
+//
+// 返回值 replayed 表示本次是否为重放(true=未真正扣款,复用首次结果)。
+// 幂等索引随 Wallet 常驻内存(append-only,与账本同生命周期);若需按 TTL
+// 淘汰,请在业务层用 pkg/idempotency 包住 ApplyTx。
+func (w *Wallet) ApplyTx(txID, ownerID string, changeset WalletMap, metadata string, now int64) (affected WalletMap, ledger *Ledger, replayed bool, err error) {
+	if txID == "" {
+		return nil, nil, false, ErrEmptyTxID
+	}
+	if len(changeset) == 0 {
+		return nil, nil, false, errors.New("wallet: empty changeset")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// 已成功过:重放首次结果。
+	if prev, ok := w.txIndex[txID]; ok {
+		l := w.ledgerByIDLocked(ownerID, prev.ledgerID)
+		return copyMap(prev.affected), l, true, nil
+	}
+
+	// 首次:内联 Apply 的核心逻辑(已持锁,不能再调 Apply 以免死锁)。
+	acc := w.accounts[ownerID]
+	if acc == nil {
+		acc = &Account{Balance: WalletMap{}}
+		w.accounts[ownerID] = acc
+	}
+	newBal := make(WalletMap, len(changeset))
+	aff := make(WalletMap, len(changeset))
+	for cur, delta := range changeset {
+		newVal := acc.Balance[cur] + delta
+		if newVal < 0 {
+			// 失败不记录 txID,允许重试。
+			return nil, nil, false, fmt.Errorf("%w: %s want %d, have %d", ErrInsufficientBalance, cur, delta, acc.Balance[cur])
+		}
+		newBal[cur] = newVal
+		aff[cur] = newVal
+	}
+	maps.Copy(acc.Balance, newBal)
+	l := &Ledger{
+		ID:         w.seq.Add(1),
+		OwnerID:    ownerID,
+		Changeset:  copyMap(changeset),
+		Metadata:   metadata,
+		CreateTime: now,
+	}
+	acc.ledgers = append(acc.ledgers, l)
+	w.txIndex[txID] = txResult{affected: copyMap(aff), ledgerID: l.ID}
+	return aff, l, false, nil
+}
+
+// ledgerByIDLocked 在已持锁时按 ID 查账本拷贝。不存在返回 nil。
+func (w *Wallet) ledgerByIDLocked(ownerID string, id int64) *Ledger {
+	acc := w.accounts[ownerID]
+	if acc == nil {
+		return nil
+	}
+	for _, l := range acc.ledgers {
+		if l.ID == id {
+			cp := *l
+			return &cp
+		}
+	}
+	return nil
+}
+
 // Balance 返回 owner 当前余额的拷贝。不存在则返回空 map。
 func (w *Wallet) Balance(ownerID string) WalletMap {
 	w.mu.Lock()
@@ -136,17 +223,7 @@ func (w *Wallet) Ledgers(ownerID string) []Ledger {
 func (w *Wallet) LedgerByID(ownerID string, id int64) *Ledger {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	acc := w.accounts[ownerID]
-	if acc == nil {
-		return nil
-	}
-	for _, l := range acc.ledgers {
-		if l.ID == id {
-			cp := *l
-			return &cp
-		}
-	}
-	return nil
+	return w.ledgerByIDLocked(ownerID, id)
 }
 
 // Accounts 返回所有 ownerID(快照)。用于遍历或导出。

@@ -150,3 +150,82 @@ func TestWallet_Concurrent(t *testing.T) {
 		t.Fatalf("ledger count=%d, want 201", len(w.Ledgers("u1")))
 	}
 }
+
+func TestWallet_ApplyTxIdempotent(t *testing.T) {
+	w := wallet.New()
+	// 首次:扣款成功
+	aff1, l1, replayed1, err := w.ApplyTx("tx-1", "u1", wallet.WalletMap{"gold": 100}, "recharge", 1)
+	if err != nil || replayed1 {
+		t.Fatalf("first: replayed=%v err=%v", replayed1, err)
+	}
+	if aff1["gold"] != 100 {
+		t.Fatalf("first affected=%d, want 100", aff1["gold"])
+	}
+	// 重放:同 txID,余额不再变,返回首次结果
+	aff2, l2, replayed2, err := w.ApplyTx("tx-1", "u1", wallet.WalletMap{"gold": 100}, "recharge", 2)
+	if err != nil || !replayed2 {
+		t.Fatalf("replay: replayed=%v err=%v", replayed2, err)
+	}
+	if aff2["gold"] != 100 {
+		t.Fatalf("replay affected=%d, want 100", aff2["gold"])
+	}
+	if l1.ID != l2.ID {
+		t.Fatalf("replay should return same ledger: %d vs %d", l1.ID, l2.ID)
+	}
+	// 关键:余额只加了一次
+	if w.Balance("u1")["gold"] != 100 {
+		t.Fatalf("balance should be 100 (applied once), got %d", w.Balance("u1")["gold"])
+	}
+	// 只有一条账本
+	if len(w.Ledgers("u1")) != 1 {
+		t.Fatalf("want 1 ledger, got %d", len(w.Ledgers("u1")))
+	}
+}
+
+func TestWallet_ApplyTxEmptyID(t *testing.T) {
+	w := wallet.New()
+	_, _, _, err := w.ApplyTx("", "u1", wallet.WalletMap{"gold": 1}, "", 1)
+	if !errors.Is(err, wallet.ErrEmptyTxID) {
+		t.Fatalf("want ErrEmptyTxID, got %v", err)
+	}
+}
+
+func TestWallet_ApplyTxFailNotRecorded(t *testing.T) {
+	w := wallet.New()
+	// 余额不足,首次失败
+	_, _, _, err := w.ApplyTx("tx-1", "u1", wallet.WalletMap{"gold": -50}, "spend", 1)
+	if !errors.Is(err, wallet.ErrInsufficientBalance) {
+		t.Fatalf("want insufficient, got %v", err)
+	}
+	// 先充值
+	w.ApplyTx("tx-0", "u1", wallet.WalletMap{"gold": 100}, "init", 2)
+	// 同 txID 重试:因首次失败未记录,应真正执行(非重放)
+	_, _, replayed, err := w.ApplyTx("tx-1", "u1", wallet.WalletMap{"gold": -50}, "spend", 3)
+	if err != nil {
+		t.Fatalf("retry after balance ok: %v", err)
+	}
+	if replayed {
+		t.Fatal("failed tx should not be recorded, retry must actually execute")
+	}
+	if w.Balance("u1")["gold"] != 50 {
+		t.Fatalf("balance want 50, got %d", w.Balance("u1")["gold"])
+	}
+}
+
+func TestWallet_ApplyTxConcurrentSameID(t *testing.T) {
+	w := wallet.New()
+	w.Apply("u1", wallet.WalletMap{"gold": 1000}, "init", 1)
+
+	const n = 100
+	var wg sync.WaitGroup
+	for range n {
+		wg.Go(func() {
+			w.ApplyTx("tx-dup", "u1", wallet.WalletMap{"gold": -10}, "spend", 2)
+		})
+	}
+	wg.Wait()
+	// 同一 txID 并发 100 次,只应扣一次(-10)
+	if got := w.Balance("u1")["gold"]; got != 990 {
+		t.Fatalf("concurrent same txID should apply once: balance=%d, want 990", got)
+	}
+}

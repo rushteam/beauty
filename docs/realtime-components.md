@@ -805,6 +805,243 @@ beauty 的 auth/requestid/callbacks/ratelimit/audit/afterwork/metadata/errors
 
 路由:`/create` `/join` `/members` `/donate` `/fund` `/score` `/ranking`。详见 `examples/clan`。
 
+---
+
+# 扩展原语速查(并发 / 可靠性 / 游戏 & 直播 / 空间地理)
+
+## 速查:pkg/idempotency（幂等执行)
+
+按 key 去重 + 并发合并(singleflight)二合一:同 key 重复只执行一次,结果按 TTL 缓存。
+
+```go
+store := idempotency.New[int64](idempotency.WithTTL(10 * time.Minute))
+defer store.Stop()
+val, err, shared := store.Do("order:"+id, func() (int64, error) {
+    return chargeAndGrant(id) // 只执行一次;并发同 key 阻塞等首次结果
+})
+// shared=true 表示复用了他人的结果(未真正执行 fn)
+```
+
+- 默认**不缓存 error**(允许重试),`WithCacheErrors(true)` 改为连错误一起缓存;
+- `fn` panic 会清理占位记录、允许重试;
+- 幂等键须**稳定**(来自业务/消息 ID),不可用 `idgen`/`uuid` 现场生成。详见 `examples/idempotency`。
+
+## 速查:pkg/keyedmutex（按 key 的细粒度锁)
+
+同 key 串行、不同 key 并行。引用计数归零自动回收锁,不随 key 增长泄漏。
+
+```go
+km := keyedmutex.New()
+unlock := km.Lock("acc:"+id)   // 只和同账户互斥
+defer unlock()
+// ... 临界区(同账户扣款串行,不同账户并行)...
+
+if u, ok := km.TryLock(k); ok { defer u() }  // 非阻塞尝试
+km.Do(k, func() { ... })                     // 便捷封装
+```
+
+- `Lock` 返回 `unlock` 闭包(不是 `Unlock(key)`),`sync.Once` 防重复解锁;
+- 与 `idempotency` 区分:后者"只执行一次",本包"每次都执行,只是串行"。详见 `examples/keyedmutex`。
+
+## 速查:pkg/backoff（指数退避 + 抖动)
+
+统一的退避策略:`Duration(n)` 算第 n 次等待,`Retry`/`RetryIf` 包住可重试操作。
+
+```go
+p := backoff.New(
+    backoff.WithBase(200*time.Millisecond), backoff.WithFactor(2),
+    backoff.WithMax(30*time.Second), backoff.WithJitter(backoff.JitterFull),
+)
+err := p.RetryIf(ctx, callRemote, func(e error) bool {
+    return !errors.Is(e, errBadRequest) // 4xx 不重试
+})
+```
+
+- 四种抖动:`JitterFull`(默认,打散最彻底)/ `Equal` / `None` / `Proportional`(±ratio,默认 ±25%);
+- `Retry` 遇 ctx 取消立即返回;已被 webhook/saga/grpcclient 复用。详见 `examples/backoff`。
+
+## 速查:pkg/saga（跨服务 Saga 编排)
+
+顺序执行正向操作,任一步失败逆序补偿已成功步骤,达成最终一致。
+
+```go
+res := saga.New("purchase", saga.WithCompensationRetry(3, 100*time.Millisecond)).
+    Step("deduct", deductFn, refundFn).   // 正向 + 补偿(须幂等)
+    Step("grant", grantFn, nil).          // nil = 无需补偿
+    Execute(ctx)
+switch res.Status {
+case saga.StatusCommitted:          /* 成功 */
+case saga.StatusCompensated:        /* 失败但已补偿,数据一致 */
+case saga.StatusCompensationFailed: /* 补偿也失败,须告警人工介入 */
+}
+```
+
+- 与 `txn`(同进程 2PC 可回滚)互补:saga 是跨服务补偿;
+- 补偿须幂等(推荐配 `wallet.ApplyTx`),补偿阶段用 `WithoutCancel` 不受原 ctx 取消影响;
+- 纯内存不持久化,依赖可重投触发源做崩溃恢复。详见 `examples/saga`。
+
+## 速查:pkg/eventbus（进程内事件总线)
+
+按 topic 订阅 + 回调分发,解耦"谁发"与"谁收"。
+
+```go
+bus := eventbus.New[UserEvent]()
+unsub := bus.Subscribe("user.login", func(topic string, e UserEvent) { ... })
+defer unsub()
+bus.Publish("user.login", UserEvent{UserID: "u1"}) // 通知该 topic 所有订阅者
+```
+
+- 同步(默认,`Publish` 返回即处理完)或异步(`WithAsync`);handler panic 经 `pkg/safe` 恢复;
+- 与 `stream`(channel 单源扇出、所有订阅者同一份流)区分:eventbus 是多主题、回调式。详见 `examples/eventbus`。
+
+## 速查:pkg/delayqueue（定点单次延迟触发)
+
+最小堆 + 单 goroutine 驱动,到点跑回调,支持按 key 取消 / 改期。
+
+```go
+q := delayqueue.New()
+defer q.Stop()
+q.Schedule("order:"+id, 15*time.Minute, cancelOrder) // 15 分钟未支付则取消
+q.Schedule("order:"+id, 30*time.Minute, cancelOrder) // 同 key 再 Schedule = 改期(覆盖)
+q.Cancel("order:"+id)                                // 支付了 → 取消
+```
+
+- 填 `scheduler`(即时)与 `cron`(周期)之间缺的"一次性触发":开局倒计时/buff 到期/超时兜底;
+- 回调独立 goroutine 执行,panic 经 `pkg/safe` 恢复。详见 `examples/delayqueue`。
+
+## 速查:pkg/counter（滑动窗口计数 / 配额)
+
+按 key 的时间窗累计,`Allow` 做窗口内配额判断。
+
+```go
+c := counter.New(time.Minute)   // 1 分钟滑动窗口
+defer c.Stop()
+c.Incr("room:1:danmaku", 1)
+if !c.Allow("user:"+uid, 1, 60) { /* 1 分钟超 60 条,拒绝 */ }
+```
+
+- 环形桶 + 分片锁;与 `ratelimit` 互补:ratelimit 控**速率**(令牌桶),counter 控**窗口内总量**;
+- 空闲 key 由 gc 回收。详见 `examples/counter`。
+
+## 速查:pkg/tally（高频累计聚合 + 批量刷写)
+
+海量小额 +1 在内存合并,定时/攒够阈值批量交给 flush,削平写放大。
+
+```go
+t := tally.New(func(ctx context.Context, batch map[string]int64) {
+    batchWriteDB(batch) // N 次 Add 只触发少量 flush
+}, tally.WithFlushInterval(time.Second))
+defer t.Stop()          // Stop 会做最后一次 flush,尾部不丢
+t.Add("room:1:like", 1) // 高频路径,只做内存累加
+```
+
+- 泛型数值类型;与 `wallet`(逐笔精确账本)互补:tally 是可聚合、容忍丢尾的计数(点赞/人气);
+- `flush` panic 经 `pkg/safe` 恢复,不影响后续。详见 `examples/tally`。
+
+## 速查:pkg/idgen（分布式唯一 ID / Snowflake)
+
+64 位趋势递增 ID:41 时间戳 + 10 节点 + 12 序列。
+
+```go
+g, _ := idgen.New(1) // node ID 0..1023,同一部署每实例唯一
+id := g.MustNext()   // 趋势递增、全局唯一
+ts, node, seq := idgen.Parse(id)
+```
+
+- 纪元可配(`WithEpoch`,上线后不可改);处理**时钟回拨**(容忍内自旋,超阈报错,绝不静默出重复 ID);
+- 与 `uuid`(128 位字符串)互补:idgen 紧凑、可排序,适合主键/对局 ID。详见 `examples/idgen`。
+
+## 速查:pkg/fsm（泛型有限状态机)
+
+声明式转移表,非法转移报错而非静默改状态,带 Enter/Leave/Transition 钩子。
+
+```go
+m := fsm.NewBuilder[State, Event](Waiting).
+    Allow(Waiting, Start, Playing).
+    Allow(Playing, Finish, Settled).
+    OnEnter(func(to State, e Event) error { return nil }).
+    Build()
+_, err := m.Fire(Start)      // 非法转移返回 ErrInvalidTransition,状态不变
+m.Can(Finish); m.Current()
+```
+
+- S/E 为 comparable 枚举;钩子返回 error 可否决转移(OnLeave/OnTransition);并发安全。
+- 对局/房间/订单状态流转,防非法跳转。详见 `examples/fsm`。
+
+## 速查:pkg/versus（限时多方对抗计分 / 直播 PK)
+
+组合 `fsm`(状态)+ `stream`(事件流)+ 倒计时,双方/多方限时比拼、到点定胜负。
+
+```go
+m := versus.New("pk-1", []string{"A", "B"},
+    versus.WithDuration(5*time.Minute),
+    versus.WithOnEnd(func(r versus.Result) { /* 胜负/平局 */ }))
+m.Start()
+m.Add("A", 100)                 // 刷礼物折算的分
+ch, unsub := m.Subscribe(ctx)   // 订阅分数变化事件(→ SSE/WS)
+```
+
+- pending→running→ended 状态机,ended 幂等;到点自动结算或 `Finish` 手动结束;
+- 事件流内部复用 `stream.Broadcaster`。详见 `examples/versus` 与 `examples/live-pk`(多房间组合)。
+
+## 速查:pkg/momentum（连击 + 热度时间衰减)
+
+连击窗口内递增/断连重置,热度按半衰期指数衰减(惰性,无后台 goroutine)。
+
+```go
+tr := momentum.New(momentum.WithComboWindow(2*time.Second), momentum.WithHalfLife(30*time.Second))
+st := tr.Hit("room:1", 10)  // st.Combo 连击数, st.Value 当前热度, st.MaxCombo 历史最高
+tr.Value("room:1")          // 读时按经过时间折算衰减
+tr.GC(1e-3)                 // 按需回收已冷却的 key
+```
+
+- 与 `counter`/`leaderboard`(不衰减)区分:momentum 反映"当下有多热";
+- 直播连击特效、实时热度榜。详见 `examples/momentum`。
+
+## 速查:pkg/pathfind（网格 A* 寻路)
+
+网格地图上求最短路径,支持障碍、移动代价、对角(可禁止穿墙角)。
+
+```go
+g := pathfind.NewGrid(w, h)
+g.SetBlocked(pathfind.Point{X: 5, Y: 3}, true)
+g.SetCost(pathfind.Point{X: 2, Y: 2}, 5) // 沼泽更难走
+path := g.FindPath(from, to, pathfind.WithDiagonal(true))
+```
+
+- octile 启发保证最优;纯计算,同一 Grid 可并发 `FindPath`;
+- 塔防/SLG/点击移动/怪物追击。详见 `examples/pathfind`。
+
+## 速查:pkg/spatial（网格空间索引 / 附近的人)
+
+实体按坐标分桶,`Nearby`/`KNN` 只扫近邻单元 + 精确距离过滤,避免全表遍历。
+
+```go
+ix := spatial.New[string](100) // cellSize≈典型查询半径
+ix.Add("alice", 10, 10); ix.Move("alice", 20, 15); ix.Remove("bob")
+near := ix.Nearby(0, 0, 50, "me")   // 半径内、按距离升序、排除自己
+top := ix.KNN(0, 0, 5, 500)          // 最近 5 个
+```
+
+- 平面 float64 坐标(游戏地图);与 `geohash`(地球经纬度 LBS)互补;
+- 收益随规模显现:小半径查询耗时取决于**局部密度**而非总量 N。基准(均匀布点、
+  半径 50)显示 10k 实体时与全表扫描相当(map 开销 ~ 抵消候选缩减),250k 时
+  网格 ~10µs、全表 ~171µs(约 17×)。实体少时全表扫描反而更简单;
+- 附近的人/MMO AOI/大地图分区。详见 `examples/spatial`。
+
+## 速查:pkg/geohash（经纬度地理编码)
+
+经纬度编码成 base32 字符串,前缀相同即地理相邻——"附近"退化为字符串前缀检索。
+
+```go
+h := geohash.Encode(39.9042, 116.4074, 8)      // "wx4g0bm6"
+cover := geohash.CoverNeighbors(lat, lng, 6)   // 中心+8邻居的前缀集(覆盖边界裂缝)
+d := geohash.Distance(lat1, lng1, lat2, lng2)  // Haversine 米
+```
+
+- 邻近搜索:按 `CoverNeighbors` 的前缀集在 DB/Redis 检索,再用 `Distance` 精确过滤;
+- 与 `spatial`(平面网格)互补,面向真实地球坐标的 LBS。详见 `examples/geohash`。
+
 ## 风格约定
 
 二十二个包遵循统一约定,便于混用:

@@ -27,6 +27,14 @@
 // Action/Compensate 中的 panic 被 pkg/safe 转为 error(走正常失败/补偿流程)。
 // 补偿阶段使用 context.WithoutCancel:原请求 ctx 取消不应中断补偿(副作用须补完)。
 //
+// 崩溃恢复:本包不持久化。生产环境依赖「可重投的触发源」(如 MQ at-least-once)
+// 实现恢复——协调器崩溃后消息重投、saga 从头重跑,靠「幂等的 Action/Compensate」
+// 保证不产生重复副作用。
+// 前提:幂等键必须来自触发消息、跨重投稳定(如 msg.OrderID),不可用 idgen/uuid
+// 现场生成——现场生成会让每次重投的键都不同,幂等失效、重复扣款。
+// 仅当触发源不可重投(如不会重试的同步请求)时,才需要外部持久化 saga 状态并在
+// 重启时恢复进度——那种场景本包不覆盖。
+//
 // 零值不可用,用 New 构造。单个 Saga 的 Execute 非并发安全(一次编排一个流程);
 // 不同 Saga 实例相互独立。
 package saga

@@ -89,6 +89,23 @@ func TestDuration_EqualJitterBounds(t *testing.T) {
 	}
 }
 
+func TestDuration_ProportionalJitterBounds(t *testing.T) {
+	p := backoff.New(
+		backoff.WithBase(100*time.Millisecond),
+		backoff.WithFactor(2),
+		backoff.WithJitter(backoff.JitterProportional),
+		backoff.WithJitterRatio(0.25),
+		backoff.WithMax(0),
+	)
+	// attempt 2 名义 400ms;±25% → [300ms, 500ms]。
+	for range 500 {
+		got := p.Duration(2)
+		if got < 300*time.Millisecond || got > 500*time.Millisecond {
+			t.Fatalf("proportional ±25%% out of bounds: %v", got)
+		}
+	}
+}
+
 func TestRetry_SucceedsAfterFailures(t *testing.T) {
 	p := backoff.New(
 		backoff.WithBase(time.Millisecond),

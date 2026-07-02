@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/backoff"
 	"github.com/rushteam/beauty/pkg/safe"
 )
 
@@ -210,6 +211,15 @@ func (s *Saga) compensate(ctx context.Context, completed []int, res *Result) {
 	compCtx := context.WithoutCancel(ctx)
 	res.Status = StatusCompensated
 
+	// 补偿重试的退避序列复用 pkg/backoff:base=compRetryDelay、factor=2、无抖动,
+	// 与历史行为(delay<<(attempt-1))一致。
+	policy := backoff.New(
+		backoff.WithBase(s.cfg.compRetryDelay),
+		backoff.WithFactor(2),
+		backoff.WithJitter(backoff.JitterNone),
+		backoff.WithMax(0),
+	)
+
 	for i := len(completed) - 1; i >= 0; i-- {
 		idx := completed[i]
 		step := s.steps[idx]
@@ -230,8 +240,8 @@ func (s *Saga) compensate(ctx context.Context, completed []int, res *Result) {
 				break
 			}
 			if attempt < attempts {
-				// 指数退避后重试。
-				time.Sleep(s.cfg.compRetryDelay << (attempt - 1))
+				// 指数退避后重试(attempt 从 1 计,Duration(attempt-1) 对应 base<<(attempt-1))。
+				time.Sleep(policy.Duration(attempt - 1))
 			}
 		}
 

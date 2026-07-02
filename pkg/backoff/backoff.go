@@ -32,15 +32,20 @@ const (
 	JitterEqual
 	// JitterNone 无抖动:等待 = base*factor^n(精确指数)。
 	JitterNone
+	// JitterProportional 比例抖动:等待 = d ± d*ratio,在 [d*(1-ratio), d*(1+ratio)]
+	// 均匀取值(ratio 由 WithJitterRatio 设置,默认 0.25 即 ±25%)。
+	// 适合"围绕名义退避小幅扰动"的场景(如 RPC 客户端重试)。
+	JitterProportional
 )
 
 // config 配置。
 type config struct {
-	base    time.Duration
-	max     time.Duration
-	factor  float64
-	jitter  Jitter
-	maxRetr int
+	base        time.Duration
+	max         time.Duration
+	factor      float64
+	jitter      Jitter
+	jitterRatio float64
+	maxRetr     int
 }
 
 // Option 配置 Policy。
@@ -58,26 +63,32 @@ func WithFactor(f float64) Option { return func(c *config) { c.factor = f } }
 // WithJitter 设置抖动策略(默认 JitterFull)。
 func WithJitter(j Jitter) Option { return func(c *config) { c.jitter = j } }
 
+// WithJitterRatio 设置 JitterProportional 的比例(0..1,默认 0.25 即 ±25%)。
+// 仅在 jitter 为 JitterProportional 时生效。
+func WithJitterRatio(r float64) Option { return func(c *config) { c.jitterRatio = r } }
+
 // WithMaxRetries 设置 Retry 的最大重试次数(额外次数,0=只试一次;默认 3)。
 func WithMaxRetries(n int) Option { return func(c *config) { c.maxRetr = n } }
 
 // Policy 退避策略(不可变)。零值不可用,用 New 构造。并发安全。
 type Policy struct {
-	base    time.Duration
-	max     time.Duration
-	factor  float64
-	jitter  Jitter
-	maxRetr int
+	base        time.Duration
+	max         time.Duration
+	factor      float64
+	jitter      Jitter
+	jitterRatio float64
+	maxRetr     int
 }
 
 // New 创建退避策略。
 func New(opts ...Option) *Policy {
 	cfg := config{
-		base:    200 * time.Millisecond,
-		max:     30 * time.Second,
-		factor:  2.0,
-		jitter:  JitterFull,
-		maxRetr: 3,
+		base:        200 * time.Millisecond,
+		max:         30 * time.Second,
+		factor:      2.0,
+		jitter:      JitterFull,
+		jitterRatio: 0.25,
+		maxRetr:     3,
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -88,15 +99,22 @@ func New(opts ...Option) *Policy {
 	if cfg.factor < 1 {
 		cfg.factor = 2.0
 	}
+	if cfg.jitterRatio < 0 {
+		cfg.jitterRatio = 0
+	}
+	if cfg.jitterRatio > 1 {
+		cfg.jitterRatio = 1
+	}
 	if cfg.maxRetr < 0 {
 		cfg.maxRetr = 0
 	}
 	return &Policy{
-		base:    cfg.base,
-		max:     cfg.max,
-		factor:  cfg.factor,
-		jitter:  cfg.jitter,
-		maxRetr: cfg.maxRetr,
+		base:        cfg.base,
+		max:         cfg.max,
+		factor:      cfg.factor,
+		jitter:      cfg.jitter,
+		jitterRatio: cfg.jitterRatio,
+		maxRetr:     cfg.maxRetr,
 	}
 }
 
@@ -118,16 +136,23 @@ func (p *Policy) Duration(attempt int) time.Duration {
 		}
 	}
 	base := time.Duration(d)
-	return applyJitter(base, p.jitter)
+	return applyJitter(base, p.jitter, p.jitterRatio)
 }
 
-func applyJitter(d time.Duration, j Jitter) time.Duration {
+func applyJitter(d time.Duration, j Jitter, ratio float64) time.Duration {
 	if d <= 0 {
 		return 0
 	}
 	switch j {
 	case JitterNone:
 		return d
+	case JitterProportional:
+		// [d*(1-ratio), d*(1+ratio)] 均匀。
+		spread := int64(float64(d) * ratio) // 半宽
+		if spread <= 0 {
+			return d
+		}
+		return d - time.Duration(spread) + time.Duration(rand.Int64N(2*spread+1))
 	case JitterEqual:
 		half := d / 2
 		return half + time.Duration(rand.Int64N(int64(half)+1))

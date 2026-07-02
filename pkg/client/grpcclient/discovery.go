@@ -11,6 +11,7 @@ import (
 
 	"log/slog"
 
+	"github.com/rushteam/beauty/pkg/backoff"
 	"github.com/rushteam/beauty/pkg/governance/bannednodes"
 	governancecb "github.com/rushteam/beauty/pkg/governance/circuitbreaker"
 	governancerouter "github.com/rushteam/beauty/pkg/governance/router"
@@ -364,6 +365,15 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 		ctx = bannednodes.WithBannedNodes(ctx)
 	}
 	attempts := c.maxRetries + 1
+	// 失败换节点的退避:base=retryDelay、factor=2、±25% 比例抖动(复用 pkg/backoff,
+	// 与历史 base*2^i ± base/4 行为一致)。
+	failover := backoff.New(
+		backoff.WithBase(c.retryDelay),
+		backoff.WithFactor(2),
+		backoff.WithJitter(backoff.JitterProportional),
+		backoff.WithJitterRatio(0.25),
+		backoff.WithMax(0),
+	)
 	var lastErr error
 	for i := 0; i < attempts; i++ {
 		if err := ctx.Err(); err != nil {
@@ -391,14 +401,11 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 		}
 
 		if i < attempts-1 {
-			// 指数退避：base * 2^i，加 ±25% jitter
-			base := c.retryDelay * (1 << i)
-			jitter := time.Duration(rand.Int64N(int64(base/2))) - base/4
-			delay := base + jitter
+			// 指数退避：base * 2^i，加 ±25% jitter(复用 pkg/backoff 的比例抖动)。
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(delay):
+			case <-time.After(failover.Duration(i)):
 			}
 		}
 	}

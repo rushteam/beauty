@@ -24,6 +24,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/backoff"
 	"github.com/rushteam/beauty/pkg/safe"
 )
 
@@ -65,12 +66,12 @@ const (
 
 // DeliveryRecord 一次投递的最终记录(成功或重试耗尽后)。
 type DeliveryRecord struct {
-	EventID string
+	EventID     string
 	EndpointURL string
-	Status     DeliveryStatus
-	Attempts   int
-	LastErr    string
-	At         time.Time
+	Status      DeliveryStatus
+	Attempts    int
+	LastErr     string
+	At          time.Time
 }
 
 // Store 持久化投递状态与幂等去重。实现方对接 Redis/DB/内存。
@@ -104,9 +105,9 @@ type Notifier struct {
 	backoff   time.Duration
 	onError   func(ep Endpoint, ev Event, err error)
 
-	store  Store // 可为 nil:不启用去重/状态追踪
-	dlq    DLQ   // 可为 nil:失败不入死信
-	now    func() time.Time
+	store Store // 可为 nil:不启用去重/状态追踪
+	dlq   DLQ   // 可为 nil:失败不入死信
+	now   func() time.Time
 }
 
 // Option 配置 Notifier。
@@ -251,16 +252,22 @@ func (n *Notifier) deliver(ctx context.Context, ep Endpoint, ev Event) error {
 	if err != nil {
 		return err
 	}
-	delay := n.backoff
+	// 退避序列复用 pkg/backoff:base=n.backoff、factor=2、无抖动、不封顶,
+	// 与历史行为(delay 每次翻倍)一致。第 attempt 次重试(attempt>=1)等待 Duration(attempt-1)。
+	policy := backoff.New(
+		backoff.WithBase(n.backoff),
+		backoff.WithFactor(2),
+		backoff.WithJitter(backoff.JitterNone),
+		backoff.WithMax(0),
+	)
 	var lastErr error
 	for attempt := 0; attempt <= n.retries; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(delay):
+			case <-time.After(policy.Duration(attempt - 1)):
 			}
-			delay *= 2
 		}
 		lastErr = n.post(ctx, ep, body)
 		if lastErr == nil {

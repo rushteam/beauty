@@ -361,3 +361,28 @@ func TestRoundRobin_ConcurrentSafe(t *testing.T) {
 		t.Errorf("total picks want 10000, got %d", total)
 	}
 }
+
+// TestRoundRobin_UpdateNextConcurrent 覆盖服务列表热更新场景:Update 与 Next 并发。
+// 回归 loadbalance.go 中 RoundRobin 缺锁导致的 data race(-race 下运行才有意义)。
+func TestRoundRobin_UpdateNextConcurrent(t *testing.T) {
+	r := loadbalance.NewRoundRobin(nodes())
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 10000 {
+			r.Update([]testNode{{id: "a", weight: 1}, {id: "b", weight: 1}})
+		}
+	})
+	for range 4 {
+		wg.Go(func() {
+			for range 10000 {
+				r.Next()
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 10000 {
+			r.Nodes()
+		}
+	})
+	wg.Wait()
+}

@@ -317,9 +317,11 @@ func (w *WeightedRoundRobin[T]) Nodes() []T {
 
 // ===== RoundRobin =====
 
-// RoundRobin 无权重轮询。atomic 游标自增取模,无锁高吞吐。
+// RoundRobin 无权重轮询。atomic 游标自增取模,读路径无锁高吞吐;
+// nodes 快照用 RWMutex 保护,以支持 Update 与 Next 并发(服务列表热更新场景)。
 // 适合节点等价(无权重区分)的场景。并发安全。零值不可用,用 NewRoundRobin 构造。
 type RoundRobin[T any] struct {
+	mu    sync.RWMutex
 	nodes []T
 	index atomic.Int64
 }
@@ -333,22 +335,30 @@ func NewRoundRobin[T any](nodes []T) *RoundRobin[T] {
 
 // Update 用新节点列表替换。适用于服务列表变化(节点增删)。
 func (r *RoundRobin[T]) Update(nodes []T) {
-	r.nodes = make([]T, len(nodes))
-	copy(r.nodes, nodes)
+	next := make([]T, len(nodes))
+	copy(next, nodes)
+	r.mu.Lock()
+	r.nodes = next
+	r.mu.Unlock()
 }
 
 // Next 返回下一个节点(轮询)。无节点时返回零值 + false。
 func (r *RoundRobin[T]) Next() (T, bool) {
 	var zero T
-	if len(r.nodes) == 0 {
+	r.mu.RLock()
+	nodes := r.nodes
+	r.mu.RUnlock()
+	if len(nodes) == 0 {
 		return zero, false
 	}
 	idx := r.index.Add(1)
-	return r.nodes[int(idx)%len(r.nodes)], true
+	return nodes[int(idx)%len(nodes)], true
 }
 
-// Nodes 返回所有节点(构建时的快照)。
+// Nodes 返回所有节点(当前快照)。
 func (r *RoundRobin[T]) Nodes() []T {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]T, len(r.nodes))
 	copy(out, r.nodes)
 	return out

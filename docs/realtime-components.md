@@ -1042,6 +1042,70 @@ d := geohash.Distance(lat1, lng1, lat2, lng2)  // Haversine 米
 - 邻近搜索:按 `CoverNeighbors` 的前缀集在 DB/Redis 检索,再用 `Distance` 精确过滤;
 - 与 `spatial`(平面网格)互补,面向真实地球坐标的 LBS。详见 `examples/geohash`。
 
+## 速查:pkg/loot（加权随机抽取 / 抽卡)
+
+按权重抽取,Alias Method 建表后每次 O(1);可选保底(pity)与不放回抽取。
+
+```go
+tb, _ := loot.NewTable([]loot.Item[string]{
+    {Value: "普通", Weight: 943, Rarity: 1},
+    {Value: "史诗", Weight: 7, Rarity: 5},
+})
+tb.Draw()                       // O(1) 加权抽一个
+tb.DrawDistinct(3)              // 不放回抽 3 个(十连去重)
+p := loot.NewPuller(tb, 90, 5)  // 连续 90 抽没出 Rarity>=5 则强制出
+it, pity := p.Draw()            // pity=true 表示本次由保底触发
+```
+
+- Alias 表构建后只读、并发安全;`WithRand` 可注入可复现随机源;
+- `Puller` 有 pity 计数状态,非并发安全(每玩家一个)。详见 `examples/loot`。
+
+## 速查:pkg/cooldown（冷却 / 操作限时)
+
+per-key 的"下次可用时刻",到点才能再触发。
+
+```go
+cd := cooldown.New(8 * time.Second) // 默认 CD
+defer cd.Stop()
+if cd.TryTrigger("p1:skill") {      // 原子"检查+触发":就绪则触发返回 true
+    castSkill()
+}
+cd.Remaining("p1:skill")            // 剩余 CD
+cd.TriggerFor("p1:daily", 24*time.Hour) // per-action 覆盖默认 CD
+```
+
+- 与 `ratelimit`(速率)/`counter`(窗口累计)区分:cooldown 控**两次动作最小间隔**;
+- 分片锁 + gc 回收空闲 key。详见 `examples/cooldown`。
+
+## 速查:pkg/ringbuffer（定长环形缓冲 / 最近 N 条)
+
+只保留最近 N 个,写满覆盖最旧,O(1) 追加。
+
+```go
+r := ringbuffer.New[string](50)   // 最近 50 条
+r.Push("弹幕")
+r.Recent(10)                       // 最近 10 条(从新到旧)
+r.Slice()                          // 全部(从旧到新)
+s := ringbuffer.NewSync[string](50) // 并发安全变体
+```
+
+- `Ring[T]` 非并发安全(零开销),`SyncRing[T]` 内置 RWMutex;
+- 固定内存不扩容。最近弹幕/战绩/滚动日志。详见 `examples/ringbuffer`。
+
+## 速查:pkg/bitmap（位图 / 签到)
+
+1 bit 一个布尔状态,大规模标记 + 集合运算,极省内存。
+
+```go
+day := bitmap.New(1e7)             // 1000 万用户,一天 ~1.25MB
+day.Set(uid); day.Test(uid); day.Count()   // 当日签到数
+mon.Clone().And(tue).And(wed)      // 连续三天都签到(交集)
+bitmap.ConsecutiveFromEnd(days, uid)       // 从末尾数连续签到天数
+```
+
+- 精确型,与 `pkg/utils/bloom`(概率型、有假阳性)区分:ID 稠密、需精确 Count/枚举时用 bitmap;
+- 底层 `[]uint64` 按需增长,非并发安全。签到/去重/权限位。详见 `examples/bitmap`。
+
 ## 风格约定
 
 二十二个包遵循统一约定,便于混用:

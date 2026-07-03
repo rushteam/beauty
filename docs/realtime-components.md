@@ -1106,6 +1106,56 @@ bitmap.ConsecutiveFromEnd(days, uid)       // 从末尾数连续签到天数
 - 精确型,与 `pkg/utils/bloom`(概率型、有假阳性)区分:ID 稠密、需精确 Count/枚举时用 bitmap;
 - 底层 `[]uint64` 按需增长,非并发安全。签到/去重/权限位。详见 `examples/bitmap`。
 
+## 速查:pkg/questlog（任务 / 成就进度)
+
+朝目标累加进度,达标可领(一次),支持前置依赖与周期重置。
+
+```go
+log := questlog.New([]questlog.Quest[string]{
+    {ID: "kill", Target: 10},
+    {ID: "vip", Target: 1, Requires: []string{"kill"}}, // 前置领完才解锁
+}, questlog.WithOnClaim(func(owner string, q questlog.Quest[string]) { grant(owner, q) }))
+
+log.Advance("u1", "kill", 3)   // 累加进度(达标自动变 Achieved)
+log.Claim("u1", "kill")        // 仅 Achieved 可领,幂等
+log.Claimable("u1")            // 可领列表(小红点用)
+log.Reset("u1", "kill")        // 周期任务刷新
+```
+
+- 四态:Locked(前置未完)→ InProgress → Achieved → Claimed;
+- 与 counter(窗口计数、会过期)区分:questlog 是"朝目标累加 + 领取状态机",进度不随时间减少。详见 `examples/questlog`。
+
+## 速查:pkg/leveling（经验 / 等级曲线)
+
+给当前经验加一笔,算出新等级/升了几级/级内进度。纯计算无状态。
+
+```go
+lv := leveling.New(leveling.Poly(100, 2, 30)) // 二次曲线,满级 30
+r := lv.Gain(totalExp, 80)   // 加 80 经验
+// r.Level / r.LeveledUp / r.LevelsGain / r.CurExp / r.NextExp / r.IsMax
+lv.Stat(totalExp)            // 只查不改(展示"距升级还差多少")
+```
+
+- 三种曲线:`Linear`(等差)/`Poly`(多项式加速)/`Table`(查表,对接策划数值);
+- 满级后经验仍累计但等级不涨;经验为调用方持久化,本包做纯函数换算。详见 `examples/leveling`。
+
+## 速查:pkg/reddot（小红点 / 未读聚合树)
+
+叶子设未读,父节点 = 后代之和,清零向上传播。
+
+```go
+tr := reddot.New()
+tr.Set("me/msg/chat", 3)      // 叶子设未读
+tr.Incr("me/friend/req", 1)
+tr.Count("me")                // 聚合未读(所有后代之和)
+tr.Dot("me/msg")              // 是否显示红点(布尔)
+tr.Children("me")             // 各子分类的聚合未读(渲染列表)
+tr.Clear("me/msg")            // 已读该分类,红点沿父链更新
+```
+
+- 路径式节点("me/msg/chat"),树惰性创建;Count(精确"99+")与 Dot(布尔)两种语义;
+- 并发安全(红点树规模小,单锁)。App"我的"页红点汇总。详见 `examples/reddot`。
+
 ## 风格约定
 
 二十二个包遵循统一约定,便于混用:

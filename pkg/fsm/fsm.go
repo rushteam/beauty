@@ -44,6 +44,10 @@ type FSM[S, E comparable] struct {
 }
 
 // ErrInvalidTransition 当前状态下该事件无合法转移。
+//
+// 有意做成携带 From/Event 字段的错误类型(而非 errors.New 的哨兵值):
+// 非法转移时调用方常需知道"从哪个状态、什么事件"被拒,用 errors.As 取出字段即可。
+// 若只需判定"是否非法转移",errors.As(err, &ErrInvalidTransition[S,E]{}) 亦可。
 type ErrInvalidTransition[S, E comparable] struct {
 	From  S
 	Event E

@@ -1156,6 +1156,32 @@ tr.Clear("me/msg")            // 已读该分类,红点沿父链更新
 - 路径式节点("me/msg/chat"),树惰性创建;Count(精确"99+")与 Dot(布尔)两种语义;
 - 并发安全(红点树规模小,单锁)。App"我的"页红点汇总。详见 `examples/reddot`。
 
+## 生产多实例:内存实现 vs Store 后端
+
+这些原语默认是**纯内存、单进程**的:状态不跨实例、进程重启即丢。按状态性质分三档,决定能否直接上多实例生产:
+
+**① 无状态 / 纯计算 —— 直接可用**
+`idgen`(节点号需每实例唯一)、`backoff`、`geohash`、`pathfind`、`leveling`、`fsm`。无跨请求共享状态,多实例、重启都无影响。
+
+**② 状态本就属于单进程 / 单局 —— 按场景可用**
+`loot`(只读表)、`ringbuffer`、`bitmap`、`spatial`、`momentum`、`versus`(单局对战)、`keyedmutex`/`eventbus`(进程内语义)、`delayqueue`/`saga`(靠 MQ 重投恢复)。这些的状态天然是"某台机器/某局"的本地视图,或有独立的恢复路径。
+
+**③ 需跨实例共享状态 —— 用 `WithStore` 升级**
+`counter`(配额)、`cooldown`(冷却)、`idempotency`(去重)在多实例下若各算各的会出错(配额被绕过、换实例重复领、重试重复执行)。这三个支持 `WithStore(kvstore.Store)`:配置后状态存到共享后端(Redis 等),跨实例一致。
+
+```go
+store := myRedisStore          // 实现 pkg/kvstore.Store 接口(每方法对应一条 Redis 命令)
+c := counter.New(time.Minute, counter.WithStore(store))     // 配额跨实例
+cd := cooldown.New(8*time.Second, cooldown.WithStore(store)) // 冷却跨实例
+im := idempotency.New[T](idempotency.WithStore(store))       // 去重跨实例
+```
+
+- 不配置 `WithStore` 时行为、API 完全不变(默认内存,零开销);
+- `pkg/kvstore` 定义接口 + 内存实现(`NewMemory`),Redis 等后端由使用方实现(遵循纯标准库,不引 SDK);
+- **语义差异**须知:counter 的 store 模式用**固定窗口**(非滑动,边界可能 2 倍突发);idempotency 的 store 模式是**去重复用**而非"全局单飞"(跨实例并发同 key 可能各执行一次,靠结果唯一存储保证幂等——所以幂等键要求业务操作本身可安全重试);store 故障一律 **fail-open**(读返回 0 / 放行 / 降级执行)+ `WithOnStoreError` 上报。
+
+见 `examples/kvstore-shared`(单进程内两实例共享 Store,演示跨实例配额/冷却/去重)。
+
 ## 风格约定
 
 二十二个包遵循统一约定,便于混用:

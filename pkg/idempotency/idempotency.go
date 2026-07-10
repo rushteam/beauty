@@ -18,8 +18,12 @@
 package idempotency
 
 import (
+	"context"
+	"encoding/json"
 	"sync"
 	"time"
+
+	"github.com/rushteam/beauty/pkg/kvstore"
 )
 
 // entry 一条幂等记录。done 关闭后 result/err 才可读(happens-before 由 channel 保证)。
@@ -35,6 +39,8 @@ type config struct {
 	ttl         time.Duration
 	cacheErrors bool
 	gcInterval  time.Duration
+	store       kvstore.Store
+	onStoreErr  func(op, key string, err error)
 }
 
 // Option 配置 Store。
@@ -46,10 +52,28 @@ func WithTTL(d time.Duration) Option { return func(c *config) { c.ttl = d } }
 // WithCacheErrors 设置是否缓存失败结果(默认 false)。
 // false:fn 返回 error 不缓存,同 key 下次请求会重新执行(适合瞬时错误可重试);
 // true:错误也按 TTL 缓存,同 key 直接返回该错误(适合确定性失败,避免无谓重试)。
+// 注意:store 模式只缓存**成功**结果(错误不跨进程序列化),此选项仅内存模式生效。
 func WithCacheErrors(cache bool) Option { return func(c *config) { c.cacheErrors = cache } }
 
-// WithGCInterval 设置过期清扫间隔(默认 1 分钟)。
+// WithGCInterval 设置过期清扫间隔(默认 1 分钟,仅内存模式)。
 func WithGCInterval(d time.Duration) Option { return func(c *config) { c.gcInterval = d } }
+
+// WithStore 让幂等结果走外部共享存储(如 Redis),使去重跨实例生效。
+// 结果用 JSON 序列化后存入 store(故 T 须可被 encoding/json 编解码)。
+//
+// 语义差异(务必知悉):内存模式提供"去重 + 并发单飞(阻塞等待首次结果)";
+// store 模式只提供**去重 + 复用已完成结果**——用 SetNX 抢占执行权,抢到的执行 fn
+// 并写回结果,没抢到的**不阻塞等待**,而是读已有结果(若尚未写完则自己执行一次)。
+// 即:跨实例的并发同 key 可能各自执行一次,幂等性由"结果最终以 key 唯一存储 + 复用"
+// 保证,而非"全局只执行一次"。要严格单飞请在 fn 内配合分布式锁,或接受此 at-least-once
+// 语义(这正是幂等键要求业务操作本身可安全重试的原因)。
+// 只缓存成功结果;fn 返回 error 时不写 store,允许重试。
+func WithStore(s kvstore.Store) Option { return func(c *config) { c.store = s } }
+
+// WithOnStoreError 设置 store 出错回调。默认静默 + 降级为直接执行 fn。
+func WithOnStoreError(fn func(op, key string, err error)) Option {
+	return func(c *config) { c.onStoreErr = fn }
+}
 
 // Store 幂等结果存储。按 key 维护"执行中/已完成"记录。
 // 零值不可用,用 New 构造。并发安全。
@@ -78,8 +102,65 @@ func New[T any](opts ...Option) *Store[T] {
 		items:  make(map[string]*entry[T]),
 		stopCh: make(chan struct{}),
 	}
-	go s.gc()
+	if cfg.store == nil {
+		go s.gc() // store 模式无内存记录,无需清扫
+	}
 	return s
+}
+
+// storeKey 幂等键在 store 里的键名。
+func (s *Store[T]) storeKey(key string) string { return "idem:" + key }
+
+// doStore 是 store 模式的 Do:SetNX 抢占执行权,读回/写入 JSON 序列化的结果。
+func (s *Store[T]) doStore(key string, fn func() (T, error)) (T, error, bool) {
+	ctx := context.Background()
+	sk := s.storeKey(key)
+
+	// 先读:已有完成结果则直接复用(去重)。
+	if b, ok, err := s.cfg.store.Get(ctx, sk); err != nil {
+		s.reportErr("get", key, err)
+		// 存储故障:降级为直接执行(不保证幂等,但不阻断业务)。
+		r, e := fn()
+		return r, e, false
+	} else if ok {
+		var v T
+		if err := json.Unmarshal(b, &v); err != nil {
+			s.reportErr("unmarshal", key, err)
+			r, e := fn()
+			return r, e, false
+		}
+		return v, nil, true
+	}
+
+	// 无结果:执行 fn(注:跨实例并发时可能多个实例都走到这里各执行一次)。
+	result, err := fn()
+	if err != nil {
+		return result, err, false // 失败不写,允许重试
+	}
+	// 成功:序列化写入(SetNX 保证只有首个写入生效,复用同一份结果)。
+	b, mErr := json.Marshal(result)
+	if mErr != nil {
+		s.reportErr("marshal", key, mErr)
+		return result, err, false
+	}
+	if ok, sErr := s.cfg.store.SetNX(ctx, sk, b, s.cfg.ttl); sErr != nil {
+		s.reportErr("setnx", key, sErr)
+	} else if !ok {
+		// 已有人先写入:复用那份结果,保证同 key 全局一致。
+		if eb, found, gErr := s.cfg.store.Get(ctx, sk); gErr == nil && found {
+			var v T
+			if json.Unmarshal(eb, &v) == nil {
+				return v, nil, true
+			}
+		}
+	}
+	return result, err, false
+}
+
+func (s *Store[T]) reportErr(op, key string, err error) {
+	if err != nil && s.cfg.onStoreErr != nil {
+		s.cfg.onStoreErr(op, key, err)
+	}
 }
 
 // Do 以 key 为幂等键执行 fn:
@@ -91,6 +172,9 @@ func New[T any](opts ...Option) *Store[T] {
 // fn 内 panic 不被捕获——调用方若需防护请在 fn 内自行 recover;panic 会
 // 导致等待同 key 的其他请求也观察到该记录被清理(可重试)。
 func (s *Store[T]) Do(key string, fn func() (T, error)) (result T, err error, shared bool) {
+	if s.cfg.store != nil {
+		return s.doStore(key, fn)
+	}
 	now := time.Now().UnixNano()
 	s.mu.Lock()
 	if e, ok := s.items[key]; ok {
@@ -152,6 +236,20 @@ func (s *Store[T]) Do(key string, fn func() (T, error)) (result T, err error, sh
 // 返回 (result, ok):ok=false 表示无记录、执行中、或已过期。
 func (s *Store[T]) Get(key string) (T, bool) {
 	var zero T
+	if s.cfg.store != nil {
+		b, ok, err := s.cfg.store.Get(context.Background(), s.storeKey(key))
+		if err != nil || !ok {
+			if err != nil {
+				s.reportErr("get", key, err)
+			}
+			return zero, false
+		}
+		var v T
+		if json.Unmarshal(b, &v) != nil {
+			return zero, false
+		}
+		return v, true
+	}
 	s.mu.Lock()
 	e, ok := s.items[key]
 	s.mu.Unlock()
@@ -172,6 +270,12 @@ func (s *Store[T]) Get(key string) (T, bool) {
 // Forget 立即删除 key 的记录(不论执行中还是已完成)。
 // 执行中的记录被 Forget 后,正在执行的 fn 结果不再被后续请求复用。
 func (s *Store[T]) Forget(key string) {
+	if s.cfg.store != nil {
+		if err := s.cfg.store.Delete(context.Background(), s.storeKey(key)); err != nil {
+			s.reportErr("delete", key, err)
+		}
+		return
+	}
 	s.mu.Lock()
 	delete(s.items, key)
 	s.mu.Unlock()

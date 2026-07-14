@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -57,10 +57,14 @@ func wrapCronHandler(cron *Cron, name string, spec string, handler func(ctx cont
 			trace.WithAttributes(attribute.String("name", name)),
 			trace.WithAttributes(attribute.String("cron_spec", spec)),
 		)
+		// 耗时直接用 time.Now 计算,不依赖 span 实现是否满足 sdktrace.ReadOnlySpan——
+		// 未显式配置真实 TracerProvider(beauty.WithTrace())时,全局 tracer 是 noop
+		// 实现,产生的 span 不满足该接口,断言会 panic(曾经的 bug:每次任务触发都
+		// panic-recover,产生噪音日志与堆栈开销)。
+		start := time.Now()
 		defer func() {
 			span.End()
-			readOnlySpan := span.(sdktrace.ReadOnlySpan)
-			timeSpent := readOnlySpan.EndTime().Sub(readOnlySpan.StartTime())
+			timeSpent := time.Since(start)
 			cron.metricsJobSpentDuration.Record(ctx, timeSpent.Seconds(), metricsAttributeSetOpt)
 		}()
 

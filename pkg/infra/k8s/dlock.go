@@ -80,7 +80,8 @@ func WithTiming(leaseDuration, renewDeadline, retryPeriod time.Duration) Option 
 }
 
 // NewElector 用已有的 CoordinationV1 客户端创建 Elector(便于测试时传入 fake
-// clientset)。生产用法见 NewElectorFromConfig。
+// clientset)。生产用法自行构造 clientset 后取其 CoordinationV1() 传入即可,
+// in-cluster/kubeconfig 的判定模式可参考 pkg/service/discover/k8s 里已有的实现。
 func NewElector(client coordinationv1client.CoordinationV1Interface, opts ...Option) *Elector {
 	hostname, _ := os.Hostname()
 	e := &Elector{

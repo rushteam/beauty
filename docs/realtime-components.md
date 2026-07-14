@@ -1218,11 +1218,20 @@ elector.Run(ctx, "myservice-cron", func(leaderCtx context.Context) {
 ```
 
 - `Run` 的 `onElected` 必须持续检查 `leaderCtx.Done()`——这是"仍是 leader"的唯一凭证;
-- etcd 实现不重新发明分布式锁算法,是官方 `client/v3/concurrency` 的薄封装(Session 租约
-  TTL 决定进程崩溃后最长多久被动释放);
-- 与 `keyedmutex`(进程内)区分:dlock 是跨进程/跨实例;
-- 集成测试(需真实 etcd,`go test -tags=integration`)验证了两独立客户端连接间的互斥、
-  5 客户端选主唯一性、进程崩溃后的 failover。详见 `examples/cron-leader`。
+- 两个真实后端,按环境选:
+  - `pkg/infra/etcd.DLock`——基于 etcd 官方 `client/v3/concurrency`(Session+Mutex/
+    Election)。实现了 `Locker`(一次性互斥)+ `Elector`(选主)。集成测试(需真实
+    etcd,`go test -tags=integration`)验证了两独立客户端连接间的互斥、5 客户端选主
+    唯一性、进程崩溃后的 failover;
+  - `pkg/infra/k8s.Elector`——基于 client-go 的 `leaderelection` + `coordination.k8s.io/v1`
+    Lease 资源(kube-scheduler 等控制面组件用的同一套机制)。部署在 k8s 里不想额外
+    运维 etcd 时用它,复用集群自带的选主能力。**只实现 `Elector`,不实现
+    `Locker`**——client-go 的 leaderelection 语义是"持续参选",没有通用一次性互斥锁
+    原语,如实反映这个限制而非拼凑一个语义不符的 Lock/Unlock。测试用 client-go 的
+    fake clientset(验证接线正确与生命周期回调;fake clientset 不做 resourceVersion
+    乐观锁仲裁,验证不了真实互斥,这点如实标注在测试注释里,未做"多 Elector 竞选
+    同一 Lease"的断言——留给真实集群);
+- 与 `keyedmutex`(进程内)区分:dlock 是跨进程/跨实例。详见 `examples/cron-leader`。
 
 ## 风格约定
 

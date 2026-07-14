@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/rushteam/beauty/pkg/dlock"
 	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
@@ -49,6 +50,10 @@ type Cron struct {
 	handlers                []cronHandler
 
 	recoverHandler func(r any)
+
+	// elector 非 nil 时,Start 只在选主当选期间运行任务(见 WithLeaderElector)。
+	elector     dlock.Elector
+	electionKey string
 }
 
 func New(opts ...CronOptions) *Cron {
@@ -89,7 +94,10 @@ func New(opts ...CronOptions) *Cron {
 	return c
 }
 
-func (s *Cron) Start(ctx context.Context) error {
+// register 把所有 handler 注册进底层 cron.Cron(仅登记调度表,不启动)。
+// AddFunc 只是登记条目,真正开始触发要靠 Cron.Start()——所以无论是否配置
+// 选主都可以在 Start 一开始就注册,选主只需要控制 Cron.Start()/Stop() 本身。
+func (s *Cron) register(ctx context.Context) {
 	for _, v := range s.handlers {
 		func(v cronHandler) {
 			logger.Info("register cron", slog.String("name", v.Name), slog.String("expr", v.Spec))
@@ -110,10 +118,32 @@ func (s *Cron) Start(ctx context.Context) error {
 			})
 		}(v)
 	}
-	s.Cron.Start()
-	<-ctx.Done()
-	s.Cron.Stop()
-	return nil
+}
+
+func (s *Cron) Start(ctx context.Context) error {
+	s.register(ctx)
+
+	if s.elector == nil {
+		s.Cron.Start()
+		<-ctx.Done()
+		s.Cron.Stop()
+		return nil
+	}
+
+	// 选主模式:只在当选期间运行,失去 leader 立即停止并重新参选。
+	// elector.Run 仅在 outer ctx 取消时返回(此时是 ctx.Err()),按 beauty 惯例
+	// "ctx 取消触发的优雅停止"算正常退出,不作为错误上报。
+	err := s.elector.Run(ctx, s.electionKey, func(leaderCtx context.Context) {
+		logger.Info("cron: elected as leader, starting jobs", slog.String("key", s.electionKey))
+		s.Cron.Start()
+		<-leaderCtx.Done()
+		logger.Info("cron: lost leadership, stopping jobs", slog.String("key", s.electionKey))
+		<-s.Cron.Stop().Done() // 等运行中的任务跑完再放开 leader 身份
+	})
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
 
 func (s *Cron) String() string {

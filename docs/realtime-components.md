@@ -1182,6 +1182,48 @@ im := idempotency.New[T](idempotency.WithStore(store))       // 去重跨实例
 
 见 `examples/kvstore-shared`(单进程内两实例共享 Store,演示跨实例配额/冷却/去重)。
 
+**④ 需跨实例互斥/协调 —— 用 `pkg/dlock`**
+`keyedmutex` 是进程内锁,`saga`/`delayqueue` 各自靠"结果幂等"或"MQ 重投"绕开跨进程协调问题;
+但有些场景就是需要**跨进程互斥**本身——最典型是"多实例部署下 Cron 只该有一个实例在跑"。
+这类场景不是给某个原语加 Store 能解决的(互斥/选主是另一个问题维度),需要独立的分布式锁/选主原语,见下节。
+
+## 速查:pkg/dlock（分布式锁 / 选主)
+
+跨进程互斥(`Locker`)与持续选主(`Elector`)的后端无关接口。核心用途:多实例部署下
+只让一个实例执行某件事(最典型是 Cron 定时任务,见 `pkg/service/cron.WithLeaderElector`)。
+
+```go
+// 开发/测试/单实例:内存实现(多 goroutine 竞争,语义等价"多实例竞争")
+elector := dlock.NewMemory()
+
+// 生产:基于 etcd 官方 concurrency 包(Session+Mutex/Election),真正跨进程
+client, _ := clientv3.New(clientv3.Config{Endpoints: []string{"etcd:2379"}})
+elector := etcd.NewDLock(client, etcd.WithSessionTTL(10))
+
+// Locker:一次性互斥
+lock, err := elector.Lock(ctx, "job:daily-report")
+defer lock.Unlock(ctx)
+
+// Elector:持续参选,当选期间跑任务,失去 leader 立即停(leaderCtx 被 cancel)
+elector.Run(ctx, "myservice-cron", func(leaderCtx context.Context) {
+    for {
+        select {
+        case <-leaderCtx.Done():
+            return // 已失去 leader 身份,必须停止工作
+        case <-time.After(time.Minute):
+            doWork()
+        }
+    }
+})
+```
+
+- `Run` 的 `onElected` 必须持续检查 `leaderCtx.Done()`——这是"仍是 leader"的唯一凭证;
+- etcd 实现不重新发明分布式锁算法,是官方 `client/v3/concurrency` 的薄封装(Session 租约
+  TTL 决定进程崩溃后最长多久被动释放);
+- 与 `keyedmutex`(进程内)区分:dlock 是跨进程/跨实例;
+- 集成测试(需真实 etcd,`go test -tags=integration`)验证了两独立客户端连接间的互斥、
+  5 客户端选主唯一性、进程崩溃后的 failover。详见 `examples/cron-leader`。
+
 ## 风格约定
 
 二十二个包遵循统一约定,便于混用:

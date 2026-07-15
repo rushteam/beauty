@@ -10,6 +10,18 @@
 ## [Unreleased]
 
 ### Added
+- **dlock**：分布式锁/选主后端补齐两家——
+  - **consul**（`pkg/infra/consul`，零新依赖）：基于 session + KV Acquire 实现
+    `Locker`（含真非阻塞 `TryLock`）+ `Elector`，`RenewPeriodic` 续期,`NewDLock` /
+    `NewDLockFromConfig` 构造;
+  - **redis**（`pkg/infra/redis`，新增 `go-redis/v9` 依赖）：单节点 SET NX PX +
+    Lua CAS 释放/续期实现 `Locker` + `Elector`(如实标注非 Redlock 的单节点语义)。
+- **kvstore**：`pkg/infra/redis` 新增 `kvstore.Store` 的 Redis 实现,给
+  counter/cooldown/idempotency 等原语一个真正跨实例共享的后端。
+- **conf**：新增基于 k8s ConfigMap / Secret 的配置中心后端（opt-in 子包
+  `pkg/infra/k8s`，空导入注册 `configmap` / `secret` scheme）。纯 k8s 部署无需额外
+  运维 nacos/etcd 即可热更新配置——`conf.New("configmap://<ns>/<name>/<dataKey>")`，
+  按 `metadata.name` watch 目标资源、断线指数退避重连、按值去重避免无谓重载。
 - **logger**：`pkg/service/logger` 新增 `NewTraceHandler`，包装任意 `slog.Handler`，
   在使用 `slog.*Context` 记录日志时自动注入当前 span 的 `trace_id` / `span_id`。
 - **grpcclient**：客户端 xDS 支持——`xds:///service` 目标，opt-in 子包
@@ -20,6 +32,11 @@
   生成项目内置版本注入（`VERSION` + `-ldflags -X`）与统一 Makefile。
 
 ### Changed
+- **infra/discover**：收敛各后端的 client 构造——`pkg/infra/{etcd,consul,k8s}` 各暴露
+  `NewClient` / `NewClientset`，`pkg/service/discover/{etcdv3,consul,k8s}` 改为复用
+  （消除与配置中心/分布式锁重复的连接构造，对齐 nacos 早已复用 `infra/nacos` 的做法）。
+- **dlock/k8s**：`pkg/infra/k8s` 新增 `NewElectorFromConfig`（从 kubeconfig/集群内配置
+  直接建 clientset），对齐 `etcd.NewDLockFromConfig` 的便捷构造。
 - **tools**：升级到 `tools` v0.1.0；生成的 `go.mod` 升级 `go 1.26` 与当前 beauty 版本；
   模板 logger 默认接入 `NewTraceHandler`，生成项目日志自动带 trace 关联。
 

@@ -35,16 +35,7 @@ var _ interface {
 
 // NewConfigCenter 创建 etcd 配置中心
 func NewConfigCenter(c *Config) (*ConfigCenter, error) {
-	dialTimeout := time.Duration(c.DialMS) * time.Millisecond
-	if dialTimeout <= 0 {
-		dialTimeout = 3 * time.Second
-	}
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   c.Endpoints,
-		DialTimeout: dialTimeout,
-		Username:    c.Username,
-		Password:    c.Password,
-	})
+	client, err := NewClient(c)
 	if err != nil {
 		return nil, fmt.Errorf("etcd config: %w", err)
 	}

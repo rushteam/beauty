@@ -32,8 +32,9 @@ var _ interface {
 	Watch(ctx context.Context, key string, onChange func(key, value string)) (context.CancelFunc, error)
 } = (*ConfigCenter)(nil)
 
-// NewConfigCenter 创建 Consul 配置中心
-func NewConfigCenter(c *Config) (*ConfigCenter, error) {
+// NewClient 按 Config 建立一个 Consul API 客户端。配置中心、分布式锁与
+// pkg/service/discover/consul 共用这一处连接构造,避免各写一遍参数覆盖。
+func NewClient(c *Config) (*api.Client, error) {
 	cfg := api.DefaultConfig()
 	if c.Addr != "" {
 		cfg.Address = c.Addr
@@ -51,6 +52,15 @@ func NewConfigCenter(c *Config) (*ConfigCenter, error) {
 		cfg.Partition = c.Partition
 	}
 	client, err := api.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("consul: new client: %w", err)
+	}
+	return client, nil
+}
+
+// NewConfigCenter 创建 Consul 配置中心
+func NewConfigCenter(c *Config) (*ConfigCenter, error) {
+	client, err := NewClient(c)
 	if err != nil {
 		return nil, fmt.Errorf("consul config: %w", err)
 	}

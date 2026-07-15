@@ -61,16 +61,7 @@ func NewDLock(client *clientv3.Client, opts ...DLockOption) *DLock {
 // NewDLockFromConfig 复用现有 Config 建立连接后创建 DLock,便于和
 // NewConfigCenter 共享同一套连接配置约定。
 func NewDLockFromConfig(c *Config, opts ...DLockOption) (*DLock, error) {
-	dialTimeout := time.Duration(c.DialMS) * time.Millisecond
-	if dialTimeout <= 0 {
-		dialTimeout = 3 * time.Second
-	}
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   c.Endpoints,
-		DialTimeout: dialTimeout,
-		Username:    c.Username,
-		Password:    c.Password,
-	})
+	client, err := NewClient(c)
 	if err != nil {
 		return nil, fmt.Errorf("etcd dlock: %w", err)
 	}

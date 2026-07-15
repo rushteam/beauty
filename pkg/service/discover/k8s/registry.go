@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	beautyk8s "github.com/rushteam/beauty/pkg/infra/k8s"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	corev1 "k8s.io/api/core/v1"
@@ -15,8 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 var instance = make(map[string]*Registry)
@@ -42,7 +41,9 @@ func NewRegistry(c *Config) *Registry {
 		return v
 	}
 
-	client, err := createKubernetesClient(c.Kubeconfig)
+	// 复用 pkg/infra/k8s 的 clientset 构造,与配置中心/选主共用同一处 in-cluster
+	// / kubeconfig 判定。
+	client, err := beautyk8s.NewClientset(c.Kubeconfig)
 	if err != nil {
 		logger.Error("k8s registry create client error", slog.Any("err", err))
 		return nil
@@ -56,31 +57,6 @@ func NewRegistry(c *Config) *Registry {
 
 	instance[key] = r
 	return r
-}
-
-// createKubernetesClient 创建 Kubernetes 客户端
-func createKubernetesClient(kubeconfig string) (kubernetes.Interface, error) {
-	var config *rest.Config
-	var err error
-
-	if kubeconfig != "" {
-		// 使用指定的 kubeconfig 文件
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		// 使用集群内配置
-		config, err = rest.InClusterConfig()
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes config: %w", err)
-	}
-
-	client, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
-
-	return client, nil
 }
 
 // Register 在 k8s 环境中无需手动注册服务，服务生命周期由 k8s Service 资源管理。

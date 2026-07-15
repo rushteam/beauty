@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	beautyetcd "github.com/rushteam/beauty/pkg/infra/etcd"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -30,15 +31,12 @@ func NewRegistry(c *Config) *Registry {
 	if v, ok := instance[key]; ok {
 		return v
 	}
-	dial := time.Second * 3
-	if c.DialMS > 0 {
-		dial = time.Duration(c.DialMS) * time.Millisecond
-	}
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   c.Endpoints,
-		Username:    c.Username,
-		Password:    c.Password,
-		DialTimeout: dial,
+	// 复用 pkg/infra/etcd 的连接构造,与配置中心/分布式锁共用同一处参数处理。
+	client, err := beautyetcd.NewClient(&beautyetcd.Config{
+		Endpoints: c.Endpoints,
+		Username:  c.Username,
+		Password:  c.Password,
+		DialMS:    c.DialMS,
 	})
 	if err != nil {
 		logger.Error("etcdRegistry client error", slog.Any("err", err))

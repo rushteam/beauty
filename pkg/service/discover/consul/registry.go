@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/consul/api"
+	beautyconsul "github.com/rushteam/beauty/pkg/infra/consul"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/addr"
@@ -24,23 +25,14 @@ type Registry struct {
 }
 
 func NewRegistry(c *Config) *Registry {
-	cfg := api.DefaultConfig()
-	if c.Addr != "" {
-		cfg.Address = c.Addr
-	}
-	if c.Token != "" {
-		cfg.Token = c.Token
-	}
-	if c.Namespace != "" {
-		cfg.Namespace = c.Namespace
-	}
-	if c.Partition != "" {
-		cfg.Partition = c.Partition
-	}
-	if c.Datacenter != "" {
-		cfg.Datacenter = c.Datacenter
-	}
-	client, err := api.NewClient(cfg)
+	// 复用 pkg/infra/consul 的连接构造,与配置中心/分布式锁共用同一处参数覆盖。
+	client, err := beautyconsul.NewClient(&beautyconsul.Config{
+		Addr:       c.Addr,
+		Token:      c.Token,
+		Namespace:  c.Namespace,
+		Partition:  c.Partition,
+		Datacenter: c.Datacenter,
+	})
 	if err != nil {
 		logger.Error("consul: failed to create client", slog.Any("err", err))
 		return nil

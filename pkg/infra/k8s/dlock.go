@@ -10,6 +10,9 @@
 // 只实现 Elector,不实现 Locker——client-go 的 leaderelection 是"选主"语义
 // (持续参选、当选后运行、失去续期能力则让位),不提供通用的一次性互斥锁原语,
 // 如实反映这个限制而非用选主拼凑一个语义不符的 Lock/Unlock。
+//
+// 除选主外,本包还提供基于 ConfigMap / Secret 的配置中心(见 config_center.go),
+// 实现 pkg/conf.ConfigCenter,让纯 k8s 部署不必额外运维配置中心即可热更新配置。
 package k8s
 
 import (
@@ -80,8 +83,8 @@ func WithTiming(leaseDuration, renewDeadline, retryPeriod time.Duration) Option 
 }
 
 // NewElector 用已有的 CoordinationV1 客户端创建 Elector(便于测试时传入 fake
-// clientset)。生产用法自行构造 clientset 后取其 CoordinationV1() 传入即可,
-// in-cluster/kubeconfig 的判定模式可参考 pkg/service/discover/k8s 里已有的实现。
+// clientset)。生产环境通常直接用 NewElectorFromConfig 从 kubeconfig / 集群内配置
+// 建连接,免去自己构造 clientset。
 func NewElector(client coordinationv1client.CoordinationV1Interface, opts ...Option) *Elector {
 	hostname, _ := os.Hostname()
 	e := &Elector{
@@ -96,6 +99,17 @@ func NewElector(client coordinationv1client.CoordinationV1Interface, opts ...Opt
 		o(e)
 	}
 	return e
+}
+
+// NewElectorFromConfig 从 kubeconfig 路径(为空则用集群内配置)建立 clientset 后
+// 创建 Elector,是生产环境的便捷入口,与 pkg/infra/etcd.NewDLockFromConfig 对齐。
+// 命名空间等仍通过 Option 设置(如 WithNamespace)。
+func NewElectorFromConfig(kubeconfig string, opts ...Option) (*Elector, error) {
+	clientset, err := NewClientset(kubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("k8s elector: %w", err)
+	}
+	return NewElector(clientset.CoordinationV1(), opts...), nil
 }
 
 // leaseLock 为 key 构造一个 LeaseLock(每个 key 对应集群内独立的 Lease 资源)。

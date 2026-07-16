@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **quic**：新增 `pkg/quic`——基于 quic-go 的连接层,作为 `pkg/ws`(WebSocket/TCP)
+  之外面向实时/游戏同步的可选传输(opt-in 子包,新增 `quic-go` 依赖)。一条连接同时
+  提供**可靠有序流**(`OpenStream`/`AcceptStream`,多路复用、跨流无队头阻塞——关键指令)
+  与**不可靠数据报**(`SendDatagram`/`ReceiveDatagram`,RFC 9221——高频状态/位置更新,
+  丢了不重传不阻塞)。`Server` 结构上满足 `beauty.Service`,可直接 `WithService` 挂进
+  框架;`Dial` 客户端;`DevTLSConfig` 提供开发用自签证书(生产用 `WithTLSConfig`)。
+  性能相关:`ListenUDP` 建 socket 时尽力把收发缓冲提到 7MB,`WithPacketConn` /
+  `WithTransport` / `WithDialTransport` 支持自备(缓冲调优的)UDP socket 与
+  `quic.Transport` 复用(一条 socket 同承载监听 + 拨号),包注释附 sysctl 提示。
+  端到端示例见 `examples/statesync-quic`(指令走可靠流、状态走不可靠数据报)。
 - **gameloop**：新增 `pkg/gameloop`——「机制而非策略」的定步长游戏循环原语(定步长
   tick、并发输入聚合、经 `stream.Broadcaster` 扇出、结构上满足 `beauty.Service`
   可直接 `WithService` 挂进框架)。帧同步/状态同步的服务端骨架,同步策略全在

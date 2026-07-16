@@ -4,11 +4,29 @@ import (
 	"net/url"
 
 	"github.com/rushteam/beauty/pkg/conf"
+	"github.com/rushteam/beauty/pkg/dlock"
 )
 
 func init() {
 	conf.RegisterFactory("configmap", newConfigMapCenterFromURL)
 	conf.RegisterFactory("secret", newSecretCenterFromURL)
+	// k8s 只提供 Elector(基于 Lease 的选主),没有互斥锁原语,故不注册 Locker。
+	dlock.RegisterElector("k8s", func(u *url.URL) (dlock.Elector, error) { return newElectorFromURL(u) })
+}
+
+// newElectorFromURL 从 URL 构造 k8s Elector。
+// 格式:k8s://?namespace=prod&kubeconfig=/path/to/kubeconfig&identity=pod-a
+// kubeconfig 省略时用集群内配置;namespace 省略时用 "default"。
+func newElectorFromURL(u *url.URL) (*Elector, error) {
+	q := u.Query()
+	var opts []Option
+	if ns := q.Get("namespace"); ns != "" {
+		opts = append(opts, WithNamespace(ns))
+	}
+	if id := q.Get("identity"); id != "" {
+		opts = append(opts, WithIdentity(id))
+	}
+	return NewElectorFromConfig(q.Get("kubeconfig"), opts...)
 }
 
 // newConfigMapCenterFromURL 从 URL 构造 ConfigMap 配置中心。

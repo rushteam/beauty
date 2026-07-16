@@ -13,8 +13,10 @@
 - **gameloop**：新增 `pkg/gameloop`——「机制而非策略」的定步长游戏循环原语(定步长
   tick、并发输入聚合、经 `stream.Broadcaster` 扇出、结构上满足 `beauty.Service`
   可直接 `WithService` 挂进框架)。帧同步/状态同步的服务端骨架,同步策略全在
-  `Handler.OnTick` 里、不进框架。仅依赖 `pkg/stream`。参考 `examples/gameloop`
-  的 lockstep demo(ws 接连接 + 进程内 bot 自校验逐帧输入全端一致)。
+  `Handler.OnTick` 里、不进框架。仅依赖 `pkg/stream`。两个参考示例展示同一个
+  `Room` 换 `OnTick` 即切换策略:`examples/gameloop`(帧同步/lockstep,下发输入,
+  bot 自校验逐帧输入全端一致)、`examples/statesync`(状态同步,服务器权威模拟 +
+  `pkg/spatial` AOI 视野过滤,下发状态)。
 - **dlock**：新增 URL/DSN 工厂，与 `conf.New` 的 scheme 工厂模式对齐——
   `dlock.New(dsn)` 构造 `Locker`、`dlock.NewElector(dsn)` 构造 `Elector`，空导入对应
   infra 子包即注册（`etcd`/`etcdv3`、`consul`、`redis` 注册两者；`k8s` 只注册 Elector）。

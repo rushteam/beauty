@@ -52,6 +52,9 @@ go run ./examples/gameloop
 (lockstep 传输不变量)。至于「同样的输入能否重放出同样的画面」——那是客户端游戏
 逻辑的确定性,是**你的**责任,不在框架内,本示例也刻意不去验证。
 
+> 想看**状态同步**版(同一个 `Room`,换 `OnTick` 下发"状态"而非"输入",并用
+> `pkg/spatial` 做 AOI 视野过滤):见 [`examples/statesync`](../statesync)。
+
 ## 复用到的 beauty 原语
 
 | 原语 | 作用 |

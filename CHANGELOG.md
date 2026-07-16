@@ -10,6 +10,20 @@
 ## [Unreleased]
 
 ### Added
+- **media/hls**：新增 `pkg/hls`——直播/点播 HLS origin(滚动分片窗口 + m3u8 播放列表
+  生成 live/VOD + `http.Handler` 挂 webserver 分发)。纯 Go 零 cgo,**不做编解码/切片**,
+  分片由上游(ffmpeg 或 rtmp remux)`Append` 进来。支持 TS 与 fMP4(`EXT-X-MAP` init
+  分片)。**分片存储可插拔**:`Store` 接口 + 内存/磁盘实现(`WithStore`),对象存储可自实现。
+  示例见 `examples/hls`(合成分片,`curl` 可拉 m3u8)。
+- **media/rtmp**：新增 `pkg/media/rtmp`——RTMP 采集服务端,薄封装 `yutopp/go-rtmp`
+  (新增依赖)。接受 OBS/ffmpeg 推流,把每路流的 metadata/audio/video(FLV tag body)
+  交给业务 `Handler`;`Server` 结构上满足 `beauty.Service` 可直接 `WithService` 挂进框架。
+  **鉴权**:连接级 `WithConnectAuth`(按 app/tcUrl)+ 推流级 `PublishFunc` 返回 nil 拒绝。
+  只负责收流,不转码。
+- **media/remux**：新增 `pkg/media/remux`——把 FLV(H.264/AAC)重封装成 MPEG-TS 分片
+  (纯 Go `go-astits`,新增依赖),按关键帧切片 `Append` 到 `hls.Stream`,**不转码**。
+  `FLVToHLS` 实现 `rtmp.Handler`,把采集与分发串成端到端直播。示例见 `examples/live-hls`
+  (RTMP 推流 → HLS 播放)。单测覆盖 FLV 解析/AVCC→AnnexB/ADTS/切片并校验产出合法 TS。
 - **quic**：新增 `pkg/quic`——基于 quic-go 的连接层,作为 `pkg/ws`(WebSocket/TCP)
   之外面向实时/游戏同步的可选传输(opt-in 子包,新增 `quic-go` 依赖)。一条连接同时
   提供**可靠有序流**(`OpenStream`/`AcceptStream`,多路复用、跨流无队头阻塞——关键指令)

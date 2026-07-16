@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **dlock**：新增 URL/DSN 工厂，与 `conf.New` 的 scheme 工厂模式对齐——
+  `dlock.New(dsn)` 构造 `Locker`、`dlock.NewElector(dsn)` 构造 `Elector`，空导入对应
+  infra 子包即注册（`etcd`/`etcdv3`、`consul`、`redis` 注册两者；`k8s` 只注册 Elector）。
+  cron 的 `WithLeaderElector` 可直接吃 DSN 构造出的 elector。
+- **kvstore**：`pkg/infra/etcd` 新增 `kvstore.Store` 的 etcd 实现（lease 做 TTL、
+  可精确查剩余；事务/CAS 做 SetNX/Incr）。与 redis 实现互补——etcd 秒级 TTL、
+  已有 etcd 免再引 Redis；redis 毫秒级 TTL、`Incr` 原生原子。
+- **docs**：新增 `pkg/infra/README.md`——基建适配层总览（能力矩阵 + 各后端
+  conf/dlock/kvstore/discover 的 DSN 与最小用法）。
 - **dlock**：分布式锁/选主后端补齐两家——
   - **consul**（`pkg/infra/consul`，零新依赖）：基于 session + KV Acquire 实现
     `Locker`（含真非阻塞 `TryLock`）+ `Elector`，`RenewPeriodic` 续期,`NewDLock` /

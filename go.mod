@@ -9,6 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.3
 	github.com/polarismesh/polaris-go v1.7.0
+	github.com/quic-go/quic-go v0.60.0
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/spf13/viper v1.20.1
 	go.etcd.io/etcd/client/v3 v3.6.2

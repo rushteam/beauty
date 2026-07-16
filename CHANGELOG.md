@@ -49,6 +49,12 @@
 - **tools**：升级到 `tools` v0.1.0；生成的 `go.mod` 升级 `go 1.26` 与当前 beauty 版本；
   模板 logger 默认接入 `NewTraceHandler`，生成项目日志自动带 trace 关联。
 
+### Security
+- **toolchain**：go.mod 固定 `toolchain go1.26.5`，修掉 govulncheck 判定为**可达**的
+  8 个 Go 标准库漏洞(crypto/tls、crypto/x509、net/http HTTP/2 无限循环、html/template
+  XSS 等)。修复后 `govulncheck ./...` 可达漏洞归零(其余 dependabot 告警均为不可达的
+  间接依赖噪音)。
+
 ### Fixed
 - **tools**：修复模板与框架 API 漂移导致生成项目无法编译的问题（中间件接口、
   注册中心字段、cron 模板坏死包、unified 服务组合裁剪等）。详见

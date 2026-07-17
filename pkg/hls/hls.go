@@ -34,10 +34,11 @@ type segMeta struct {
 }
 
 type config struct {
-	window    int
-	targetDur time.Duration
-	ext       string
-	store     Store
+	window     int
+	targetDur  time.Duration
+	ext        string
+	store      Store
+	partTarget time.Duration
 }
 
 // Option 配置 Stream。
@@ -79,6 +80,17 @@ func WithStore(s Store) Option {
 	}
 }
 
+// WithPartTarget 开启 LL-HLS(低延迟)并设置部分分片(part)目标时长(如 333ms)。
+// 开启后用 AppendPart/CompleteSegment 驱动(而非 Append),播放列表带 EXT-X-PART 等指令
+// 并支持阻塞式刷新。
+func WithPartTarget(d time.Duration) Option {
+	return func(c *config) {
+		if d > 0 {
+			c.partTarget = d
+		}
+	}
+}
+
 // Stream 是一路 HLS 流。零值不可用,用 NewStream 构造。并发安全。
 type Stream struct {
 	cfg config
@@ -89,6 +101,12 @@ type Stream struct {
 	nextSeq  uint64
 	initSeg  []byte // fMP4 init segment(#EXT-X-MAP),可选
 	finished bool   // Finish 后为 true(点播:加 #EXT-X-ENDLIST、不再淘汰)
+
+	// LL-HLS(llPartTarget>0 时开启):building 是正在构建分片(序号 nextSeq)的各 part;
+	// cond 在每次 part/segment 变化时广播,用于阻塞式播放列表刷新。
+	llPartTarget time.Duration
+	building     []part
+	cond         *sync.Cond
 }
 
 // NewStream 创建一路 HLS 流。
@@ -100,6 +118,8 @@ func NewStream(opts ...Option) *Stream {
 	if s.cfg.store == nil {
 		s.cfg.store = NewMemoryStore()
 	}
+	s.llPartTarget = s.cfg.partTarget
+	s.cond = sync.NewCond(&s.mu)
 	return s
 }
 
@@ -138,6 +158,9 @@ func (s *Stream) Append(data []byte, dur time.Duration) (uint64, error) {
 func (s *Stream) Finish() {
 	s.mu.Lock()
 	s.finished = true
+	if s.cond != nil {
+		s.cond.Broadcast() // 唤醒 LL-HLS 阻塞刷新
+	}
 	s.mu.Unlock()
 }
 
@@ -168,6 +191,9 @@ func (s *Stream) targetDurationSec() int {
 func (s *Stream) MediaPlaylist() []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.llPartTarget > 0 {
+		return s.llMediaPlaylistLocked()
+	}
 
 	var b strings.Builder
 	version := 3
@@ -210,9 +236,24 @@ func (s *Stream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case strings.HasSuffix(name, ".m3u8"):
+		// LL-HLS 阻塞式刷新:?_HLS_msn=N&_HLS_part=K 时,挂起到该 part 就绪再返回。
+		if s.llPartTarget > 0 {
+			if msn, part, ok := parseBlockingQuery(r); ok {
+				s.waitForPart(msn, part)
+			}
+		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(s.MediaPlaylist())
+
+	case strings.HasPrefix(name, "part"):
+		data, ok := s.partData(name)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", segmentContentType(s.cfg.ext))
+		w.Write(data)
 
 	case name == "init.mp4":
 		s.mu.RLock()

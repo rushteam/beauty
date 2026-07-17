@@ -14,7 +14,12 @@
   生成 live/VOD + `http.Handler` 挂 webserver 分发)。纯 Go 零 cgo,**不做编解码/切片**,
   分片由上游(ffmpeg 或 rtmp remux)`Append` 进来。支持 TS 与 fMP4(`EXT-X-MAP` init
   分片)。**分片存储可插拔**:`Store` 接口 + 内存/磁盘实现(`WithStore`),对象存储可自实现。
-  示例见 `examples/hls`(合成分片,`curl` 可拉 m3u8)。
+  **ABR 多码率**:`Master`/`Variant` 生成 `#EXT-X-STREAM-INF` 主清单并按变体名路由,变体
+  Handler 可接 `*Stream` 或 `http.FileServer`(适配进程内或 ffmpeg 外部转码产物)。
+  **LL-HLS 低延迟**:`WithPartTarget` 开启部分分片(`AppendPart`/`CompleteSegment`),播放列表
+  带 `EXT-X-PART`/`PART-INF`/`SERVER-CONTROL`/`PRELOAD-HINT` 并支持阻塞式刷新
+  (`_HLS_msn`/`_HLS_part`)。示例:`examples/hls`(合成分片)、`examples/live-transcode`
+  (拓扑 A:RTMP→ffmpeg 多码率转码→ABR HLS)。
 - **media/rtmp**：新增 `pkg/media/rtmp`——RTMP 采集服务端,薄封装 `yutopp/go-rtmp`
   (新增依赖)。接受 OBS/ffmpeg 推流,把每路流的 metadata/audio/video(FLV tag body)
   交给业务 `Handler`;`Server` 结构上满足 `beauty.Service` 可直接 `WithService` 挂进框架。

@@ -25,6 +25,12 @@
   交给业务 `Handler`;`Server` 结构上满足 `beauty.Service` 可直接 `WithService` 挂进框架。
   **鉴权**:连接级 `WithConnectAuth`(按 app/tcUrl)+ 推流级 `PublishFunc` 返回 nil 拒绝。
   只负责收流,不转码。
+- **media**：新增 `pkg/media`——直播/视频服务的编排薄机制。`Hub` 做**多路流管理**
+  (streamKey→Session 注册表 + 生命周期 + 按 key 路由 + 防重复推流,`Session.Context`
+  供外部后台任务随流停机);`Supervisor` 做**子进程监督**(ffmpeg 等,启动/按 `pkg/backoff`
+  退避重启/优雅停,命令构造留 policy);`Metrics` 基于 OTel 全局 Meter 上报运维指标
+  (`media.streams.active` / `publish` / `rejected` / `ingest.bytes` / `segments` /
+  `transcode.restarts`,未配 telemetry 时 no-op)。示例 `examples/live-multi`(多路 + 指标)。
 - **media/remux**：新增 `pkg/media/remux`——把 FLV(H.264/AAC)重封装成 MPEG-TS 分片
   (纯 Go `go-astits`,新增依赖),按关键帧切片 `Append` 到 `hls.Stream`,**不转码**。
   `FLVToHLS` 实现 `rtmp.Handler`,把采集与分发串成端到端直播。示例见 `examples/live-hls`

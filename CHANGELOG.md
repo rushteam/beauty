@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **mq**：新增 `pkg/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
+  `eventbus` 扇出 + `webhook` HTTP 推)。`Publisher`/`Subscriber` 接口(订阅按 ctx 绑定生命周期,
+  同时适配 NATS push 与 Kafka pull 语义)+ `Consumer`(把一组订阅包成 `beauty.Service`:
+  Start/String/Ready,随 app 停机)+ 处理中间件(`Chain`/`Recover`/`Retry`)。**队列组**
+  (`WithGroup`)竞争消费用于多副本水平扩展,不设组则扇出(对齐 NATS queue group / Kafka consumer
+  group)。自带**零依赖进程内实现** `NewInProc`(channel + 轮询),用于单体/开发/测试;真 broker
+  作为 opt-in 子包实现同一接口,不强引依赖。序列化/trace 透传/分区键/broker 选型是 policy;投递
+  保证由 broker 决定(进程内为 at-most-once,用 Retry 兜瞬时错误;可靠"改库+发消息"的 Outbox
+  依赖持久层暂未做)。示例 `examples/mq`。单测覆盖扇出/队列组负载均衡/订阅随 ctx 解除/Consumer
+  生命周期/Retry/Recover/关闭,`-race` 通过,无新依赖。
 - **shard**：新增 `pkg/shard`——有状态服务多副本分片路由的薄机制。用一致性哈希(复用
   `pkg/loadbalance.ConsistentHash`)把每个 key(streamKey/roomID/userID)确定性归属到某实例:
   `Sharder.Owner(key)`/`IsLocal(key)`,成员集可随服务发现动态 `SetMembers`。`Router` 是

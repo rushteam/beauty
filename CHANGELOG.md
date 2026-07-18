@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **contrib**：新增 `contrib/` 多模块区,放**依赖较重**的可选集成——每个子目录是**独立 Go 模块**
+  (`github.com/rushteam/beauty/contrib/<name>`,自带 go.mod,与已有的 `tools/` 同套路)。核心
+  `github.com/rushteam/beauty` 只留轻量机制/接口,重依赖实现进 contrib:不 import 就零负担、可自己
+  照接口实现、可独立钉版本;核心 `go build ./...` 不编译 contrib(模块边界隔离),依赖与 CI 不受影响。
+  首个模块 **`contrib/gorm`**——GORM 集成(读写分离 dbresolver、otelgorm 链路、gorm→slog 日志桥含
+  慢查询告警、连接池、`TranslateError`+`IsDuplicatedKey` 错误映射、`Write()`/`Read()` 切主从、
+  `Ping`/`Close`)。`Open`(MySQL DSN)/`OpenWith`(任意 `gorm.Dialector`,支持 Postgres/SQLite/测试)。
+  不 import 核心,仅依赖标准库 slog + OTel 全局 Provider,亦可脱离框架单用。sqlite 内存 + 合成错误
+  单测覆盖 CRUD/读写句柄/唯一键判定,`-race` 通过。规划:`contrib/kafka`·`contrib/nats`(为 `pkg/mq`
+  提供 broker 绑定)、`contrib/elasticsearch`(搜索)。
 - **mq**：新增 `pkg/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
   `eventbus` 扇出 + `webhook` HTTP 推)。`Publisher`/`Subscriber` 接口(订阅按 ctx 绑定生命周期,
   同时适配 NATS push 与 Kafka pull 语义)+ `Consumer`(把一组订阅包成 `beauty.Service`:

@@ -3,12 +3,10 @@ package rtmp_test
 import (
 	"bytes"
 	"context"
-	"io"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	gortmp "github.com/yutopp/go-rtmp"
 	rtmpmsg "github.com/yutopp/go-rtmp/message"
 
@@ -58,10 +56,8 @@ func TestServer_IngestPublish(t *testing.T) {
 	}
 	defer func() { cancel(); <-done }()
 
-	// ---- 推流客户端(go-rtmp client)----
-	silent := logrus.New()
-	silent.SetOutput(io.Discard)
-	cc, err := gortmp.Dial("rtmp", srv.Addr().String(), &gortmp.ConnConfig{Logger: silent})
+	// ---- 推流客户端(go-rtmp client);Logger 留 nil → go-rtmp 默认静默 ----
+	cc, err := gortmp.Dial("rtmp", srv.Addr().String(), &gortmp.ConnConfig{})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

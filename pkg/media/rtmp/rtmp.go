@@ -25,7 +25,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/sirupsen/logrus"
 	gortmp "github.com/yutopp/go-rtmp"
 	rtmpmsg "github.com/yutopp/go-rtmp/message"
 )
@@ -63,7 +62,6 @@ type Server struct {
 	onPublish   PublishFunc
 	connectAuth ConnectAuthFunc
 	name        string
-	logger      logrus.FieldLogger
 
 	ln        net.Listener
 	srv       *gortmp.Server
@@ -83,15 +81,6 @@ func WithServiceName(name string) Option {
 	}
 }
 
-// WithLogger 设置底层 go-rtmp 的日志器(默认丢弃,避免刷屏)。
-func WithLogger(l logrus.FieldLogger) Option {
-	return func(s *Server) {
-		if l != nil {
-			s.logger = l
-		}
-	}
-}
-
 // WithConnectAuth 设置连接级鉴权:在 RTMP connect 阶段按 app/tcUrl 校验,返回 error 拒绝连接。
 func WithConnectAuth(fn ConnectAuthFunc) Option {
 	return func(s *Server) { s.connectAuth = fn }
@@ -99,13 +88,10 @@ func WithConnectAuth(fn ConnectAuthFunc) Option {
 
 // NewServer 创建 RTMP 采集服务端。addr 形如 ":1935"。onPublish 决定如何处理每一路推流。
 func NewServer(addr string, onPublish PublishFunc, opts ...Option) *Server {
-	discard := logrus.New()
-	discard.SetOutput(io.Discard)
 	s := &Server{
 		addr:      addr,
 		onPublish: onPublish,
 		name:      "rtmp",
-		logger:    discard,
 		ready:     make(chan struct{}),
 	}
 	for _, o := range opts {
@@ -124,8 +110,8 @@ func (s *Server) Start(ctx context.Context) error {
 	s.srv = gortmp.NewServer(&gortmp.ServerConfig{
 		OnConnect: func(conn net.Conn) (io.ReadWriteCloser, *gortmp.ConnConfig) {
 			return conn, &gortmp.ConnConfig{
+				// Logger 留 nil:go-rtmp 会自建一个输出到 Discard 的 logger,默认静默。
 				Handler: &connHandler{onPublish: s.onPublish, connectAuth: s.connectAuth},
-				Logger:  s.logger,
 			}
 		},
 	})

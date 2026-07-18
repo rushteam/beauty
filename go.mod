@@ -12,7 +12,6 @@ require (
 	github.com/polarismesh/polaris-go v1.7.0
 	github.com/quic-go/quic-go v0.60.0
 	github.com/redis/go-redis/v9 v9.7.3
-	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/viper v1.20.1
 	github.com/yutopp/go-rtmp v0.0.7
 	go.etcd.io/etcd/client/v3 v3.6.2
@@ -118,6 +117,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/sirupsen/logrus v1.7.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect

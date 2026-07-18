@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **media/webrtc**：新增 `pkg/media/webrtc`——WebRTC 的 WHIP(采集)/WHEP(分发)薄机制,
+  基于纯 Go 的 pion/webrtc(零 cgo,新增 `pion/webrtc/v4` + `pion/rtp` 依赖)。面向**亚秒级、
+  交互式**实时媒体(连麦/云游戏/实时协作),和 `pkg/hls`(多秒级、可过 CDN 分发)互补,
+  与 `pkg/quic`+`pkg/gameloop` 同属「实时」家族。WHIP/WHEP 本质同为「HTTP 一发一答 SDP 协商、
+  服务端做 answerer」:`NewWHIP`/`NewWHEP` 是 `http.Handler`(挂 `beauty.WithWebServer` 即可,
+  不自起监听),负责 SDP/ICE 协商 + 资源生命周期(`Location`/`DELETE`/断连自动回收);
+  `Answer` 暴露协商原语,`Pipe` 做 RTP 纯包转发(不转码,SFU 最小原语),`NewLocalTrackFor`
+  按远端编解码建可写轨道,`NewAPI` 装配默认编解码 + 拦截器。鉴权、转发拓扑(SFU/MCU)、
+  STUN/TURN、编解码档位、CORS 全留 policy。示例 `examples/webrtc-whip-whep`(一推多播最小 SFU,
+  浏览器/OBS 推流 → 多浏览器播放)。端到端单测覆盖真实 ICE 环回 + RTP 转发 + DELETE 拆除。
 - **media/hls**：新增 `pkg/hls`——直播/点播 HLS origin(滚动分片窗口 + m3u8 播放列表
   生成 live/VOD + `http.Handler` 挂 webserver 分发)。纯 Go 零 cgo,**不做编解码/切片**,
   分片由上游(ffmpeg 或 rtmp remux)`Append` 进来。支持 TS 与 fMP4(`EXT-X-MAP` init

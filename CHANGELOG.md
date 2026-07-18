@@ -133,6 +133,14 @@
   生成项目内置版本注入（`VERSION` + `-ldflags -X`）与统一 Makefile。
 
 ### Changed
+- **client**：把已有的韧性原语接进**直连/普通客户端**(此前只有服务发现版客户端接了节点级
+  熔断+重试)。HTTP `resty.NewHTTPClient` 新增 `WithRetry`(基于 `pkg/backoff.Policy`:默认只重
+  试幂等方法的瞬时失败——网络错误/429/502/503/504,遵守 `Retry-After`、请求体自动重放)、
+  `WithRetryable`(自定义判定)、`WithCircuitBreaker`(复用 `middleware/circuitbreaker` 的
+  RoundTripper);传输链为**熔断→重试→otel→base**(熔断最外:一次逻辑请求一个样本,打开即短路
+  不进重试)。gRPC `grpcclient` 新增 `WithCircuitBreakerInterceptor`(接入请求级熔断拦截器,直连
+  与发现模式均生效),与发现版的节点级 `WithCircuitBreaker` 互补;gRPC 重试默认已由 service config
+  开启。单测覆盖重试/不重试幂等性/体重放/ctx 取消/熔断短路,`-race` 通过,无新依赖。
 - **infra/discover**：收敛各后端的 client 构造——`pkg/infra/{etcd,consul,k8s}` 各暴露
   `NewClient` / `NewClientset`，`pkg/service/discover/{etcdv3,consul,k8s}` 改为复用
   （消除与配置中心/分布式锁重复的连接构造，对齐 nacos 早已复用 `infra/nacos` 的做法）。

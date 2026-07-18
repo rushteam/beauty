@@ -10,6 +10,15 @@
 ## [Unreleased]
 
 ### Added
+- **media/webrtc/sfu**：在 `pkg/media/webrtc` 之上新增 `sfu` 子包——多人实时音视频的
+  「会议室」SFU 原语(选择性转发,不混流不转码)。补齐 WHIP/WHEP 覆盖不到的 **N↔N 动态
+  成员**那一档:每人推自己的轨道、订阅其他所有人,成员进出由服务端重协商。**无 glare 模型**:
+  客户端只在加入时发一次 offer,此后所有重协商一律由服务端作为 offerer 发起(`resync` 在信令
+  未落定时自动推迟、answer 到达后重试)。信令**传输无关**——`Room.Join(id, send)` 通过 `send`
+  回调推信令、`Participant.HandleSignal` 吃客户端信令,承载(WebSocket 等)由上层决定。鉴权、
+  房间划分、音/视频、混流(MCU)、主讲人检测、STUN/TURN、录制全留 policy。示例
+  `examples/webrtc-voice-room`(pkg/ws 信令 + 浏览器多人语音)。进程内多方单测覆盖真实 ICE +
+  双向收流 + 重协商 + 离开回收,`-race` 通过。
 - **media/webrtc**：新增 `pkg/media/webrtc`——WebRTC 的 WHIP(采集)/WHEP(分发)薄机制,
   基于纯 Go 的 pion/webrtc(零 cgo,新增 `pion/webrtc/v4` + `pion/rtp` 依赖)。面向**亚秒级、
   交互式**实时媒体(连麦/云游戏/实时协作),和 `pkg/hls`(多秒级、可过 CDN 分发)互补,

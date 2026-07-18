@@ -10,6 +10,16 @@
 ## [Unreleased]
 
 ### Added
+- **media/hlsmux**：新增 `pkg/media/hlsmux`——把 RTMP 采集的 FLV(H.264+AAC)喂给
+  `bluenviron/gohlslib`(mediamtx 同款库,新增 `gohlslib/v2` + `mediacommon/v2` 依赖),
+  产出产线级 HLS:MPEG-TS / fMP4 / **LL-HLS(低延迟)**。相比自研 `pkg/media/remux`(仅
+  FLV→TS + 手搓播放列表),由 gohlslib 负责分片、播放列表(含 LL-HLS `EXT-X-PART`/
+  `PRELOAD-HINT` 与阻塞式刷新)、fMP4 init 段等全部细节。`Bridge` 同时实现 `rtmp.Handler`
+  (收流)与 `http.Handler`(播放,拿到 SPS/PPS+首关键帧后惰性起 muxer,未就绪回 503)。
+  与 `pkg/hls`+`pkg/media/remux` 并存的**另一条 HLS 路径**:要最薄少依赖选前者,要经真实
+  播放器打磨的 LL-HLS 选本包。边界照旧——分片/LL-HLS 参数经 Option 透出,多路用 `pkg/media.Hub`,
+  转码/鉴权/多码率在框架外。示例 `examples/live-hls-gohlslib`。单测覆盖 FLV 解析纯函数 +
+  用真实 SPS/PPS/ASC 喂帧、由 gohlslib 自身校验产出 MPEG-TS/LL-HLS 播放列表,`-race` 通过。
 - **media/webrtc/sfu**：在 `pkg/media/webrtc` 之上新增 `sfu` 子包——多人实时音视频的
   「会议室」SFU 原语(选择性转发,不混流不转码)。补齐 WHIP/WHEP 覆盖不到的 **N↔N 动态
   成员**那一档:每人推自己的轨道、订阅其他所有人,成员进出由服务端重协商。**无 glare 模型**:

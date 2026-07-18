@@ -6,6 +6,8 @@ toolchain go1.26.5
 
 require (
 	github.com/asticode/go-astits v1.15.0
+	github.com/bluenviron/gohlslib/v2 v2.4.0
+	github.com/bluenviron/mediacommon/v2 v2.9.1
 	github.com/coder/websocket v1.8.14
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.3
@@ -37,6 +39,7 @@ require (
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/abema/go-mp4 v1.7.1 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.7 // indirect
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect
 	github.com/alibabacloud-go/darabonba-array v0.1.0 // indirect

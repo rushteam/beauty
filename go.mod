@@ -5,7 +5,6 @@ go 1.26
 toolchain go1.26.5
 
 require (
-	github.com/asticode/go-astits v1.15.0
 	github.com/bluenviron/gohlslib/v2 v2.4.0
 	github.com/bluenviron/mediacommon/v2 v2.9.1
 	github.com/coder/websocket v1.8.14
@@ -62,6 +61,7 @@ require (
 	github.com/aliyun/credentials-go v1.4.3 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/asticode/go-astikit v0.30.0 // indirect
+	github.com/asticode/go-astits v1.15.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

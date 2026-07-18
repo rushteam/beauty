@@ -1,15 +1,19 @@
 # live-multi —— 多路直播 + 多路流管理(Hub)+ OTel 指标
 
 一个 RTMP 端口收**多路**流,按 `streamKey` 各自成流、各自分发,用
-[`pkg/media.Hub`](../../pkg/media) 做注册表/生命周期/路由 + OTel 运维指标。走 copy 路径
-(remux,不转码)。
+[`pkg/media.Hub`](../../pkg/media) 做注册表/生命周期/路由 + OTel 运维指标。每路 HLS 由
+[`pkg/media/hlsmux`](../../pkg/media/hlsmux)(gohlslib)产出 LL-HLS,不转码。
 
 ```
 推 /live/roomA ─┐
-推 /live/roomB ─┼─▶ rtmp.Server ─▶ Hub.Acquire(key) ─▶ remux → 各自 hls.Stream
+推 /live/roomB ─┼─▶ rtmp.Server ─▶ Hub.Acquire(key) ─▶ hlsmux.Bridge(→LL-HLS)
                 ┘                         │
               播放 /live/roomA/index.m3u8 ◀── Hub 按 key 路由
 ```
+
+`Hub` 现在是泛型 `Hub[S media.Stream]`(`Stream = http.Handler + Finish()`),这里的 `S` 是
+`*hlsmux.Bridge`;换成 `*hls.Stream` 即回到自研 origin。`Bridge` 同时是 `rtmp.Handler`(收流)
+与 `http.Handler`(播放),所以一个对象既进 `Acquire` 收流、又被 Hub 路由分发。
 
 Hub 提供的薄机制:
 
@@ -45,12 +49,14 @@ go sup.Run(sess.Context()) // Release 时自动停
 ```
 
 **适用边界(重要)**:Supervisor 的"崩溃重启"适合 ffmpeg **从可重连的源拉流/读稳定输入**
-(RTMP URL、文件、FIFO)的拓扑——崩了重启能自动重连。而本示例这种把 FLV **管道喂给
-ffmpeg stdin** 的方式,进程一旦崩,输入管道即断,正确做法是**结束本次推流、等推流端重推**
-(而非原地重启)。所以本示例走 copy 路径不涉及转码进程;要 stdin 管道转码见
+(RTMP URL、文件、FIFO)的拓扑——崩了重启能自动重连。而把 FLV **管道喂给 ffmpeg stdin**
+的方式,进程一旦崩、输入管道即断,正确做法是**结束本次推流、等推流端重推**(而非原地重启)。
+本示例走不转码路径(gohlslib 直接封装)不涉及转码进程;要 stdin 管道转码见
 [`examples/live-transcode`](../live-transcode),要带重启的转码请用"拉流/读文件"式输入。
 
 ## 边界
 
 - 转码档位、ffmpeg 参数、导出器(Prometheus/OTLP)、鉴权 token 体系 —— 都是 policy,不在框架内。
-- 多副本部署要共享存储(`hls.WithStore` 接对象存储)或按 key 粘连路由;CDN 在框架外回源。
+- 存储:gohlslib 分片默认在内存,`hlsmux.WithDirectory` 可落盘给 CDN 回源(注:LL-HLS variant
+  不支持落盘)。要**可插拔对象存储**(`hls.WithStore`)得用 `*hls.Stream` 那条路径——把 Hub 的
+  `S` 换成 `*hls.Stream` 并自行喂分片。多副本部署另需按 key 粘连路由。

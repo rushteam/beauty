@@ -10,16 +10,18 @@
 ## [Unreleased]
 
 ### Added
-- **media/hlsmux**：新增 `pkg/media/hlsmux`——把 RTMP 采集的 FLV(H.264+AAC)喂给
-  `bluenviron/gohlslib`(mediamtx 同款库,新增 `gohlslib/v2` + `mediacommon/v2` 依赖),
-  产出产线级 HLS:MPEG-TS / fMP4 / **LL-HLS(低延迟)**。相比自研 `pkg/media/remux`(仅
-  FLV→TS + 手搓播放列表),由 gohlslib 负责分片、播放列表(含 LL-HLS `EXT-X-PART`/
-  `PRELOAD-HINT` 与阻塞式刷新)、fMP4 init 段等全部细节。`Bridge` 同时实现 `rtmp.Handler`
-  (收流)与 `http.Handler`(播放,拿到 SPS/PPS+首关键帧后惰性起 muxer,未就绪回 503)。
-  与 `pkg/hls`+`pkg/media/remux` 并存的**另一条 HLS 路径**:要最薄少依赖选前者,要经真实
-  播放器打磨的 LL-HLS 选本包。边界照旧——分片/LL-HLS 参数经 Option 透出,多路用 `pkg/media.Hub`,
-  转码/鉴权/多码率在框架外。示例 `examples/live-hls-gohlslib`。单测覆盖 FLV 解析纯函数 +
-  用真实 SPS/PPS/ASC 喂帧、由 gohlslib 自身校验产出 MPEG-TS/LL-HLS 播放列表,`-race` 通过。
+- **media/hlsmux**：新增 `pkg/media/hlsmux`——RTMP 采集(H.264+AAC)→ HLS 的主力路径,把 FLV 喂给
+  `bluenviron/gohlslib`(mediamtx 同款库,新增 `gohlslib/v2` + `mediacommon/v2` 依赖),产出产线级
+  HLS:MPEG-TS / fMP4 / **LL-HLS(低延迟)**。由 gohlslib 负责分片、播放列表(含 LL-HLS
+  `EXT-X-PART`/`PRELOAD-HINT` 与阻塞式刷新)、fMP4 init 段等全部细节。`Bridge` 同时实现
+  `rtmp.Handler`(收流)与 `http.Handler`(播放,拿到 SPS/PPS+首关键帧后惰性起 muxer,未就绪回
+  503),幂等 `Finish()` 满足 `media.Stream` 可直接进 `pkg/media.Hub` 做多路管理,亦可作为
+  `hls.Master` 的一路 ABR 变体(`http.Handler`)。与 `pkg/hls` 分工:RTMP→HLS 走本包;需要
+  **通用分片入口**(喂 ffmpeg 现成分片)、**跨码率 ABR 主清单**、**可插拔对象存储 `Store`** 时用
+  `pkg/hls`。存储:gohlslib 默认内存,`WithDirectory` 落盘给 CDN(LL-HLS variant 不支持落盘)。
+  边界照旧——分片/LL-HLS 参数经 Option 透出,转码/鉴权/多码率在框架外。示例
+  `examples/live-hls-gohlslib`(单路)、`examples/live-multi`(多路 + OTel 指标)。单测覆盖 FLV
+  解析纯函数 + 用真实 SPS/PPS/ASC 喂帧由 gohlslib 自身校验产出、以及 Hub/ABR 集成,`-race` 通过。
 - **media/webrtc/sfu**：在 `pkg/media/webrtc` 之上新增 `sfu` 子包——多人实时音视频的
   「会议室」SFU 原语(选择性转发,不混流不转码)。补齐 WHIP/WHEP 覆盖不到的 **N↔N 动态
   成员**那一档:每人推自己的轨道、订阅其他所有人,成员进出由服务端重协商。**无 glare 模型**:
@@ -41,7 +43,7 @@
   浏览器/OBS 推流 → 多浏览器播放)。端到端单测覆盖真实 ICE 环回 + RTP 转发 + DELETE 拆除。
 - **media/hls**：新增 `pkg/hls`——直播/点播 HLS origin(滚动分片窗口 + m3u8 播放列表
   生成 live/VOD + `http.Handler` 挂 webserver 分发)。纯 Go 零 cgo,**不做编解码/切片**,
-  分片由上游(ffmpeg 或 rtmp remux)`Append` 进来。支持 TS 与 fMP4(`EXT-X-MAP` init
+  分片由上游(ffmpeg 或其它 muxer)`Append` 进来。支持 TS 与 fMP4(`EXT-X-MAP` init
   分片)。**分片存储可插拔**:`Store` 接口 + 内存/磁盘实现(`WithStore`),对象存储可自实现。
   **ABR 多码率**:`Master`/`Variant` 生成 `#EXT-X-STREAM-INF` 主清单并按变体名路由,变体
   Handler 可接 `*Stream` 或 `http.FileServer`(适配进程内或 ffmpeg 外部转码产物)。
@@ -54,16 +56,14 @@
   交给业务 `Handler`;`Server` 结构上满足 `beauty.Service` 可直接 `WithService` 挂进框架。
   **鉴权**:连接级 `WithConnectAuth`(按 app/tcUrl)+ 推流级 `PublishFunc` 返回 nil 拒绝。
   只负责收流,不转码。
-- **media**：新增 `pkg/media`——直播/视频服务的编排薄机制。`Hub` 做**多路流管理**
+- **media**：新增 `pkg/media`——直播/视频服务的编排薄机制。`Hub[S media.Stream]` 做**多路流管理**
   (streamKey→Session 注册表 + 生命周期 + 按 key 路由 + 防重复推流,`Session.Context`
-  供外部后台任务随流停机);`Supervisor` 做**子进程监督**(ffmpeg 等,启动/按 `pkg/backoff`
+  供外部后台任务随流停机);按流类型泛型化,`Stream = http.Handler + Finish()`,可承载
+  `*hlsmux.Bridge`(gohlslib)或 `*hls.Stream`(自研 origin),故 `pkg/media` 不依赖 `pkg/hls`。
+  `Supervisor` 做**子进程监督**(ffmpeg 等,启动/按 `pkg/backoff`
   退避重启/优雅停,命令构造留 policy);`Metrics` 基于 OTel 全局 Meter 上报运维指标
   (`media.streams.active` / `publish` / `rejected` / `ingest.bytes` / `segments` /
   `transcode.restarts`,未配 telemetry 时 no-op)。示例 `examples/live-multi`(多路 + 指标)。
-- **media/remux**：新增 `pkg/media/remux`——把 FLV(H.264/AAC)重封装成 MPEG-TS 分片
-  (纯 Go `go-astits`,新增依赖),按关键帧切片 `Append` 到 `hls.Stream`,**不转码**。
-  `FLVToHLS` 实现 `rtmp.Handler`,把采集与分发串成端到端直播。示例见 `examples/live-hls`
-  (RTMP 推流 → HLS 播放)。单测覆盖 FLV 解析/AVCC→AnnexB/ADTS/切片并校验产出合法 TS。
 - **quic**：新增 `pkg/quic`——基于 quic-go 的连接层,作为 `pkg/ws`(WebSocket/TCP)
   之外面向实时/游戏同步的可选传输(opt-in 子包,新增 `quic-go` 依赖)。一条连接同时
   提供**可靠有序流**(`OpenStream`/`AcceptStream`,多路复用、跨流无队头阻塞——关键指令)

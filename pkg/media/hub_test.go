@@ -11,8 +11,12 @@ import (
 	"github.com/rushteam/beauty/pkg/media"
 )
 
+func newStreamHub() *media.Hub[*hls.Stream] {
+	return media.NewHub(func(string) *hls.Stream { return hls.NewStream() })
+}
+
 func TestHub_AcquireRejectRelease(t *testing.T) {
-	h := media.NewHub()
+	h := newStreamHub()
 
 	s1, ok := h.Acquire("live1")
 	if !ok || s1 == nil {
@@ -51,9 +55,9 @@ func TestHub_AcquireRejectRelease(t *testing.T) {
 }
 
 func TestHub_Routing(t *testing.T) {
-	h := media.NewHub(media.WithStreamFactory(func(key string) *hls.Stream {
+	h := media.NewHub(func(key string) *hls.Stream {
 		return hls.NewStream(hls.WithWindow(4))
-	}))
+	})
 	sess, _ := h.Acquire("room42")
 	sess.Stream.Append([]byte("TSDATA"), time.Second)
 
@@ -81,7 +85,7 @@ func TestHub_Routing(t *testing.T) {
 }
 
 func TestHub_ConcurrentAcquire(t *testing.T) {
-	h := media.NewHub()
+	h := newStreamHub()
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	wins := 0

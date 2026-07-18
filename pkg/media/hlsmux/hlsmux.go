@@ -59,6 +59,7 @@ type Bridge struct {
 
 	mu       sync.Mutex
 	started  bool
+	closed   bool
 	sps, pps []byte
 	haveASC  bool
 	asc      mpeg4audio.AudioSpecificConfig
@@ -207,15 +208,23 @@ func (b *Bridge) OnAudio(ts uint32, data []byte) error {
 	return nil
 }
 
-// OnClose 实现 rtmp.Handler:关闭 muxer。
+// OnClose 实现 rtmp.Handler:关闭 muxer。幂等(rtmp 断连与 Hub.Release 可能各调一次)。
 func (b *Bridge) OnClose() {
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.closed = true
 	m := b.m
 	b.mu.Unlock()
 	if m != nil {
 		m.Close()
 	}
 }
+
+// Finish 满足 media.Stream(供 pkg/media.Hub 在 Release 时收尾);等价于 OnClose,幂等。
+func (b *Bridge) Finish() { b.OnClose() }
 
 // ServeHTTP 实现 http.Handler:把播放请求交给 gohlslib(未就绪前回 503)。
 func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,17 @@
 ## [Unreleased]
 
 ### Added
+- **shard**：新增 `pkg/shard`——有状态服务多副本分片路由的薄机制。用一致性哈希(复用
+  `pkg/loadbalance.ConsistentHash`)把每个 key(streamKey/roomID/userID)确定性归属到某实例:
+  `Sharder.Owner(key)`/`IsLocal(key)`,成员集可随服务发现动态 `SetMembers`。`Router` 是
+  `http.Handler`,按 key 把非本地请求反向代理给归属实例(WebSocket 亦可,带防环标记头),本地 key
+  交本地 handler——从而让 `media.Hub`、`webrtc/sfu` 房间、`gameloop` 房间、`presence` 这些进程内
+  单实例服务水平扩多副本而无需改成分布式(分片层坐在前面)。成员来源(服务发现)、key 提取
+  (`PathHeadKey` 与 Hub 的 `/{key}/…` 对齐)、权重都是 policy。单测覆盖归属稳定/唯一、空集为本地、
+  反代到 owner、防环、成员变更迁移,`-race` 通过。
+- **docs**：新增 `docs/media-validation.md`——媒体链路**真机验证清单**(RTMP→LL-HLS、多路 Hub、
+  WHIP/WHEP、SFU 会议、分片)。单测只验证产出结构,本清单给出可照抄的 ffmpeg 命令 + 真实播放器
+  (Safari/hls.js/ffplay)检查点 + 延迟/断流/泄漏红线,上线前照跑。
 - **media/hlsmux**：新增 `pkg/media/hlsmux`——RTMP 采集(H.264+AAC)→ HLS 的主力路径,把 FLV 喂给
   `bluenviron/gohlslib`(mediamtx 同款库,新增 `gohlslib/v2` + `mediacommon/v2` 依赖),产出产线级
   HLS:MPEG-TS / fMP4 / **LL-HLS(低延迟)**。由 gohlslib 负责分片、播放列表(含 LL-HLS

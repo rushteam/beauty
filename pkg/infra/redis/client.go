@@ -12,26 +12,71 @@ package redis
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 )
 
-// Config Redis 连接配置(单节点)。
+// Config Redis 连接配置(单节点)。连接池/超时字段为可选,零值用 go-redis 默认。
 type Config struct {
 	Addr     string // host:port
 	Password string
 	DB       int
+
+	PoolSize     int           // 连接池大小(0 用默认:10*GOMAXPROCS)
+	MinIdleConns int           // 最小空闲连接
+	DialTimeout  time.Duration // 建连超时
+	ReadTimeout  time.Duration // 读超时
+	WriteTimeout time.Duration // 写超时
 }
+
+// Option 配置 NewClient(如接入 OTel 埋点)。
+type Option func(*clientConfig)
+
+type clientConfig struct {
+	tracing bool
+	metrics bool
+}
+
+// WithTracing 给客户端接入 OTel 链路追踪(redisotel):每条 redis 命令产生 span,
+// 用 beauty telemetry 配好的全局 TracerProvider(未配则 no-op)。
+func WithTracing() Option { return func(c *clientConfig) { c.tracing = true } }
+
+// WithMetrics 给客户端接入 OTel 命令级 metrics(redisotel):命令耗时、连接池状态等,
+// 用全局 MeterProvider(未配则 no-op)。
+func WithMetrics() Option { return func(c *clientConfig) { c.metrics = true } }
 
 // NewClient 按 Config 建立一个 go-redis 客户端(懒连接,不校验可达性)。
 // 分布式锁与 KV 存储共用这一处构造。client 生命周期由调用方管理(负责 Close)。
-func NewClient(c *Config) *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr:     c.Addr,
-		Password: c.Password,
-		DB:       c.DB,
+// 传 WithTracing()/WithMetrics() 即接入 OTel 可观测。
+func NewClient(c *Config, opts ...Option) *redis.Client {
+	var cfg clientConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	client := redis.NewClient(&redis.Options{
+		Addr:         c.Addr,
+		Password:     c.Password,
+		DB:           c.DB,
+		PoolSize:     c.PoolSize,
+		MinIdleConns: c.MinIdleConns,
+		DialTimeout:  c.DialTimeout,
+		ReadTimeout:  c.ReadTimeout,
+		WriteTimeout: c.WriteTimeout,
 	})
+	if cfg.tracing {
+		if err := redisotel.InstrumentTracing(client); err != nil {
+			slog.Warn("redis: instrument tracing failed", "err", err)
+		}
+	}
+	if cfg.metrics {
+		if err := redisotel.InstrumentMetrics(client); err != nil {
+			slog.Warn("redis: instrument metrics failed", "err", err)
+		}
+	}
+	return client
 }
 
 // pingClient 建连接并 Ping 验证可达,供各 *FromConfig 构造函数快速失败,

@@ -158,6 +158,11 @@
   生成项目内置版本注入（`VERSION` + `-ldflags -X`）与统一 Makefile。
 
 ### Changed
+- **infra/redis**：`NewClient` 支持 OTel 埋点——新增 `WithTracing()`/`WithMetrics()` 选项,基于
+  `redisotel` 给每条 redis 命令产生 span 与命令级 metrics(用 beauty telemetry 配好的全局
+  Tracer/Meter Provider,未配则 no-op);`Config` 补 `PoolSize`/`MinIdleConns`/`DialTimeout`/
+  `ReadTimeout`/`WriteTimeout` 连接池与超时字段(零值用 go-redis 默认)。分布式锁/KV 共用的
+  客户端从此可观测。新增依赖 `redisotel`(其依赖 go-redis/otel 核心已有),go-redis 升至 v9.21。
 - **client**：把已有的韧性原语接进**直连/普通客户端**(此前只有服务发现版客户端接了节点级
   熔断+重试)。HTTP `resty.NewHTTPClient` 新增 `WithRetry`(基于 `pkg/backoff.Policy`:默认只重
   试幂等方法的瞬时失败——网络错误/429/502/503/504,遵守 `Retry-After`、请求体自动重放)、

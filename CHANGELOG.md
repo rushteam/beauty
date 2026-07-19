@@ -18,8 +18,16 @@
   慢查询告警、连接池、`TranslateError`+`IsDuplicatedKey` 错误映射、`Write()`/`Read()` 切主从、
   `Ping`/`Close`)。`Open`(MySQL DSN)/`OpenWith`(任意 `gorm.Dialector`,支持 Postgres/SQLite/测试)。
   不 import 核心,仅依赖标准库 slog + OTel 全局 Provider,亦可脱离框架单用。sqlite 内存 + 合成错误
-  单测覆盖 CRUD/读写句柄/唯一键判定,`-race` 通过。规划:`contrib/kafka`·`contrib/nats`(为 `pkg/mq`
-  提供 broker 绑定)、`contrib/elasticsearch`(搜索)。
+  单测覆盖 CRUD/读写句柄/唯一键判定,`-race` 通过。
+  - **`contrib/nats`**——`pkg/mq` 的 NATS broker 绑定,实现 `Publisher`/`Subscriber`:topic→subject、
+    `mq.WithGroup`→NATS queue group(竞争)/ 不设组扇出、Headers 与 Key 透传、订阅随 ctx 退订;
+    at-most-once(要持久化用 JetStream)。内嵌 `nats-server` 做真实往返单测(扇出/队列组/退订),`-race` 通过。
+  - **`contrib/kafka`**——`pkg/mq` 的 Kafka broker 绑定(segmentio/kafka-go),实现 `Publisher`/`Subscriber`:
+    topic/Key/Headers 映射、consumer group=mq group、**at-least-once**(handler 成功后提交 offset);Kafka
+    消费必须带 group(否则 `ErrGroupRequired`)。单测覆盖消息映射与 group 前置校验(broker 互操作需外部环境)。
+  - **`contrib/elasticsearch`**——薄封装 go-elasticsearch/v8:`New`/`Ping`/`Search`(原始 JSON)/`Index`/`ES()`,
+    独立不依赖核心。httptest 打桩单测(含 v8 product-check 头),`-race` 通过。
+  - 其中 nats/kafka 实现核心 `pkg/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/elasticsearch 独立。
 - **mq**：新增 `pkg/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
   `eventbus` 扇出 + `webhook` HTTP 推)。`Publisher`/`Subscriber` 接口(订阅按 ctx 绑定生命周期,
   同时适配 NATS push 与 Kafka pull 语义)+ `Consumer`(把一组订阅包成 `beauty.Service`:

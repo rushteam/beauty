@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -126,9 +127,14 @@ func (db *DB) Reader() DBTX {
 // Primary 返回底层主库 *sql.DB,用于开启事务(BeginTx)、迁移等。
 func (db *DB) Primary() *sql.DB { return db.primary }
 
-// RW 返回一个**自动路由**的 DBTX:Exec→主库,Query/QueryRow→读句柄(除非 Primary(ctx))。
-// 便利但有坑:INSERT...RETURNING(QueryRow 却是写)、SELECT...FOR UPDATE(读却要走主)会被
-// 路由错——这类调用请用 Primary(ctx) 强制走主库,或直接用 Writer()。
+// RW 返回一个**自动路由**的 DBTX:Exec→主库;Query/QueryRow 先按 SQL 意图判定——含**写意图**
+// (写动词开头、RETURNING、FOR UPDATE/SHARE、数据修改 CTE)走主库,否则走读句柄。Primary(ctx)
+// 可强制走主库(用于读己之写)。
+//
+// 意图嗅探是**保守启发式**:拿不准偏向主库(牺牲读分流、保正确;"写→副本"是危险失败,
+// "读→主库"只是少分流)。它能自动挡住 INSERT...RETURNING、SELECT...FOR UPDATE 这类常见坑,
+// 但 SQL 启发式无法 100% 覆盖所有写法(如藏在字符串/注释里的关键字会误判为主库,方向安全)。
+// **需要确定性保证时,用显式的 Writer()/Reader()。**
 func (db *DB) RW() DBTX { return &router{db: db} }
 
 // Ping 探测主库与所有副本连通性。
@@ -170,8 +176,9 @@ func IsPrimary(ctx context.Context) bool {
 
 type router struct{ db *DB }
 
-func (r *router) read(ctx context.Context) DBTX {
-	if IsPrimary(ctx) {
+// route 为一次 Query 选库:显式 Primary(ctx) 或 SQL 含写意图 → 主库;否则读句柄。
+func (r *router) route(ctx context.Context, q string) DBTX {
+	if IsPrimary(ctx) || hasWriteIntent(q) {
 		return r.db.primary
 	}
 	return r.db.Reader()
@@ -186,9 +193,40 @@ func (r *router) PrepareContext(ctx context.Context, q string) (*sql.Stmt, error
 }
 
 func (r *router) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	return r.read(ctx).QueryContext(ctx, q, args...)
+	return r.route(ctx, q).QueryContext(ctx, q, args...)
 }
 
 func (r *router) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
-	return r.read(ctx).QueryRowContext(ctx, q, args...)
+	return r.route(ctx, q).QueryRowContext(ctx, q, args...)
+}
+
+// hasWriteIntent 保守判定一条 SQL 是否应走主库(写、锁定读、数据修改 CTE)。
+// 偏向主库:false-positive(读误判为写)只是少分流,方向安全;避免 false-negative(写→副本)。
+func hasWriteIntent(q string) bool {
+	up := strings.ToUpper(strings.TrimLeft(q, " \t\r\n("))
+	switch {
+	case hasAnyPrefix(up, "INSERT", "UPDATE", "DELETE", "REPLACE", "MERGE", "UPSERT",
+		"CALL", "EXEC", "CREATE", "ALTER", "DROP", "TRUNCATE", "GRANT", "REVOKE", "LOCK"):
+		return true
+	case strings.Contains(up, "RETURNING"),
+		strings.Contains(up, "FOR UPDATE"),
+		strings.Contains(up, "FOR NO KEY UPDATE"),
+		strings.Contains(up, "FOR SHARE"):
+		return true
+	case strings.HasPrefix(up, "WITH") &&
+		(strings.Contains(up, "INSERT ") || strings.Contains(up, "UPDATE ") ||
+			strings.Contains(up, "DELETE ")):
+		// 数据修改 CTE(WITH ... AS (INSERT/UPDATE/DELETE ...))
+		return true
+	}
+	return false
+}
+
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }

@@ -38,20 +38,24 @@ q := writeQ.WithTx(tx)
 tx.Commit()
 ```
 
-## 自动路由(方便,但注意坑)
+## 自动路由(带 SQL 意图嗅探)
 
-`sdb.RW()` 返回一个自动路由的 `DBTX`:`Exec`→主库、`Query`/`QueryRow`→副本。传给 `db.New(sdb.RW())`
-即可"一个 Queries 走两边"。**坑**:`INSERT ... RETURNING`(走 QueryRow 却是写)、`SELECT ... FOR UPDATE`
-(读却必须走主)会被路由错——这类调用用 `sqldb.Primary(ctx)` 强制走主库:
+`sdb.RW()` 返回一个自动路由的 `DBTX`:`Exec`→主库;`Query`/`QueryRow` 先按 **SQL 意图**判定——
+含**写意图**(写动词开头、`RETURNING`、`FOR UPDATE`/`FOR SHARE`、数据修改 CTE)自动走主库,否则走副本。
+传给 `db.New(sdb.RW())` 即可"一个 Queries 走两边":
 
 ```go
 q := db.New(sdb.RW())
-q.GetUser(ctx, id)                    // 走副本
-q.GetUserForUpdate(sqldb.Primary(ctx), id) // 强制走主库
-row, _ := q.InsertReturning(sqldb.Primary(ctx), p) // RETURNING 必须走主库
+q.GetUser(ctx, id)                 // 纯 SELECT → 副本
+q.GetUserForUpdate(ctx, id)        // SELECT ... FOR UPDATE → 自动走主库
+row, _ := q.InsertReturning(ctx, p)// INSERT ... RETURNING → 自动走主库
+q.GetUser(sqldb.Primary(ctx), id)  // 读己之写:显式强制主库
 ```
 
-正确性优先就用显式 `Reader()`/`Writer()`;图省事再用 `RW()` + `Primary(ctx)`。
+嗅探是**保守启发式**:拿不准偏向主库(牺牲读分流、保正确;"写→副本"是危险失败,"读→主库"
+只是少分流)。它能挡住 `RETURNING`/`FOR UPDATE` 这类常见坑,但 SQL 启发式**无法 100% 覆盖**
+所有写法(藏在字符串/注释里的关键字会误判为主库——方向安全)。**需要确定性保证时,用显式
+`Writer()`/`Reader()`**,那是唯一的 correct-by-construction 路径。
 
 ## 能力
 

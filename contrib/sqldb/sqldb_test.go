@@ -81,6 +81,29 @@ func TestRW_AutoRoute(t *testing.T) {
 	}
 }
 
+// RW 自动嗅探:INSERT...RETURNING(走 QueryRow 却是写)应被自动路由到主库,而非副本。
+func TestRW_ReturningRoutesToPrimary(t *testing.T) {
+	db := openSplit(t) // 主库有 'P',副本有 'R'
+	defer db.Close()
+	rw := db.RW()
+
+	var got string
+	// 未加任何 Primary(ctx) 提示,靠意图嗅探判定这是写 → 落主库。
+	err := rw.QueryRowContext(context.Background(), "INSERT INTO t(v) VALUES('Y') RETURNING v").Scan(&got)
+	if err != nil {
+		t.Fatalf("returning: %v", err)
+	}
+	if got != "Y" {
+		t.Fatalf("returning 值 = %q, want Y", got)
+	}
+	if n := count(t, db.Writer()); n != 2 {
+		t.Fatalf("主库应有 2 行(P+Y),得 %d —— RETURNING 未落主库", n)
+	}
+	if n := count(t, db.Reader()); n != 1 {
+		t.Fatalf("副本应仍 1 行(R),得 %d —— 写误落副本", n)
+	}
+}
+
 // 无副本时读回退主库。
 func TestNoReplica_FallbackToPrimary(t *testing.T) {
 	db, err := sqldb.Open(sqldb.Config{

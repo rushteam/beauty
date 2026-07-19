@@ -37,12 +37,13 @@ cd contrib/gorm && go test ./...
 |---|---|---|
 | [`contrib/gorm`](gorm) | GORM 集成:读写分离(dbresolver)、otelgorm 链路、slog 日志桥、错误映射 | gorm.io/gorm、driver/mysql、otelgorm |
 | [`contrib/nats`](nats) | `pkg/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
+| [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(consumer group;at-least-once,提交后确认) | segmentio/kafka-go |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 
-`contrib/nats` 与 `contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber` 接口——因此它们
-`import` 核心(用 `require github.com/rushteam/beauty` + `replace => ../..` 在本仓解析,发布时用 tag);
-`contrib/gorm` 与 `contrib/elasticsearch` 不依赖核心,可完全独立使用。
+`contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
+接口——因此它们 `import` 核心(用 `require github.com/rushteam/beauty` + `replace => ../..` 在本仓解析,
+发布时用 tag);`contrib/gorm` 与 `contrib/elasticsearch` 不依赖核心,可完全独立使用。
 
 ## 约定
 

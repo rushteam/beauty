@@ -10,6 +10,10 @@
 ## [Unreleased]
 
 ### Added
+- **buildinfo**：新增 `pkg/buildinfo`——运行时暴露构建信息(版本/commit/构建时间/Go 版本/模块/dirty),
+  用于 `/version` 端点、启动日志、诊断。零依赖(仅标准库)。两来源自动合并:ldflags 注入的包级变量
+  (`-X .../buildinfo.version=...`)优先,缺失项用 `runtime/debug.ReadBuildInfo` 的 VCS 元数据回退。
+  `Get()`/`String()`(单行摘要)/`Handler()`(输出 JSON 的 `http.Handler`)。单测覆盖默认/ldflags 覆盖/Handler。
 - **contrib**：新增 `contrib/` 多模块区,放**依赖较重**的可选集成——每个子目录是**独立 Go 模块**
   (`github.com/rushteam/beauty/contrib/<name>`,自带 go.mod,与已有的 `tools/` 同套路)。核心
   `github.com/rushteam/beauty` 只留轻量机制/接口,重依赖实现进 contrib:不 import 就零负担、可自己
@@ -27,7 +31,10 @@
     消费必须带 group(否则 `ErrGroupRequired`)。单测覆盖消息映射与 group 前置校验(broker 互操作需外部环境)。
   - **`contrib/elasticsearch`**——薄封装 go-elasticsearch/v8:`New`/`Ping`/`Search`(原始 JSON)/`Index`/`ES()`,
     独立不依赖核心。httptest 打桩单测(含 v8 product-check 头),`-race` 通过。
-  - 其中 nats/kafka 实现核心 `pkg/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/elasticsearch 独立。
+  - **`contrib/natsjs`**——`pkg/mq` 的 NATS **JetStream** 绑定,持久化 + **at-least-once**:`EnsureStream` 建流、
+    Publish 落盘、`mq.WithGroup`→durable consumer(竞争、断线续)/ 不设组 ephemeral(扇出)、AckExplicit
+    (成功 Ack / 失败 Nak 重投)。内嵌开启 JetStream 的 `nats-server` 做真实往返单测(先发后订的持久化、Nak 重投),`-race` 通过。
+  - 其中 nats/natsjs/kafka 实现核心 `pkg/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/elasticsearch 独立。
 - **mq**：新增 `pkg/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
   `eventbus` 扇出 + `webhook` HTTP 推)。`Publisher`/`Subscriber` 接口(订阅按 ctx 绑定生命周期,
   同时适配 NATS push 与 Kafka pull 语义)+ `Consumer`(把一组订阅包成 `beauty.Service`:

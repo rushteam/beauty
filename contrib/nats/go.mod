@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/nats-io/nats-server/v2 v2.14.3
 	github.com/nats-io/nats.go v1.52.0
-	github.com/rushteam/beauty v0.0.0
+	github.com/rushteam/beauty v0.1.0
 )
 
 require (
@@ -20,5 +20,3 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
-
-replace github.com/rushteam/beauty => ../..

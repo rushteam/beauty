@@ -43,8 +43,24 @@ cd contrib/gorm && go test ./...
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 
 `contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
-接口——因此它们 `import` 核心(用 `require github.com/rushteam/beauty` + `replace => ../..` 在本仓解析,
-发布时用 tag);`contrib/gorm`、`contrib/sqldb`、`contrib/elasticsearch` 不依赖核心,可完全独立使用。
+接口,故 `require github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/gorm`、
+`contrib/sqldb`、`contrib/elasticsearch` 不依赖核心,可完全独立使用。
+
+## 版本
+
+各模块独立打 tag(`<模块目录>/vX.Y.Z`),独立 `go get`:
+
+```bash
+go get github.com/rushteam/beauty/contrib/gorm@v0.1.0
+go get github.com/rushteam/beauty/contrib/sqldb@v0.1.0
+go get github.com/rushteam/beauty/contrib/nats@v0.1.0    # 依赖核心 beauty v0.1.0
+```
+
+依赖核心的 mq 模块默认按 `require` 的核心版本解析。若本地要同时改核心与该 contrib,临时在其
+`go.mod` 加一行 `replace github.com/rushteam/beauty => ../..` 即可(提交/发布前去掉)。
+> 注:不建议用覆盖全仓的根 `go.work`——各 contrib 与核心的间接依赖版本可能不一致(如
+> `genproto` 新旧拆分),合并工作区会触发 ambiguous import。按需只对"核心 + 单个 contrib"
+> 做局部 replace 更稳。
 
 ## 约定
 

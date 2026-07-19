@@ -34,7 +34,12 @@
   - **`contrib/natsjs`**——`pkg/mq` 的 NATS **JetStream** 绑定,持久化 + **at-least-once**:`EnsureStream` 建流、
     Publish 落盘、`mq.WithGroup`→durable consumer(竞争、断线续)/ 不设组 ephemeral(扇出)、AckExplicit
     (成功 Ack / 失败 Nak 重投)。内嵌开启 JetStream 的 `nats-server` 做真实往返单测(先发后订的持久化、Nak 重投),`-race` 通过。
-  - 其中 nats/natsjs/kafka 实现核心 `pkg/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/elasticsearch 独立。
+  - **`contrib/sqldb`**——`database/sql` 读写分离 + OTel,配合 **sqlc**(生成的 `Queries` 吃 `DBTX`,本模块
+    `Writer()`/`Reader()` 即 `DBTX`)/ sqlx / 手写 SQL。`Open`(主 + 多副本,otelsql 埋点、连接池)、`Writer()`
+    (主)/`Reader()`(副本轮询,无副本回退主)/`Primary()`(开事务/迁移)/`Ping`/`Close`;`RW()` 自动路由
+    (Exec→主、Query→从)+ `Primary(ctx)` 逃生口(应对 `INSERT...RETURNING`/`SELECT...FOR UPDATE` 的路由坑)。
+    不 import 驱动与核心。双内存 sqlite 库单测验证路由落点,`-race` 通过。
+  - 其中 nats/natsjs/kafka 实现核心 `pkg/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/sqldb/elasticsearch 独立。
 - **mq**：新增 `pkg/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
   `eventbus` 扇出 + `webhook` HTTP 推)。`Publisher`/`Subscriber` 接口(订阅按 ctx 绑定生命周期,
   同时适配 NATS push 与 Kafka pull 语义)+ `Consumer`(把一组订阅包成 `beauty.Service`:

@@ -64,9 +64,9 @@ func main() {
 		teamCount := len(teams)
 		mu.Unlock()
 		json.NewEncoder(w).Encode(map[string]any{
-			"waiting":  m.Count(),
-			"matched":  matched.Load(),
-			"teams":    teamCount,
+			"waiting": m.Count(),
+			"matched": matched.Load(),
+			"teams":   teamCount,
 		})
 	})
 

@@ -15,7 +15,7 @@ import (
 
 const (
 	resUser   audit.Resource = iota + 1 // 用户资源
-	resConfig                            // 配置资源
+	resConfig                           // 配置资源
 )
 
 func main() {

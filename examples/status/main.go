@@ -4,9 +4,10 @@
 // 走 router 投递 status notification。串起 presence + relationship + router。
 //
 // 流程:
-//   /friend?a=alice&b=bob     建立双向好友(互为关注者)
-//   /join?session=s1&user=alice&channel=room1   alice 加入流 → bob 收到 online 通知
-//   /leave?session=s1&user=alice&channel=room1  alice 离开 → bob 收到 offline 通知
+//
+//	/friend?a=alice&b=bob     建立双向好友(互为关注者)
+//	/join?session=s1&user=alice&channel=room1   alice 加入流 → bob 收到 online 通知
+//	/leave?session=s1&user=alice&channel=room1  alice 离开 → bob 收到 offline 通知
 package main
 
 import (

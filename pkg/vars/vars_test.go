@@ -10,8 +10,8 @@ func TestRender(t *testing.T) {
 	}{
 		{"hello ${name}", map[string]string{"name": "bob"}, "hello bob"},
 		{"${a}/${b}", map[string]string{"a": "1", "b": "2"}, "1/2"},
-		{"x ${missing} y", nil, "x  y"},                                  // 缺失无默认 → 空
-		{"port=${PORT:-8080}", nil, "port=8080"},                        // 默认值
+		{"x ${missing} y", nil, "x  y"},                                        // 缺失无默认 → 空
+		{"port=${PORT:-8080}", nil, "port=8080"},                               // 默认值
 		{"port=${PORT:-8080}", map[string]string{"PORT": "9090"}, "port=9090"}, // 有值覆盖默认
 		{"no placeholder", map[string]string{"x": "y"}, "no placeholder"},
 		{"${ spaced }", map[string]string{"spaced": "ok"}, "ok"}, // key 去空格

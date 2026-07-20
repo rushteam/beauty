@@ -17,7 +17,6 @@ func withDirectAddr(addr string) directOption {
 	}
 }
 
-
 func withDirectBalancingPolicy(policy string) directOption {
 	serverConfig := fmt.Sprintf(`{"loadBalancingPolicy":"%s"}`, policy)
 	return func(c *directClient) {

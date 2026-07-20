@@ -144,7 +144,7 @@ type openErrHandler struct {
 	closeCh   chan struct{}
 }
 
-func (h *openErrHandler) OnOpen(*session.Session) error { return errBoom }
+func (h *openErrHandler) OnOpen(*session.Session) error                                 { return errBoom }
 func (h *openErrHandler) OnMessage(*session.Session, session.MessageType, []byte) error { return nil }
 func (h *openErrHandler) OnClose(*session.Session, string) {
 	h.closeOnce.Do(func() { close(h.closeCh) })

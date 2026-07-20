@@ -31,10 +31,10 @@ type Edge struct {
 
 // 常用状态值(业务可自定义扩展)。
 const (
-	StateActive  = 0 // 活跃关系(好友/成员)
-	StatePending = 1 // 待确认(好友请求已发)
-	StateAdmin   = 2 // 管理员(群组角色)
-	StateOwner   = 3 // 拥有者(群组角色)
+	StateActive  = 0  // 活跃关系(好友/成员)
+	StatePending = 1  // 待确认(好友请求已发)
+	StateAdmin   = 2  // 管理员(群组角色)
+	StateOwner   = 3  // 拥有者(群组角色)
 	StateBlocked = 99 // 拉黑(单向隔离)
 )
 

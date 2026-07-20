@@ -7,14 +7,15 @@
 //   - pkg/domain/party:公会内小队(临时组队开黑)。
 //
 // 路由:
-//   /create?clan=c1&leader=alice           创建公会(relationship 加 leader 边)
-//   /join?clan=c1&user=bob                 加入公会(加 member 边)
-//   /members?clan=c1                       成员列表(按角色过滤)
-//   /donate?clan=c1&user=alice&amount=100  捐赠公会基金
-//   /fund?clan=c1                          查公会基金
-//   /score?clan=c1&user=alice&score=100    公会战赛季榜提交
-//   /ranking?clan=c1                       公会战排名
-//   /squad?clan=c1&leader=alice            公会内组小队(party)
+//
+//	/create?clan=c1&leader=alice           创建公会(relationship 加 leader 边)
+//	/join?clan=c1&user=bob                 加入公会(加 member 边)
+//	/members?clan=c1                       成员列表(按角色过滤)
+//	/donate?clan=c1&user=alice&amount=100  捐赠公会基金
+//	/fund?clan=c1                          查公会基金
+//	/score?clan=c1&user=alice&score=100    公会战赛季榜提交
+//	/ranking?clan=c1                       公会战排名
+//	/squad?clan=c1&leader=alice            公会内组小队(party)
 package main
 
 import (
@@ -34,8 +35,8 @@ import (
 
 // Clan 用现有原语组合出的公会聚合体。
 type Clan struct {
-	graph *relationship.Graph   // 成员与角色
-	fund  *wallet.Wallet        // 公会基金
+	graph *relationship.Graph    // 成员与角色
+	fund  *wallet.Wallet         // 公会基金
 	war   *tournament.Tournament // 公会战赛季榜
 }
 

@@ -20,16 +20,16 @@ import (
 type ErrClass int
 
 const (
-	ClassUnknown       ErrClass = iota // 未能识别
-	ClassUniqueViolation               // 唯一约束冲突(重复键)
-	ClassForeignKeyViolation           // 外键约束冲突
-	ClassNotNullViolation              // 非空约束冲突
-	ClassCheckViolation                // check 约束冲突
-	ClassDeadlock                      // 死锁/序列化失败
-	ClassTimeout                       // 查询超时
-	ClassConnection                   // 连接断开/不可达
-	ClassNotFound                      // 行不存在(影响 0 行的 NoRows)
-	ClassTooManyRows                   // 期望单行却返回多行
+	ClassUnknown             ErrClass = iota // 未能识别
+	ClassUniqueViolation                     // 唯一约束冲突(重复键)
+	ClassForeignKeyViolation                 // 外键约束冲突
+	ClassNotNullViolation                    // 非空约束冲突
+	ClassCheckViolation                      // check 约束冲突
+	ClassDeadlock                            // 死锁/序列化失败
+	ClassTimeout                             // 查询超时
+	ClassConnection                          // 连接断开/不可达
+	ClassNotFound                            // 行不存在(影响 0 行的 NoRows)
+	ClassTooManyRows                         // 期望单行却返回多行
 )
 
 // Driver 把底层 driver error 归类为 ErrClass。
@@ -108,16 +108,16 @@ func (t *Translator) Is(err error, class ErrClass) bool {
 // 语义:冲突→409、不存在→404、超时→504、连接→503。
 func defaultTable() map[ErrClass]perr.Code {
 	return map[ErrClass]perr.Code{
-		ClassUnknown:          perr.CodeInternal,
-		ClassUniqueViolation:  perr.CodeConflict,
+		ClassUnknown:             perr.CodeInternal,
+		ClassUniqueViolation:     perr.CodeConflict,
 		ClassForeignKeyViolation: perr.CodeConflict,
-		ClassNotNullViolation: perr.CodeInvalidArgument,
-		ClassCheckViolation:   perr.CodeInvalidArgument,
-		ClassDeadlock:         perr.CodeConflict,
-		ClassTimeout:          perr.CodeDeadline,
-		ClassConnection:       perr.CodeUnavailable,
-		ClassNotFound:         perr.CodeNotFound,
-		ClassTooManyRows:      perr.CodeInternal,
+		ClassNotNullViolation:    perr.CodeInvalidArgument,
+		ClassCheckViolation:      perr.CodeInvalidArgument,
+		ClassDeadlock:            perr.CodeConflict,
+		ClassTimeout:             perr.CodeDeadline,
+		ClassConnection:          perr.CodeUnavailable,
+		ClassNotFound:            perr.CodeNotFound,
+		ClassTooManyRows:         perr.CodeInternal,
 	}
 }
 

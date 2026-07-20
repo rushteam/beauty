@@ -18,9 +18,9 @@ import (
 
 func TestCode_Predefined_HTTPMapping(t *testing.T) {
 	cases := []struct {
-		code       errors.Code
-		wantHTTP   int
-		wantGRPC   uint32
+		code     errors.Code
+		wantHTTP int
+		wantGRPC uint32
 	}{
 		{errors.CodeInvalidArgument, 400, 3},
 		{errors.CodeUnauthenticated, 401, 16},

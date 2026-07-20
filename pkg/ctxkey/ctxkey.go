@@ -18,8 +18,8 @@ import "context"
 // Key 是一个类型安全的 context key。T 约束存取的值类型。
 // 零值不可直接使用(需经 New 创建以获得独立标识);但 Key 是可比较的。
 type Key[T any] struct {
-	_ [0]int           // 零大小,不占内存
-	id *uintptr        // 独立标识,New 时分配,使同 T 的不同 Key 区分
+	_  [0]int   // 零大小,不占内存
+	id *uintptr // 独立标识,New 时分配,使同 T 的不同 Key 区分
 }
 
 // New 创建一个独立的 Key。同 T 多次调用 New 返回的 Key 互不冲突

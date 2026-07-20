@@ -14,8 +14,8 @@ func main() {
 	dlq := webhook.NewMemDLQ()
 	n := webhook.New(
 		webhook.WithRetries(3),
-		webhook.WithStore(store),   // 启用幂等去重 + 投递状态追踪
-		webhook.WithDLQ(dlq),       // 启用死信队列:重试耗尽后入队,可 Replay
+		webhook.WithStore(store), // 启用幂等去重 + 投递状态追踪
+		webhook.WithDLQ(dlq),     // 启用死信队列:重试耗尽后入队,可 Replay
 		webhook.WithErrorHandler(func(ep webhook.Endpoint, ev webhook.Event, err error) {
 			fmt.Printf("webhook failed: url=%s event=%s err=%v\n", ep.URL, ev.Type, err)
 		}),
@@ -42,4 +42,3 @@ func main() {
 	// ok, err := n.Replay(context.Background())
 	fmt.Println("done")
 }
-

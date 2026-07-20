@@ -25,14 +25,14 @@ import (
 
 // Object 是一个存储对象。
 type Object struct {
-	OwnerID    string // 所属用户(空=公共)
-	Collection string // 集合名(逻辑分组)
-	Key        string // 集合内 key
-	Value      []byte // 负载
-	Version    string // 当前版本(value 的 MD5;空=不存在)
-	ReadAccess int    // 0=私有 1=自己可读 2=公开可读
-	WriteAccess int   // 0=只读 1=可写
-	UpdateTime int64  // unix nano
+	OwnerID     string // 所属用户(空=公共)
+	Collection  string // 集合名(逻辑分组)
+	Key         string // 集合内 key
+	Value       []byte // 负载
+	Version     string // 当前版本(value 的 MD5;空=不存在)
+	ReadAccess  int    // 0=私有 1=自己可读 2=公开可读
+	WriteAccess int    // 0=只读 1=可写
+	UpdateTime  int64  // unix nano
 }
 
 // WriteMode 写语义。
@@ -50,13 +50,13 @@ const (
 
 // WriteOp 是一次批量写操作。
 type WriteOp struct {
-	OwnerID    string
-	Collection string
-	Key        string
-	Value      []byte
-	Mode       WriteMode
-	Version    string // IfMatch 时的期望版本
-	ReadAccess int
+	OwnerID     string
+	Collection  string
+	Key         string
+	Value       []byte
+	Mode        WriteMode
+	Version     string // IfMatch 时的期望版本
+	ReadAccess  int
 	WriteAccess int
 }
 

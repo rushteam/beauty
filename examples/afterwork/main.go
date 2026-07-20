@@ -7,7 +7,8 @@
 //
 // 跑:go run ./examples/afterwork
 // 验证:curl -XPOST localhost:8303/order -d '{"sku":"A","qty":2}'
-//       服务端日志会看到"response sent"先于"audit written"。
+//
+//	服务端日志会看到"response sent"先于"audit written"。
 package main
 
 import (

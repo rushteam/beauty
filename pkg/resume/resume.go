@@ -6,7 +6,8 @@
 // 实现"掉线不掉状态"的体验。
 //
 // 它把 pkg/token(验证 refresh)与 pkg/presence(查在场流)织成完整登录态:
-//   token.VerifyRefresh → userID/tokenID → presence.ListBySession → []Stream
+//
+//	token.VerifyRefresh → userID/tokenID → presence.ListBySession → []Stream
 //
 // 零值不可用,用 New 构造。并发安全(只读组合两个并发安全组件)。
 package resume
@@ -25,15 +26,15 @@ type Stream struct {
 
 // PresenceInfo 一个会话的在场快照:在哪些流 + 对应 userID。
 type PresenceInfo struct {
-	UserID   string
-	TokenID  string
-	Streams  []Stream
+	UserID  string
+	TokenID string
+	Streams []Stream
 }
 
 // Resolver 把 refresh token 解析为在场快照。
 type Resolver struct {
-	tm       *token.Manager
-	tracker  *presence.Tracker
+	tm      *token.Manager
+	tracker *presence.Tracker
 }
 
 // Option 配置 Resolver。

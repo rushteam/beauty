@@ -31,11 +31,11 @@ import (
 // 预定义的透传键，与 HTTP Header 名称一致（小写）。
 // 业务可直接用字符串字面量扩展，不必局限于此。
 const (
-	KeyTenantID   = "x-tenant-id"   // 租户 ID，多租户场景必传
-	KeyCaller     = "x-caller"      // 调用方服务名，链路追踪辅助
-	KeyEnv        = "x-env"         // 环境标（prod/staging/dev），灰度路由
-	KeyRequestID  = "x-request-id"  // 请求 ID，与 requestid 中间件共享键名
-	KeyUserID     = "x-user-id"     // 当前用户 ID，鉴权后透传
+	KeyTenantID  = "x-tenant-id"  // 租户 ID，多租户场景必传
+	KeyCaller    = "x-caller"     // 调用方服务名，链路追踪辅助
+	KeyEnv       = "x-env"        // 环境标（prod/staging/dev），灰度路由
+	KeyRequestID = "x-request-id" // 请求 ID，与 requestid 中间件共享键名
+	KeyUserID    = "x-user-id"    // 当前用户 ID，鉴权后透传
 )
 
 var mdKey = ctxkey.New[MD]()

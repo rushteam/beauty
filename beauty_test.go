@@ -46,9 +46,9 @@ func (s *slowService) String() string { return s.name }
 
 // readyService 实现 ReadyNotifier，在 Start 内部延迟 delay 后发出就绪信号。
 type readyService struct {
-	name      string
-	readyCh   chan struct{}
-	readyOnce sync.Once
+	name       string
+	readyCh    chan struct{}
+	readyOnce  sync.Once
 	registered atomic.Bool
 }
 
@@ -65,7 +65,7 @@ func (s *readyService) Start(ctx context.Context) error {
 	return nil
 }
 func (s *readyService) Ready() <-chan struct{} { return s.readyCh }
-func (s *readyService) String() string        { return s.name }
+func (s *readyService) String() string         { return s.name }
 
 // stubRegistry 记录注册/注销顺序，实现 discover.Registry 接口。
 type stubRegistry struct {
@@ -302,11 +302,11 @@ type wrappedDiscoverService struct {
 	name string
 }
 
-func (w *wrappedDiscoverService) ID() string                    { return w.name }
-func (w *wrappedDiscoverService) Name() string                  { return w.name }
-func (w *wrappedDiscoverService) Kind() string                  { return "test" }
-func (w *wrappedDiscoverService) Addr() string                  { return "127.0.0.1:0" }
-func (w *wrappedDiscoverService) Metadata() map[string]string   { return nil }
+func (w *wrappedDiscoverService) ID() string                  { return w.name }
+func (w *wrappedDiscoverService) Name() string                { return w.name }
+func (w *wrappedDiscoverService) Kind() string                { return "test" }
+func (w *wrappedDiscoverService) Addr() string                { return "127.0.0.1:0" }
+func (w *wrappedDiscoverService) Metadata() map[string]string { return nil }
 
 // orderingService 实现 discover.Service，并记录 Start 返回（server 停止）的时间。
 type orderingService struct {

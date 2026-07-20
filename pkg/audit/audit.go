@@ -65,7 +65,7 @@ type Audit struct {
 	mu      sync.Mutex
 	seq     int64
 	sink    Sink
-	queue   chan Entry        // 异步队列,满则丢弃(审计不应阻塞业务)
+	queue   chan Entry // 异步队列,满则丢弃(审计不应阻塞业务)
 	wg      sync.WaitGroup
 	stopped bool
 }

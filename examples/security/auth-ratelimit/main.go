@@ -209,8 +209,8 @@ func main() {
 			webserver.WithServiceName("web-server"),
 			// 中间件执行顺序（从外到内）：
 			webserver.WithMiddleware(
-				loggingMiddleware,                       // 1. 日志中间件（最外层）
-				auth.HTTPMiddleware(authMiddleware),      // 2. 认证中间件
+				loggingMiddleware,                             // 1. 日志中间件（最外层）
+				auth.HTTPMiddleware(authMiddleware),           // 2. 认证中间件
 				ratelimit.HTTPMiddleware(rateLimitMiddleware), // 3. 限流中间件
 				timeout.HTTPMiddleware(timeoutController),     // 4. 超时控制中间件
 				circuitbreaker.HTTPMiddleware(circuitBreaker), // 5. 熔断器中间件（最内层）

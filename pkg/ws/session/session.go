@@ -14,6 +14,7 @@
 // 使用:
 //
 //	mux.Handle("/ws", ws.Handler(session.Accept(myHandler, opts...)))
+//
 // 其中 myHandler 实现 session.Handler,在 OnMessage 里读消息、用 Send 投递写。
 package session
 

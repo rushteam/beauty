@@ -24,14 +24,14 @@ type roomState struct {
 
 // 输入:客户端发来的数字。
 type roomInput struct {
-	From int    `json:"from"`
-	Val  int    `json:"val"`
+	From int `json:"from"`
+	Val  int `json:"val"`
 }
 
 // 产出:每帧广播给所有订阅者。
 type roomOutput struct {
-	Tick   int        `json:"tick"`
-	Total  int        `json:"total"`
+	Tick   int         `json:"tick"`
+	Total  int         `json:"total"`
 	Inputs []roomInput `json:"inputs"`
 }
 

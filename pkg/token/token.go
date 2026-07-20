@@ -28,25 +28,25 @@ import (
 
 // Claims 是 session token 的声明集合,嵌入 jwt.RegisteredClaims 提供标准字段。
 type Claims struct {
-	TokenID  string            `json:"tid"`             // 会话标识(非用户标识),用于黑名单注销
-	UserID   string            `json:"sub"`             // 用户 ID(jwt sub)
-	Username string            `json:"name,omitempty"`  // 用户名(可选)
-	Vars     map[string]string `json:"vars,omitempty"`  // 业务元数据,免外查
+	TokenID  string            `json:"tid"`            // 会话标识(非用户标识),用于黑名单注销
+	UserID   string            `json:"sub"`            // 用户 ID(jwt sub)
+	Username string            `json:"name,omitempty"` // 用户名(可选)
+	Vars     map[string]string `json:"vars,omitempty"` // 业务元数据,免外查
 	jwt.RegisteredClaims
 }
 
 // Manager 管理令牌签发、验证与注销。
 type Manager struct {
-	sessionKey []byte       // session token 签名密钥
-	refreshKey []byte       // refresh token 签名密钥(独立)
+	sessionKey []byte // session token 签名密钥
+	refreshKey []byte // refresh token 签名密钥(独立)
 	sessTTL    time.Duration
 	refreshTTL time.Duration
 
 	mu       sync.Mutex
-	revoked  map[string]int64     // tokenID → 保留到(unix 秒);黑名单
-	kickedAt map[string]int64     // userID → 全局失效时间秒;此时间前签发的 token 全失效
+	revoked  map[string]int64 // tokenID → 保留到(unix 秒);黑名单
+	kickedAt map[string]int64 // userID → 全局失效时间秒;此时间前签发的 token 全失效
 
-	stopCh chan struct{}
+	stopCh  chan struct{}
 	stopped sync.Once
 }
 

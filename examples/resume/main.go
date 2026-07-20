@@ -4,9 +4,10 @@
 // → 客户端按列表自动重新 join。串起 pkg/token + pkg/presence。
 //
 // 流程:
-//   /login       签发 dual token,模拟已加入 room1/party-a
-//   /reconnect   用 refresh token 还原在场流列表
-//   /remark      用新 sessionID 把流重新登记(MarkOnline)
+//
+//	/login       签发 dual token,模拟已加入 room1/party-a
+//	/reconnect   用 refresh token 还原在场流列表
+//	/remark      用新 sessionID 把流重新登记(MarkOnline)
 package main
 
 import (
@@ -22,9 +23,9 @@ import (
 )
 
 var (
-	tm   *token.Manager
-	tr   *presence.Tracker
-	rsv  *resume.Resolver
+	tm  *token.Manager
+	tr  *presence.Tracker
+	rsv *resume.Resolver
 )
 
 func main() {
@@ -64,9 +65,9 @@ func main() {
 		newSID := "new-" + info.TokenID
 		rsv.MarkOnline(newSID, info.UserID, info.UserID, info.Streams, false)
 		json.NewEncoder(w).Encode(map[string]any{
-			"user":         info.UserID,
-			"new_session":  newSID,
-			"streams":      info.Streams,
+			"user":        info.UserID,
+			"new_session": newSID,
+			"streams":     info.Streams,
 		})
 	})
 

@@ -124,7 +124,7 @@ func (c *traceComponent) Init() context.CancelFunc {
 	// 没有这一步，otelhttp/otelgrpc 无法在服务间传递 trace，链路会断开。
 	props := []propagation.TextMapPropagator{
 		propagation.TraceContext{}, // W3C traceparent / tracestate
-		propagation.Baggage{},     // W3C baggage
+		propagation.Baggage{},      // W3C baggage
 	}
 	props = append(props, c.propagators...)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(props...))

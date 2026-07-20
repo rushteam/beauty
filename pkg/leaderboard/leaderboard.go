@@ -35,9 +35,9 @@ type Record struct {
 
 // RankCache 管理多个排行榜的内存排名缓存。
 type RankCache struct {
-	mu          sync.RWMutex
-	caches      map[string]*rankEntry // key = leaderboardID + "/" + expiryUnix
-	blacklist   map[string]struct{}   // 不缓存的榜 ID
+	mu           sync.RWMutex
+	caches       map[string]*rankEntry // key = leaderboardID + "/" + expiryUnix
+	blacklist    map[string]struct{}   // 不缓存的榜 ID
 	blacklistAll bool                  // 黑名单含 "*" 表示全部不缓存
 }
 

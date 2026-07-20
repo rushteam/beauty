@@ -22,9 +22,9 @@ import (
 
 // mapStaging 把一个 map[K]V 在事务期间做副本,Commit 时 swap,Rollback 丢弃。
 type mapStaging[K comparable, V any] struct {
-	mu       *sync.Mutex       // 共享主库的锁
-	dst      map[K]V           // 主库指针(*map 不行,需 indirection)
-	working  map[K]V           // staging 副本
+	mu        *sync.Mutex // 共享主库的锁
+	dst       map[K]V     // 主库指针(*map 不行,需 indirection)
+	working   map[K]V     // staging 副本
 	committed bool
 }
 
@@ -59,8 +59,8 @@ func (s *mapStaging[K, V]) Rollback(ctx context.Context) error {
 // 业务:钱包(简化为 map) + 背包存档(简化为 map)
 type game struct {
 	mu     sync.Mutex
-	wallet map[string]int64            // userID -> gold
-	bag    map[string]map[string]int   // userID -> {item -> qty}
+	wallet map[string]int64          // userID -> gold
+	bag    map[string]map[string]int // userID -> {item -> qty}
 }
 
 func newGame() *game {

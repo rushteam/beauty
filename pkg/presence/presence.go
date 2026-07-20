@@ -6,6 +6,7 @@
 // 双索引 presence 树:
 //   - presencesByStream:  按 流 → 查成员(广播用)
 //   - presencesBySession: 按 会话 → 查所在流(下线清理用)
+//
 // 一次 Track/Untrack 同步更新两棵索引,双向查询均 O(1)。
 //
 // 零值不可用,用 New 构造。Tracker 并发安全。

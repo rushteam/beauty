@@ -38,8 +38,8 @@ type Snapshot struct {
 	LeaderID     string
 	Members      []Member
 	JoinRequests []JoinRequest
-	Open         bool   // open:任何人直接加入;false:需 Leader Accept
-	MaxSize      int    // 最大成员数(含预留),0 不限
+	Open         bool // open:任何人直接加入;false:需 Leader Accept
+	MaxSize      int  // 最大成员数(含预留),0 不限
 }
 
 // OnChange 成员/状态变更时的回调。业务在此调 router.SendToStream 广播给全员。

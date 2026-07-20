@@ -55,8 +55,8 @@ func HTTPMiddleware(auth *AuthMiddleware) func(http.Handler) http.Handler {
 func buildHTTPMetadata(r *http.Request) map[string]any {
 	md := make(map[string]any, 7)
 
-	md["headers"] = r.Header      // http.Header 即 map[string][]string，直接引用
-	md["query"] = r.URL.RawQuery  // 原始 query string，避免 ParseQuery 的 map 分配
+	md["headers"] = r.Header     // http.Header 即 map[string][]string，直接引用
+	md["query"] = r.URL.RawQuery // 原始 query string，避免 ParseQuery 的 map 分配
 	md["method"] = r.Method
 	md["path"] = r.URL.Path
 	md["remote_addr"] = r.RemoteAddr

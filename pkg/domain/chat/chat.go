@@ -30,10 +30,10 @@ type Message struct {
 
 // Store 频道消息存储:按 channel 持久化 + 游标分页。
 type Store struct {
-	mu        sync.Mutex
-	byChannel map[string][]*Message // channelID → 消息(按 msgID 升序)
-	bySeq     map[string]int64      // channelID → 下一个 msgID(单调,不因截断回退)
-	idCounter atomic.Int64
+	mu            sync.Mutex
+	byChannel     map[string][]*Message // channelID → 消息(按 msgID 升序)
+	bySeq         map[string]int64      // channelID → 下一个 msgID(单调,不因截断回退)
+	idCounter     atomic.Int64
 	maxPerChannel int
 }
 

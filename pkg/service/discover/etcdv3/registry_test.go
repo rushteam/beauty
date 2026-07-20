@@ -216,10 +216,10 @@ type mockService struct {
 	metadata             map[string]string
 }
 
-func (m *mockService) ID() string                  { return m.id }
-func (m *mockService) Name() string                { return m.name }
-func (m *mockService) Kind() string                { return m.kind }
-func (m *mockService) Addr() string                { return m.addr }
+func (m *mockService) ID() string   { return m.id }
+func (m *mockService) Name() string { return m.name }
+func (m *mockService) Kind() string { return m.kind }
+func (m *mockService) Addr() string { return m.addr }
 func (m *mockService) Metadata() map[string]string {
 	if m.metadata == nil {
 		return map[string]string{}

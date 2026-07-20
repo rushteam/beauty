@@ -12,9 +12,9 @@ import (
 //
 // 实现须并发安全(Append 来自采集 goroutine,Get 来自多个 HTTP 请求)。
 type Store interface {
-	Put(seq uint64, data []byte) error       // 写入一个分片
-	Get(seq uint64) ([]byte, bool, error)    // 读取;不存在返回 (nil,false,nil)
-	Remove(seq uint64) error                  // 淘汰(不存在也不报错)
+	Put(seq uint64, data []byte) error    // 写入一个分片
+	Get(seq uint64) ([]byte, bool, error) // 读取;不存在返回 (nil,false,nil)
+	Remove(seq uint64) error              // 淘汰(不存在也不报错)
 }
 
 // ===== 内存实现(默认)=====

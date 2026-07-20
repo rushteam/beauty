@@ -6,6 +6,7 @@
 //     复用、跨流无队头阻塞(HoL);
 //   - 不可靠数据报(SendDatagram/ReceiveDatagram,RFC 9221):高频状态/位置更新,
 //     丢了就丢、不重传、不阻塞后续——正是状态同步想要的语义(TCP 给不了)。
+//
 // 另外 QUIC 内建 TLS 1.3(加密是强制的)、连接迁移、0-RTT。
 //
 // 语义与边界:
@@ -143,8 +144,8 @@ type Server struct {
 	tls     *tls.Config
 	qconf   *quicgo.Config
 
-	pconn     net.PacketConn     // WithPacketConn:自备(已调好缓冲的)UDP socket
-	transport *quicgo.Transport  // WithTransport:自备可复用的 transport(优先于 pconn)
+	pconn     net.PacketConn    // WithPacketConn:自备(已调好缓冲的)UDP socket
+	transport *quicgo.Transport // WithTransport:自备可复用的 transport(优先于 pconn)
 	ln        *quicgo.Listener
 	ready     chan struct{}
 	readyOnce sync.Once

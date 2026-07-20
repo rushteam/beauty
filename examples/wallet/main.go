@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/service/webserver"
 	"github.com/rushteam/beauty/pkg/domain/wallet"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 
 func main() {

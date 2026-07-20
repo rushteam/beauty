@@ -6,13 +6,14 @@
 //   - pkg/ratelimit:发消息限流(防刷屏,按 userID 令牌桶)。
 //
 // 路由:
-//   POST /create?group=g1&owner=alice                  创建群组
-//   POST /join?group=g1&user=bob                       加入群组
-//   POST /msg?group=g1&from=alice&to=bob&text=hi       发私聊(限流 2/s)
-//   GET  /inbox?user=bob&after=0&limit=10              拉收件箱(降序)
-//   POST /read?user=bob&seq=3                          标记已读
-//   GET  /unread?user=bob                              未读数
-//   GET  /members?group=g1                             成员列表
+//
+//	POST /create?group=g1&owner=alice                  创建群组
+//	POST /join?group=g1&user=bob                       加入群组
+//	POST /msg?group=g1&from=alice&to=bob&text=hi       发私聊(限流 2/s)
+//	GET  /inbox?user=bob&after=0&limit=10              拉收件箱(降序)
+//	POST /read?user=bob&seq=3                          标记已读
+//	GET  /unread?user=bob                              未读数
+//	GET  /members?group=g1                             成员列表
 package main
 
 import (
@@ -30,7 +31,7 @@ import (
 
 var (
 	groups  = group.New()
-	inboxes = inbox.New(nil) // 无在线投递,纯离线留存
+	inboxes = inbox.New(nil)                 // 无在线投递,纯离线留存
 	tb      = ratelimit.NewTokenBucket(2, 2) // 2 令牌,2/s 补(每用户)
 )
 

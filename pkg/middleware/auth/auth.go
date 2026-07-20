@@ -55,9 +55,9 @@ func NewUser(id, name string, roles []string) *DefaultUser {
 	}
 }
 
-func (u *DefaultUser) ID() string                       { return u.id }
-func (u *DefaultUser) Name() string                     { return u.name }
-func (u *DefaultUser) Roles() []string                  { return u.roles }
+func (u *DefaultUser) ID() string               { return u.id }
+func (u *DefaultUser) Name() string             { return u.name }
+func (u *DefaultUser) Roles() []string          { return u.roles }
 func (u *DefaultUser) Metadata() map[string]any { return u.metadata }
 
 func (u *DefaultUser) HasRole(role string) bool {

@@ -10,8 +10,8 @@ import (
 
 // fakeStore 记录每个 sessionID 的在场流(用于 ListBySession)。
 type fakeStore struct {
-	mu       sync.Mutex
-	bySess   map[string][]*presence.Presence
+	mu     sync.Mutex
+	bySess map[string][]*presence.Presence
 }
 
 func (s *fakeStore) ListBySession(sid string) []*presence.Presence {
@@ -31,7 +31,7 @@ func (f fakeFinder) Watchers(userID string, _ int) []string {
 
 // fakeNotifier 记录投递。
 type fakeNotifier struct {
-	mu     sync.Mutex
+	mu       sync.Mutex
 	delivers []deliver
 }
 

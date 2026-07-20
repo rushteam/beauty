@@ -21,10 +21,10 @@ type dialConfig struct {
 	// 直连模式
 	direct bool
 
-	registry    discover.Discovery
-	labelFilter *ServiceLabelFilter
-	grpcOpts    []grpc.DialOption
-	timeout     time.Duration
+	registry     discover.Discovery
+	labelFilter  *ServiceLabelFilter
+	grpcOpts     []grpc.DialOption
+	timeout      time.Duration
 	loadBalancer string
 
 	// 地域过滤

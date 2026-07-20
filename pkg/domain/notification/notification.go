@@ -4,6 +4,7 @@
 // 设计要点:
 //   - persistent 标志区分持久通知(存 DB+在线投)与瞬时通知(仅在线投);
 //   - 离线通知按 (userID, seq) 有序存储,游标分页避免重复推送;
+//
 // - 无 read/unread 状态机——删除即消失,简化并发(只删不改)。
 //
 // 与 pkg/router 的分工:Send 时若用户在线(通过 liveSink)即时投递,
@@ -40,12 +41,12 @@ type LiveSink func(userID string, n *Notification) bool
 
 // Store 管理持久通知的存储、在线投递与游标拉取。
 type Store struct {
-	mu       sync.Mutex
-	byUser   map[string][]*Notification // 每用户的持久通知(按 seq 有序)
-	byUserSeq map[string]int64          // 每用户下一个 seq(单调,不因截断回退)
-	seq      atomic.Int64               // 全局 ID
-	live     LiveSink                   // 在线投递(可 nil)
-	maxPerUser int                      // 每用户最大保留数(超出删最旧)
+	mu         sync.Mutex
+	byUser     map[string][]*Notification // 每用户的持久通知(按 seq 有序)
+	byUserSeq  map[string]int64           // 每用户下一个 seq(单调,不因截断回退)
+	seq        atomic.Int64               // 全局 ID
+	live       LiveSink                   // 在线投递(可 nil)
+	maxPerUser int                        // 每用户最大保留数(超出删最旧)
 }
 
 // Option 配置 Store。
@@ -75,6 +76,7 @@ func New(live LiveSink, opts ...Option) *Store {
 // Send 发送一条通知。
 //   - persistent=true:存库 + 若在线则实时投(在线投失败也不影响存储);
 //   - persistent=false:仅尝试在线投,不存库。投失败即丢弃(瞬时通知)。
+//
 // 返回存库后的 Notification(ID/Seq 已填充),未存库则返回 nil。
 func (s *Store) Send(ctx context.Context, n *Notification) *Notification {
 	n.ID = s.seq.Add(1)

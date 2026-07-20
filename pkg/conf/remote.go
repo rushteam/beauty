@@ -15,9 +15,9 @@ import (
 // remoteLoader 使用 ConfigCenter 拉取配置，并通过 Watch 实现热加载。
 // Unmarshal 每次都从最新内容重新解析，保证热加载后的调用拿到新值。
 type remoteLoader struct {
-	cc      ConfigCenter
-	key     string
-	format  string // yaml / json / toml …
+	cc     ConfigCenter
+	key    string
+	format string // yaml / json / toml …
 
 	mu      sync.RWMutex
 	current string // 最新原始内容

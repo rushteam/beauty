@@ -7,10 +7,10 @@ import (
 )
 
 type Config struct {
-	Addr      string `mapstructure:"addr"`
-	Token     string `mapstructure:"token" schema:"token"`
-	Namespace string `mapstructure:"namespace" schema:"namespace"`
-	Partition string `mapstructure:"partition" schema:"partition"`
+	Addr       string `mapstructure:"addr"`
+	Token      string `mapstructure:"token" schema:"token"`
+	Namespace  string `mapstructure:"namespace" schema:"namespace"`
+	Partition  string `mapstructure:"partition" schema:"partition"`
 	Datacenter string `mapstructure:"datacenter" schema:"datacenter"`
 }
 

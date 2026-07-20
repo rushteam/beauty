@@ -45,9 +45,9 @@ func FromContext(ctx context.Context) Limiter {
 
 // bucket 单个 key 的令牌桶状态。
 type bucket struct {
-	mu       sync.Mutex
-	tokens   float64       // 当前令牌数(可小数,因补速率是连续的)
-	last      time.Time
+	mu     sync.Mutex
+	tokens float64 // 当前令牌数(可小数,因补速率是连续的)
+	last   time.Time
 }
 
 // TokenBucket 令牌桶限流器:固定速率补令牌,允许突发(初始满桶)。
@@ -161,14 +161,14 @@ func (tb *TokenBucket) Stop() {
 
 // SlidingWindow 滑动窗口限流器:在 window 时长内最多 limit 次请求,精确计数。
 type SlidingWindow struct {
-	limit     int
-	window    time.Duration
-	maxIdle   time.Duration
+	limit      int
+	window     time.Duration
+	maxIdle    time.Duration
 	gcInterval time.Duration
-	mu        sync.Mutex
-	wins      map[string][]time.Time
-	stop      chan struct{}
-	once      sync.Once
+	mu         sync.Mutex
+	wins       map[string][]time.Time
+	stop       chan struct{}
+	once       sync.Once
 }
 
 // NewSlidingWindow 创建滑动窗口限流器。limit<=0 或 window<=0 视为不限。

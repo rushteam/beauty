@@ -66,10 +66,12 @@ func WithoutMetricRuntime() MetricOption {
 // SDK 默认即为 exemplar.TraceBasedFilter（仅在当前处于已采样的 trace 上下文时记录），
 // 因此通常无需显式设置；OTLP exporter 默认会导出 exemplar（Prometheus 需以 OpenMetrics
 // 格式抓取）。可用本选项改为：
+//
 //   - exemplar.AlwaysOnFilter  —— 总是记录（无 trace 也记，基数更高）
+//
 //   - exemplar.AlwaysOffFilter —— 完全关闭 exemplar
 //
-//	WithMetricExemplarFilter(exemplar.AlwaysOffFilter)
+//     WithMetricExemplarFilter(exemplar.AlwaysOffFilter)
 //
 // 也可通过标准环境变量 OTEL_METRICS_EXEMPLAR_FILTER（trace_based / always_on / always_off）配置。
 func WithMetricExemplarFilter(filter exemplar.Filter) MetricOption {

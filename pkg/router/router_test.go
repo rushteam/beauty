@@ -77,7 +77,7 @@ func TestRouter_DeferredBatching(t *testing.T) {
 
 // fakeForwarder 记录跨节点转发调用。
 type fakeForwarder struct {
-	mu   sync.Mutex
+	mu    sync.Mutex
 	calls []forwardCall
 }
 
@@ -114,11 +114,11 @@ func TestRouter_CrossNode_Forward(t *testing.T) {
 	)
 	st := presence.Stream{Mode: 1, Subject: "r"}
 	ids := []presence.ID{
-		{SessionID: "s1", Stream: st, Node: "node-a"},        // 本地
-		{SessionID: "s2", Stream: st, Node: "node-b"},        // 远端
-		{SessionID: "s3", Stream: st, Node: "node-b"},        // 远端(同节点攒批)
-		{SessionID: "s4", Stream: st, Node: "node-c"},        // 远端(另一节点)
-		{SessionID: "s5", Stream: st},                         // Node 空=本地
+		{SessionID: "s1", Stream: st, Node: "node-a"}, // 本地
+		{SessionID: "s2", Stream: st, Node: "node-b"}, // 远端
+		{SessionID: "s3", Stream: st, Node: "node-b"}, // 远端(同节点攒批)
+		{SessionID: "s4", Stream: st, Node: "node-c"}, // 远端(另一节点)
+		{SessionID: "s5", Stream: st},                 // Node 空=本地
 	}
 	n := r.SendToPresenceIDs(ids, Message{Data: []byte("x")})
 	// 本地 2(s1+s5)+ 远端 3(s2+s3+s4)= 5。

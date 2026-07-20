@@ -8,9 +8,9 @@ import (
 // httpResponse 是写给客户端的 JSON 结构。
 // cause 字段永远不序列化，确保内部错误不泄露。
 type httpResponse struct {
-	Code    int           `json:"code"`
-	Message string        `json:"message"`
-	Details []detailJSON  `json:"details,omitempty"`
+	Code    int          `json:"code"`
+	Message string       `json:"message"`
+	Details []detailJSON `json:"details,omitempty"`
 }
 
 type detailJSON struct {

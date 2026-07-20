@@ -70,14 +70,14 @@ type Encoder func(n Notification) []byte
 
 // Dispatcher 订阅 presence 事件并分发 status notification。
 type Dispatcher struct {
-	store    presenceStore
-	finders  []watcherFinder // 多个图谱可叠加(如好友 + 关注分属不同图)
-	notify   Notifier
-	encode   Encoder
+	store   presenceStore
+	finders []watcherFinder // 多个图谱可叠加(如好友 + 关注分属不同图)
+	notify  Notifier
+	encode  Encoder
 
 	// 用户 → 当前所在流集合(用于判断 online/offline 转换)。
-	mu       sync.Mutex
-	online   map[string]map[presence.Stream]struct{}
+	mu     sync.Mutex
+	online map[string]map[presence.Stream]struct{}
 }
 
 // Option 配置 Dispatcher。

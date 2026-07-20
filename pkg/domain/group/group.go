@@ -30,20 +30,20 @@ import (
 
 // 角色常量(复用 relationship 的状态编码,语义别名)。
 const (
-	RoleMember = relationship.StateActive   // 普通成员
-	RoleAdmin  = relationship.StateAdmin    // 管理员
-	RoleOwner  = relationship.StateOwner    // 拥有者(唯一)
+	RoleMember  = relationship.StateActive  // 普通成员
+	RoleAdmin   = relationship.StateAdmin   // 管理员
+	RoleOwner   = relationship.StateOwner   // 拥有者(唯一)
 	RolePending = relationship.StatePending // 申请中(待审核)
 )
 
 // Group 一个群组实体。
 type Group struct {
-	ID          string
-	Name        string
-	OwnerID     string
+	ID           string
+	Name         string
+	OwnerID      string
 	Announcement string
-	MaxMembers  int
-	CreatedAt   int64
+	MaxMembers   int
+	CreatedAt    int64
 }
 
 // Store 管理群组集合及其成员关系。
@@ -54,10 +54,10 @@ type Store struct {
 
 // groupState 一个群组的可变状态:实体 + 成员图 + banlist。
 type groupState struct {
-	mu      sync.RWMutex
-	info    Group
-	graph   *relationship.Graph // source=groupID, dest=userID, State=role
-	banned  map[string]int64    // userID -> bannedAt(unix nano)
+	mu     sync.RWMutex
+	info   Group
+	graph  *relationship.Graph // source=groupID, dest=userID, State=role
+	banned map[string]int64    // userID -> bannedAt(unix nano)
 }
 
 // Option 配置 Store(预留,目前无选项)。
@@ -515,17 +515,17 @@ func (gs *groupState) checkPrivilegeLocked(actor string, required int) error {
 
 // 错误定义。
 var (
-	ErrExists          = errors.New("group: already exists")
-	ErrNotFound        = errors.New("group: not found")
-	ErrAlreadyMember   = errors.New("group: already a member")
-	ErrNotMember       = errors.New("group: not a member")
-	ErrNotPending      = errors.New("group: not a pending request")
-	ErrFull            = errors.New("group: max members reached")
-	ErrBanned          = errors.New("group: user is banned")
-	ErrNotBanned       = errors.New("group: user is not banned")
+	ErrExists           = errors.New("group: already exists")
+	ErrNotFound         = errors.New("group: not found")
+	ErrAlreadyMember    = errors.New("group: already a member")
+	ErrNotMember        = errors.New("group: not a member")
+	ErrNotPending       = errors.New("group: not a pending request")
+	ErrFull             = errors.New("group: max members reached")
+	ErrBanned           = errors.New("group: user is banned")
+	ErrNotBanned        = errors.New("group: user is not banned")
 	ErrOwnerCannotLeave = errors.New("group: owner cannot leave, transfer first")
-	ErrNoPermission    = errors.New("group: no permission")
-	ErrCannotKickPeer  = errors.New("group: cannot kick a peer of equal or higher role")
+	ErrNoPermission     = errors.New("group: no permission")
+	ErrCannotKickPeer   = errors.New("group: cannot kick a peer of equal or higher role")
 )
 
 // String 便于日志。

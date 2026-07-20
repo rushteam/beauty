@@ -57,12 +57,12 @@ func init() {
 
 // 快捷构造函数，对应每个预定义码
 
-func InvalidArgument(msg string) *Status  { return New(CodeInvalidArgument, msg) }
-func Unauthenticated(msg string) *Status  { return New(CodeUnauthenticated, msg) }
-func Forbidden(msg string) *Status        { return New(CodeForbidden, msg) }
-func NotFound(msg string) *Status         { return New(CodeNotFound, msg) }
-func Conflict(msg string) *Status         { return New(CodeConflict, msg) }
-func TooManyRequests(msg string) *Status  { return New(CodeTooManyRequests, msg) }
-func Internal(msg string) *Status         { return New(CodeInternal, msg) }
-func Unimplemented(msg string) *Status    { return New(CodeUnimplemented, msg) }
-func Unavailable(msg string) *Status      { return New(CodeUnavailable, msg) }
+func InvalidArgument(msg string) *Status { return New(CodeInvalidArgument, msg) }
+func Unauthenticated(msg string) *Status { return New(CodeUnauthenticated, msg) }
+func Forbidden(msg string) *Status       { return New(CodeForbidden, msg) }
+func NotFound(msg string) *Status        { return New(CodeNotFound, msg) }
+func Conflict(msg string) *Status        { return New(CodeConflict, msg) }
+func TooManyRequests(msg string) *Status { return New(CodeTooManyRequests, msg) }
+func Internal(msg string) *Status        { return New(CodeInternal, msg) }
+func Unimplemented(msg string) *Status   { return New(CodeUnimplemented, msg) }
+func Unavailable(msg string) *Status     { return New(CodeUnavailable, msg) }

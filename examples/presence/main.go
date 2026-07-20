@@ -54,9 +54,9 @@ func main() {
 			names = append(names, m.Meta.Username)
 		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"channel":  stream.Subject,
-			"count":    len(members),
-			"members":  names,
+			"channel": stream.Subject,
+			"count":   len(members),
+			"members": names,
 		})
 	})
 

@@ -176,7 +176,7 @@ func TestDBErr_ErrorIsDriver_Stdlib(t *testing.T) {
 // (因为不是 errors.Is 命中),应归为 Unknown——证明 ErrorIsDriver 只认哨兵不认 interface。
 type timeoutErr struct{ msg string }
 
-func (e *timeoutErr) Error() string { return e.msg }
+func (e *timeoutErr) Error() string   { return e.msg }
 func (e *timeoutErr) Timeout() bool   { return true }
 func (e *timeoutErr) Temporary() bool { return true }
 

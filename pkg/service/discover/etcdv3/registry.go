@@ -23,7 +23,6 @@ var mu sync.Mutex
 
 var _ discover.RegistryDiscovery = (*Registry)(nil)
 
-
 func NewRegistry(c *Config) *Registry {
 	key := c.String()
 	mu.Lock()

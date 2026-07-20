@@ -44,11 +44,14 @@ cd contrib/gorm && go test ./...
 | [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding + Fallback/Retry/Metered(OpenAI/Anthropic) | 无(纯 stdlib) |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |
+| [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
+| [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
 
 `contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
-接口,故 `require github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/gorm`、
-`contrib/sqldb`、`contrib/elasticsearch`、`contrib/llm`、`contrib/vector`、`contrib/mcp` 不依赖核心,
-可完全独立使用(其中 `llm`/`vector` 纯标准库、零外部依赖;`mcp` 的 `Service` 结构上满足 `beauty.Service`)。
+接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/authz.Enforcer` 接口——这些都 `require
+github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/gorm`、`contrib/sqldb`、
+`contrib/elasticsearch`、`contrib/llm`、`contrib/vector`、`contrib/mcp` 不依赖核心,可完全独立使用
+(其中 `llm`/`vector` 纯标准库、零外部依赖;`mcp` 的 `Service` 结构上满足 `beauty.Service`)。
 
 ## 版本
 

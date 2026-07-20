@@ -16,6 +16,11 @@
   前缀,零依赖)+ HTTP 中间件 / gRPC 一元拦截器(无主体→401/Unauthenticated、拒绝→403/PermissionDenied,
   action/resource 由 mapper 从请求推导)。复杂策略(ABAC/动态/关系授权)由实现同一 `Enforcer` 的 contrib
   提供(`contrib/casbin`、`contrib/openfga`),调用点不变。`-race` 单测覆盖 RBAC 通配/context/HTTP/gRPC。
+  - **`contrib/casbin`**——用 casbin/v2 实现 `authz.Enforcer`(RBAC 域/继承、ABAC、策略文件/DB adapter)。
+    默认按 Subject 每个角色 Enforce,`WithSubjectID`/`WithMapper` 可调映射。进程内 model+policy 单测,`-race` 通过。
+  - **`contrib/openfga`**——用 OpenFGA(Zanzibar 式 ReBAC)实现 `authz.Enforcer`,经 Check API 判定细粒度
+    关系权限;默认映射 user/relation/object,`WithMapper` 可调。httptest 打桩单测,`-race` 通过。
+  - casbin/openfga 实现核心 `pkg/authz.Enforcer` 故 `require github.com/rushteam/beauty`(核心 v0.2.0 起含 authz)。
 - **syncx**：新增 `pkg/syncx`——一组便捷的并发原语(泛型,仅依赖 stdlib + `golang.org/x/sync`),补齐
   常被手搓、易写错的模式:`Map`/`ForEach`(带并发上限 + 错误聚合,首错取消其余)、`SingleFlight`
   (相同 key 去重合并,防缓存击穿)、`Batcher`(按大小/时间 flush 批处理)、`Debounce`/`Throttle`

@@ -6,7 +6,7 @@
 // 定位:这是 pkg/hls(自研播放列表 origin)+ pkg/media/remux(自研 FLV→TS)之外的
 // **另一条 HLS 路径**——三者并存,按需选:
 //   - 要最薄、零第三方 HLS 依赖、够用的直播:pkg/hls + pkg/media/remux;
-//   - 要 LL-HLS/fMP4、经过 mediamtx 同款库打磨的产线级 HLS:本包(gohlslib)。
+//   - 要 LL-HLS/fMP4、产线级 HLS(gohlslib):本包(gohlslib)。
 //
 // 用法(接在 rtmp.Server 后面,Bridge 同时是 rtmp.Handler 与 http.Handler):
 //

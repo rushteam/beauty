@@ -1,22 +1,14 @@
 # gRPC DialContext 简化 API
 
-类似 Polaris 风格的简化拨号 API，提供更简洁的服务发现客户端使用方式。
+简洁的函数式拨号 API，让用户像使用原生 gRPC 一样使用服务发现功能。
 
 ## 概述
 
-`DialContext` API 参考了 `grpc-go-polaris` 的设计理念，提供了一个简洁的函数式 API，让用户可以像使用原生 gRPC 一样简单地使用服务发现功能，同时保持 Beauty 框架的强大特性。
+`DialContext` 用一个函数式 API 把服务发现、负载均衡、路由过滤、熔断封装起来:
+按 target(scheme://service?labels)拨号即可,无需手写 resolver/balancer 组装。
 
-## 设计对比
+## 用法示例
 
-### Polaris 风格
-```go
-conn, err := polaris.DialContext(ctx, "polaris://QuickStartEchoServerGRPC",
-    polaris.WithGRPCDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
-    polaris.WithDisableRouter(),
-)
-```
-
-### Beauty 风格
 ```go
 conn, err := grpcclient.DialContext(ctx, "beauty://v1alpha.Greeter?env=production",
     grpcclient.WithGRPCDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),

@@ -1,6 +1,6 @@
 # live-hls-gohlslib —— RTMP 推流 → gohlslib → LL-HLS
 
-用 [`pkg/media/hlsmux`](../../pkg/media/hlsmux)(基于 mediamtx 同款 `bluenviron/gohlslib`)
+用 [`pkg/media/hlsmux`](../../pkg/media/hlsmux)(基于 `bluenviron/gohlslib`)
 把 RTMP 推流转成 **LL-HLS**。相比自研的 [`pkg/media/remux`](../../pkg/media/remux)(仅 FLV→TS +
 手搓播放列表),这条路径由 gohlslib 负责分片、播放列表(含 LL-HLS `EXT-X-PART`/`PRELOAD-HINT`
 与阻塞式刷新)、fMP4 init 段等全部 HLS 细节。
@@ -24,7 +24,7 @@ ffmpeg -re -stream_loop -1 -i input.mp4 -c:v libx264 -c:a aac -f flv rtmp://loca
 
 | | `pkg/hls` + `pkg/media/remux` | `pkg/media/hlsmux`(本示例) |
 |---|---|---|
-| HLS 实现 | 自研(播放列表/TS 切片手写) | gohlslib(mediamtx 同款库) |
+| HLS 实现 | 自研(播放列表/TS 切片手写) | gohlslib |
 | LL-HLS / fMP4 | pkg/hls 支持 LL-HLS;remux 只产 TS | 原生支持 TS / fMP4 / LL-HLS |
 | 第三方依赖 | 仅 go-astits | gohlslib + mediacommon |
 | 适合 | 最薄、够用、想少依赖 | 要产线级 HLS、经真实播放器打磨 |

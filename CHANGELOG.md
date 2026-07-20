@@ -73,7 +73,7 @@
   WHIP/WHEP、SFU 会议、分片)。单测只验证产出结构,本清单给出可照抄的 ffmpeg 命令 + 真实播放器
   (Safari/hls.js/ffplay)检查点 + 延迟/断流/泄漏红线,上线前照跑。
 - **media/hlsmux**：新增 `pkg/media/hlsmux`——RTMP 采集(H.264+AAC)→ HLS 的主力路径,把 FLV 喂给
-  `bluenviron/gohlslib`(mediamtx 同款库,新增 `gohlslib/v2` + `mediacommon/v2` 依赖),产出产线级
+  `bluenviron/gohlslib`(新增 `gohlslib/v2` + `mediacommon/v2` 依赖),产出产线级
   HLS:MPEG-TS / fMP4 / **LL-HLS(低延迟)**。由 gohlslib 负责分片、播放列表(含 LL-HLS
   `EXT-X-PART`/`PRELOAD-HINT` 与阻塞式刷新)、fMP4 init 段等全部细节。`Bridge` 同时实现
   `rtmp.Handler`(收流)与 `http.Handler`(播放,拿到 SPS/PPS+首关键帧后惰性起 muxer,未就绪回

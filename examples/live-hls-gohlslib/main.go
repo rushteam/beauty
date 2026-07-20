@@ -1,5 +1,5 @@
 // live-hls-gohlslib demo:RTMP 推流 → gohlslib → LL-HLS 播放。展示 pkg/media/hlsmux
-// (基于 mediamtx 同款 bluenviron/gohlslib)这条 HLS 路径:相比自研的 pkg/media/remux,
+// (基于 bluenviron/gohlslib)这条 HLS 路径:相比自研的 pkg/media/remux,
 // 由 gohlslib 负责分片/播放列表/LL-HLS/fMP4 等全部 HLS 细节。
 //
 //	OBS/ffmpeg(推 /live/stream)─▶ rtmp.Server ─▶ hlsmux.Bridge(FLV→gohlslib)

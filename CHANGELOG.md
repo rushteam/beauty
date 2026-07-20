@@ -38,7 +38,10 @@
     provider REST,不引 SDK)。`Client`(Generate/Stream 流式 token)+ `Embedder` 接口;子包
     `llm/openai`(chat + embeddings,BaseURL 可对接兼容网关)、`llm/anthropic`(messages);中间件
     `Fallback`(跨 provider 切换)/`Retry`/`Metered`(用量+延迟回调,接 OTel/账单由你定,故不绑 OTel)。
-    httptest 打桩单测覆盖 Generate/Stream/Embed/Fallback/Metered,`-race` 通过。
+    httptest 打桩单测覆盖 Generate/Stream/Embed/Fallback/Metered,`-race` 通过。多厂商:智谱/Kimi/
+    MiniMax/通义千问(DashScope)/DeepSeek 等 **OpenAI 兼容**端点换 `WithBaseURL` 即用(提供
+    `BaseURL*` 常量);**Azure OpenAI** 用 `NewAzure`(api-key 头 + deployment 路径 + api-version);
+    AWS Bedrock 因 SigV4 + 按模型报文需独立适配(不在本模块)。
   - **`contrib/vector`**——RAG / 语义检索的向量存储抽象(**纯标准库、零外部依赖**)。`Store` 接口
     (Upsert/Query topK/Delete)+ `MemoryStore`(暴力余弦,并发安全,dev/小规模直用)+ `Cosine` 助手;
     配 `contrib/llm` 的 Embedder 搭 RAG,大规模换 pgvector/qdrant 实现同接口。单测覆盖余弦与增查删/降序/混维。

@@ -18,18 +18,36 @@ import (
 
 const defaultBaseURL = "https://api.openai.com/v1"
 
-// Client 实现 llm.Client 与 llm.Embedder。
+// OpenAI 兼容厂商的 BaseURL 预设——这些家都提供 OpenAI 兼容端点,直接
+// New(key, WithBaseURL(...)) 即可,无需专门 provider。
+const (
+	BaseURLOpenAI    = "https://api.openai.com/v1"
+	BaseURLDeepSeek  = "https://api.deepseek.com/v1"
+	BaseURLMoonshot  = "https://api.moonshot.cn/v1"                        // Kimi / 月之暗面
+	BaseURLZhipu     = "https://open.bigmodel.cn/api/paas/v4"              // 智谱 GLM
+	BaseURLDashScope = "https://dashscope.aliyuncs.com/compatible-mode/v1" // 阿里通义千问
+	BaseURLMiniMax   = "https://api.minimax.chat/v1"                       // MiniMax
+)
+
+// Client 实现 llm.Client 与 llm.Embedder。支持 OpenAI、OpenAI 兼容厂商(换 BaseURL)、
+// 以及 Azure OpenAI(见 NewAzure)。
 type Client struct {
 	apiKey     string
 	baseURL    string
 	embedModel string
 	hc         *http.Client
+
+	// 认证与寻址(默认 OpenAI 语义;Azure 走 api-key 头 + deployment 路径 + api-version)
+	keyHeader  string // 默认 "Authorization"
+	keyPrefix  string // 默认 "Bearer "
+	deployment string // 非空 → Azure 部署名,URL 走 /openai/deployments/<dep>/...
+	apiVersion string // 非空 → 追加 ?api-version=<v>(Azure)
 }
 
 // Option 配置 Client。
 type Option func(*Client)
 
-// WithBaseURL 覆盖 API 基地址(默认 https://api.openai.com/v1)。
+// WithBaseURL 覆盖 API 基地址(默认 https://api.openai.com/v1;兼容厂商用上面的 BaseURL* 常量)。
 func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = strings.TrimRight(u, "/") } }
 
 // WithHTTPClient 使用自定义 *http.Client(超时、代理、otelhttp transport 等)。
@@ -38,13 +56,40 @@ func WithHTTPClient(hc *http.Client) Option { return func(c *Client) { c.hc = hc
 // WithEmbedModel 设置 Embed 使用的模型(默认 text-embedding-3-small)。
 func WithEmbedModel(model string) Option { return func(c *Client) { c.embedModel = model } }
 
-// New 创建 OpenAI 客户端。
+// WithAPIKeyHeader 自定义认证头与前缀(默认 "Authorization" + "Bearer ")。
+// Azure 用 ("api-key", "");某些网关可能用别的头。
+func WithAPIKeyHeader(header, prefix string) Option {
+	return func(c *Client) { c.keyHeader, c.keyPrefix = header, prefix }
+}
+
+// WithAzure 配置 Azure OpenAI 寻址:deployment 部署名 + api-version。
+func WithAzure(deployment, apiVersion string) Option {
+	return func(c *Client) { c.deployment, c.apiVersion = deployment, apiVersion }
+}
+
+// New 创建客户端。默认 OpenAI 认证(Authorization: Bearer <key>)。
 func New(apiKey string, opts ...Option) *Client {
-	c := &Client{apiKey: apiKey, baseURL: defaultBaseURL, hc: http.DefaultClient}
+	c := &Client{
+		apiKey: apiKey, baseURL: defaultBaseURL, hc: http.DefaultClient,
+		keyHeader: "Authorization", keyPrefix: "Bearer ",
+	}
 	for _, o := range opts {
 		o(c)
 	}
 	return c
+}
+
+// NewAzure 创建 Azure OpenAI 客户端。endpoint 形如 https://<resource>.openai.azure.com,
+// deployment 是部署名,apiVersion 如 "2024-10-21"。请求会走
+// <endpoint>/openai/deployments/<deployment>/{chat/completions,embeddings}?api-version=<v>,
+// 认证用 api-key 头。
+func NewAzure(endpoint, deployment, apiVersion, apiKey string, opts ...Option) *Client {
+	base := []Option{
+		WithBaseURL(endpoint),
+		WithAPIKeyHeader("api-key", ""),
+		WithAzure(deployment, apiVersion),
+	}
+	return New(apiKey, append(base, opts...)...)
 }
 
 var (
@@ -68,17 +113,31 @@ func buildMessages(req llm.Request) []llm.Message {
 	return append([]llm.Message{{Role: llm.System, Content: req.System}}, req.Messages...)
 }
 
-func (c *Client) post(ctx context.Context, path string, body any) (*http.Response, error) {
+// endpoint 按 OpenAI / Azure 语义构造某个 API 的完整 URL。kind 如 "chat/completions"、"embeddings"。
+func (c *Client) endpoint(kind string) string {
+	var u string
+	if c.deployment != "" { // Azure
+		u = c.baseURL + "/openai/deployments/" + c.deployment + "/" + kind
+	} else {
+		u = c.baseURL + "/" + kind
+	}
+	if c.apiVersion != "" {
+		u += "?api-version=" + c.apiVersion
+	}
+	return u
+}
+
+func (c *Client) post(ctx context.Context, kind string, body any) (*http.Response, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(kind), bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set(c.keyHeader, c.keyPrefix+c.apiKey)
 	return c.hc.Do(httpReq)
 }
 
@@ -89,7 +148,7 @@ func apiError(resp *http.Response) error {
 
 // Generate 实现 llm.Client。
 func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
-	resp, err := c.post(ctx, "/chat/completions", chatReq{
+	resp, err := c.post(ctx, "chat/completions", chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
 	})
@@ -128,7 +187,7 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,
 	}
-	resp, err := c.post(ctx, "/chat/completions", body)
+	resp, err := c.post(ctx, "chat/completions", body)
 	if err != nil {
 		return nil, fmt.Errorf("openai: request: %w", err)
 	}
@@ -184,7 +243,7 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 	if model == "" {
 		model = "text-embedding-3-small"
 	}
-	resp, err := c.post(ctx, "/embeddings", map[string]any{"model": model, "input": texts})
+	resp, err := c.post(ctx, "embeddings", map[string]any{"model": model, "input": texts})
 	if err != nil {
 		return nil, fmt.Errorf("openai: embed request: %w", err)
 	}

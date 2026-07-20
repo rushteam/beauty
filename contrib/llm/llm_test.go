@@ -89,6 +89,50 @@ func TestOpenAI_Embed(t *testing.T) {
 	}
 }
 
+func TestOpenAI_Azure(t *testing.T) {
+	var gotFullPath, gotAPIKey, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotFullPath = r.URL.Path + "?" + r.URL.RawQuery
+		gotAPIKey = r.Header.Get("api-key")
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"model":"gpt-4o","choices":[{"message":{"content":"az"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	defer srv.Close()
+
+	c := openai.NewAzure(srv.URL, "my-deploy", "2024-10-21", "azkey")
+	resp, err := c.Generate(context.Background(), llm.Request{Model: "gpt-4o", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("azure generate: %v", err)
+	}
+	if resp.Content != "az" {
+		t.Fatalf("content = %q", resp.Content)
+	}
+	if gotAPIKey != "azkey" || gotAuth != "" {
+		t.Fatalf("Azure 应用 api-key 头(得 %q),不用 Authorization(得 %q)", gotAPIKey, gotAuth)
+	}
+	if gotFullPath != "/openai/deployments/my-deploy/chat/completions?api-version=2024-10-21" {
+		t.Fatalf("Azure URL = %q", gotFullPath)
+	}
+}
+
+// 兼容厂商:换 BaseURL 即用同一 openai provider(此处以 Kimi 的 BaseURL 常量为例走打桩)。
+func TestOpenAI_CompatibleBaseURL(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"model":"moonshot-v1","choices":[{"message":{"content":"ok"}}],"usage":{}}`)
+	}))
+	defer srv.Close()
+	// 生产时用 openai.BaseURLMoonshot / BaseURLZhipu / ... ;测试用打桩地址,验证是同一条 Bearer 认证路径。
+	c := openai.New("kimikey", openai.WithBaseURL(srv.URL))
+	if _, err := c.Generate(context.Background(), llm.Request{Model: "moonshot-v1", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if gotAuth != "Bearer kimikey" {
+		t.Fatalf("兼容厂商应走 Bearer 认证, got %q", gotAuth)
+	}
+}
+
 // ---- Anthropic ----
 
 func TestAnthropic_GenerateAndStream(t *testing.T) {

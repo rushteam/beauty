@@ -51,11 +51,32 @@ cli := llm.Metered(
 - **`Retry(c, n, delay)`**:重试建立阶段错误(流式已开始产出则不重试)。
 - **`Metered(c, hook)`**:生成完成后回调用量与耗时——接哪(OTel/日志/账单)由你定,故本包不绑 OTel。
 
-## Provider
+## 多厂商适配
 
-- **`llm/openai`**:`/v1/chat/completions` + `/v1/embeddings`,`WithBaseURL` 可对接 OpenAI 兼容网关
-  (本地模型、together、azure)。实现 `llm.Client` + `llm.Embedder`。
+**大部分厂商提供 OpenAI 兼容端点,换 `WithBaseURL` 即用同一 `openai` provider,无需专门适配:**
+
+```go
+openai.New(key, openai.WithBaseURL(openai.BaseURLZhipu))     // 智谱 GLM
+openai.New(key, openai.WithBaseURL(openai.BaseURLMoonshot))  // Kimi / 月之暗面
+openai.New(key, openai.WithBaseURL(openai.BaseURLMiniMax))   // MiniMax
+openai.New(key, openai.WithBaseURL(openai.BaseURLDashScope)) // 阿里通义千问(compatible-mode)
+openai.New(key, openai.WithBaseURL(openai.BaseURLDeepSeek))  // DeepSeek
+// 其它 OpenAI 兼容网关 / 本地模型(ollama/vLLM 等):自填 WithBaseURL 即可
+```
+
+| 厂商 | 接法 |
+|---|---|
+| OpenAI / 智谱 / Kimi / MiniMax / 通义千问 / DeepSeek / 兼容网关 | `openai.New(key, WithBaseURL(...))`(见上,已带常量) |
+| **Azure OpenAI** | `openai.NewAzure(endpoint, deployment, apiVersion, key)`(api-key 头 + deployment 路径 + api-version) |
+| **Anthropic** | `anthropic.New(key)`(原生 Messages API) |
+| **AWS Bedrock** | 需独立适配(SigV4 签名 + 按模型报文),不在本模块——可另起 `llm/bedrock` |
+
+- **`llm/openai`**:`chat/completions` + `embeddings`;`WithBaseURL` 对接兼容厂商,`NewAzure`/`WithAzure`/
+  `WithAPIKeyHeader` 覆盖 Azure 及自定义认证。实现 `llm.Client` + `llm.Embedder`。
 - **`llm/anthropic`**:`/v1/messages`(`x-api-key` + `anthropic-version`)。实现 `llm.Client`。
+
+> 认证是否兼容:上述"OpenAI 兼容"厂商都用 `Authorization: Bearer <key>`,故 `openai` provider 直接可用;
+> Azure 用 `api-key` 头 + 独特 URL,故单独 `NewAzure`;Bedrock 用 AWS SigV4,机制完全不同,需专门实现。
 
 ## 边界
 

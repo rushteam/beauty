@@ -10,6 +10,10 @@
 ## [Unreleased]
 
 ### Added
+- **syncx**：新增 `pkg/syncx`——一组便捷的并发原语(泛型,仅依赖 stdlib + `golang.org/x/sync`),补齐
+  常被手搓、易写错的模式:`Map`/`ForEach`(带并发上限 + 错误聚合,首错取消其余)、`SingleFlight`
+  (相同 key 去重合并,防缓存击穿)、`Batcher`(按大小/时间 flush 批处理)、`Debounce`/`Throttle`
+  (去抖/限频)、`Future`/`Async`(异步跑 + Await 取结果,panic 转错误)。全部 `-race` 单测通过。
 - **buildinfo**：新增 `pkg/buildinfo`——运行时暴露构建信息(版本/commit/构建时间/Go 版本/模块/dirty),
   用于 `/version` 端点、启动日志、诊断。零依赖(仅标准库)。两来源自动合并:ldflags 注入的包级变量
   (`-X .../buildinfo.version=...`)优先,缺失项用 `runtime/debug.ReadBuildInfo` 的 VCS 元数据回退。

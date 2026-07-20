@@ -108,6 +108,7 @@ app.Start(ctx) // 阻塞到收到信号;各服务一并停机
 | 服务发现 | `pkg/service/discover`,客户端 `pkg/client/{grpcclient,http}` |
 | 分布式锁 / 选主 | `pkg/dlock`(etcd、consul、redis、k8s) |
 | TTL-KV 与原语 | `pkg/kvstore`(redis、etcd)→ counter / cooldown / idempotency |
+| 并发 | `pkg/syncx`(Map/ForEach、SingleFlight、Batcher、Debounce/Throttle、Future)、`pkg/xgo`、`pkg/safe`、`pkg/chanx`、`pkg/keyedmutex` |
 | 韧性 | `pkg/ratelimit`、`pkg/governance/{circuitbreaker,overloadctrl}`、`pkg/backoff` |
 | 实时 | `pkg/ws`、`pkg/sse`、`pkg/stream`、`pkg/quic`、`pkg/gameloop`、`pkg/spatial`、`pkg/presence` |
 | 媒体 | `pkg/media/rtmp`、`pkg/hls`、`pkg/media/hlsmux`、`pkg/media/webrtc`(含 `sfu`)、`pkg/media`(hub/supervisor/metrics) |

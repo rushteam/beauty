@@ -110,6 +110,7 @@ app.Start(ctx) // blocks until signal; drains all services
 | Service discovery | `pkg/service/discover`, clients `pkg/client/{grpcclient,http}` |
 | Distributed lock / leader | `pkg/dlock` (etcd, consul, redis, k8s) |
 | TTL-KV & primitives | `pkg/kvstore` (redis, etcd) → counter / cooldown / idempotency |
+| Concurrency | `pkg/syncx` (Map/ForEach, SingleFlight, Batcher, Debounce/Throttle, Future), `pkg/xgo`, `pkg/safe`, `pkg/chanx`, `pkg/keyedmutex` |
 | Resilience | `pkg/ratelimit`, `pkg/governance/{circuitbreaker,overloadctrl}`, `pkg/backoff` |
 | Realtime | `pkg/ws`, `pkg/sse`, `pkg/stream`, `pkg/quic`, `pkg/gameloop`, `pkg/spatial`, `pkg/presence` |
 | Media | `pkg/media/rtmp`, `pkg/hls`, `pkg/media/hlsmux`, `pkg/media/webrtc` (+ `sfu`), `pkg/media` (hub/supervisor/metrics) |

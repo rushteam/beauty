@@ -41,10 +41,13 @@ cd contrib/gorm && go test ./...
 | [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(consumer group;at-least-once,提交后确认) | segmentio/kafka-go |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
+| [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding + Fallback/Retry/Metered(OpenAI/Anthropic) | 无(纯 stdlib) |
+| [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 
 `contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
 接口,故 `require github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/gorm`、
-`contrib/sqldb`、`contrib/elasticsearch` 不依赖核心,可完全独立使用。
+`contrib/sqldb`、`contrib/elasticsearch`、`contrib/llm`、`contrib/vector` 不依赖核心,可完全独立
+使用(其中 `llm`/`vector` 纯标准库、零外部依赖)。
 
 ## 版本
 

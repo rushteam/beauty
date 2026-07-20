@@ -34,6 +34,14 @@
   - **`contrib/natsjs`**——`pkg/mq` 的 NATS **JetStream** 绑定,持久化 + **at-least-once**:`EnsureStream` 建流、
     Publish 落盘、`mq.WithGroup`→durable consumer(竞争、断线续)/ 不设组 ephemeral(扇出)、AckExplicit
     (成功 Ack / 失败 Nak 重投)。内嵌开启 JetStream 的 `nats-server` 做真实往返单测(先发后订的持久化、Nak 重投),`-race` 通过。
+  - **`contrib/llm`**——面向 AI 应用的 provider 无关 LLM 客户端(**纯标准库、零外部依赖**,HTTP 直连
+    provider REST,不引 SDK)。`Client`(Generate/Stream 流式 token)+ `Embedder` 接口;子包
+    `llm/openai`(chat + embeddings,BaseURL 可对接兼容网关)、`llm/anthropic`(messages);中间件
+    `Fallback`(跨 provider 切换)/`Retry`/`Metered`(用量+延迟回调,接 OTel/账单由你定,故不绑 OTel)。
+    httptest 打桩单测覆盖 Generate/Stream/Embed/Fallback/Metered,`-race` 通过。
+  - **`contrib/vector`**——RAG / 语义检索的向量存储抽象(**纯标准库、零外部依赖**)。`Store` 接口
+    (Upsert/Query topK/Delete)+ `MemoryStore`(暴力余弦,并发安全,dev/小规模直用)+ `Cosine` 助手;
+    配 `contrib/llm` 的 Embedder 搭 RAG,大规模换 pgvector/qdrant 实现同接口。单测覆盖余弦与增查删/降序/混维。
   - **`contrib/sqldb`**——`database/sql` 读写分离 + OTel,配合 **sqlc**(生成的 `Queries` 吃 `DBTX`,本模块
     `Writer()`/`Reader()` 即 `DBTX`)/ sqlx / 手写 SQL。`Open`(主 + 多副本,otelsql 埋点、连接池)、`Writer()`
     (主)/`Reader()`(副本轮询,无副本回退主)/`Primary()`(开事务/迁移)/`Ping`/`Close`;`RW()` 自动路由

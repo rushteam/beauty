@@ -2,6 +2,8 @@ module github.com/rushteam/beauty/contrib/mcp
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require github.com/modelcontextprotocol/go-sdk v1.6.1
 
 require (

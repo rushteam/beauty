@@ -2,6 +2,8 @@ module github.com/rushteam/beauty/contrib/sqldb
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	github.com/XSAM/otelsql v0.43.0
 	modernc.org/sqlite v1.54.0

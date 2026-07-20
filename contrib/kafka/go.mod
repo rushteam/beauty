@@ -2,6 +2,8 @@ module github.com/rushteam/beauty/contrib/kafka
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	github.com/rushteam/beauty v0.1.0
 	github.com/segmentio/kafka-go v0.4.51

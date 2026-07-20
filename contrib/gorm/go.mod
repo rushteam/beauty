@@ -2,6 +2,8 @@ module github.com/rushteam/beauty/contrib/gorm
 
 go 1.26.0
 
+toolchain go1.26.5
+
 require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1

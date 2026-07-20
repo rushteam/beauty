@@ -116,7 +116,7 @@ app.Start(ctx) // 阻塞到收到信号;各服务一并停机
 | 一致性 | `pkg/saga`、`pkg/txn`、`pkg/idempotency` |
 | 可观测 | `pkg/service/telemetry`、`pkg/service/logger`、`pkg/buildinfo`、`pkg/service/pprof` |
 | 横向扩展 | `pkg/shard`(一致性哈希路由 + 反向代理) |
-| 鉴权 | `pkg/middleware/auth`、`pkg/token` |
+| 鉴权 | `pkg/middleware/auth`(认证)、`pkg/authz`(授权:RBAC + HTTP/gRPC 中间件)、`pkg/token` |
 | 领域 / 游戏 | `pkg/{leaderboard,matchmaker,leveling,questlog,versus,tally,reddot,...}` |
 
 细节见 [`docs/`](docs) 与可运行示例 [`examples/`](examples)。

@@ -10,6 +10,12 @@
 ## [Unreleased]
 
 ### Added
+- **authz**：新增 `pkg/authz`——授权机制,补齐"只认证不授权"的空白(在 `middleware/auth`/`token`
+  确认身份+角色之上,判"能否对某资源做某动作")。`Subject`(id/角色/属性,放 context)+ `Enforcer`
+  接口(`Authorize(sub,action,resource)`→nil/ErrDenied)+ 内置 **RBAC**(`Grant` + 通配 `*` / `/*`
+  前缀,零依赖)+ HTTP 中间件 / gRPC 一元拦截器(无主体→401/Unauthenticated、拒绝→403/PermissionDenied,
+  action/resource 由 mapper 从请求推导)。复杂策略(ABAC/动态/关系授权)由实现同一 `Enforcer` 的 contrib
+  提供(`contrib/casbin`、`contrib/openfga`),调用点不变。`-race` 单测覆盖 RBAC 通配/context/HTTP/gRPC。
 - **syncx**：新增 `pkg/syncx`——一组便捷的并发原语(泛型,仅依赖 stdlib + `golang.org/x/sync`),补齐
   常被手搓、易写错的模式:`Map`/`ForEach`(带并发上限 + 错误聚合,首错取消其余)、`SingleFlight`
   (相同 key 去重合并,防缓存击穿)、`Batcher`(按大小/时间 flush 批处理)、`Debounce`/`Throttle`

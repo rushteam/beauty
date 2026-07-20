@@ -118,7 +118,7 @@ app.Start(ctx) // blocks until signal; drains all services
 | Consistency | `pkg/saga`, `pkg/txn`, `pkg/idempotency` |
 | Observability | `pkg/service/telemetry`, `pkg/service/logger`, `pkg/buildinfo`, `pkg/service/pprof` |
 | Scale-out | `pkg/shard` (consistent-hash routing + reverse proxy) |
-| Auth | `pkg/middleware/auth`, `pkg/token` |
+| Auth | `pkg/middleware/auth` (authn), `pkg/authz` (authz: RBAC + HTTP/gRPC middleware), `pkg/token` |
 | Domain / game | `pkg/{leaderboard,matchmaker,leveling,questlog,versus,tally,reddot,...}` |
 
 See [`docs/`](docs) and [`examples/`](examples) for details and runnable demos.

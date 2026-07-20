@@ -1,8 +1,22 @@
+<div align="center">
+
 # Beauty
 
-> A batteries-included Go microservices framework — compose HTTP / gRPC / cron / realtime / media services under one lifecycle, with config, discovery, resilience, messaging and observability built in.
+**A batteries-included Go microservices framework**
 
-English | [中文](README-CN.md)
+Compose HTTP · gRPC · cron · realtime · media services under one lifecycle —
+config, discovery, resilience, messaging and observability built in.
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/rushteam/beauty.svg)](https://pkg.go.dev/github.com/rushteam/beauty)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rushteam/beauty)](https://goreportcard.com/report/github.com/rushteam/beauty)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**English** · [中文](README-CN.md)
+
+</div>
+
+---
 
 Beauty gives you a small core (`beauty.New(...).Start(ctx)`) that runs any number of
 services under a single graceful lifecycle, plus a broad set of **mechanisms, not policy**:

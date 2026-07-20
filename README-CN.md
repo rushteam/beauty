@@ -1,8 +1,22 @@
+<div align="center">
+
 # Beauty
 
-> 开箱即用的 Go 微服务框架 —— 用一套生命周期编排 HTTP / gRPC / 定时 / 实时 / 媒体等服务,内建配置、发现、韧性、消息与可观测。
+**开箱即用的 Go 微服务框架**
 
-[English](README.md) | 中文
+用一套生命周期编排 HTTP · gRPC · 定时 · 实时 · 媒体等服务 ——
+内建配置、发现、韧性、消息与可观测。
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/rushteam/beauty.svg)](https://pkg.go.dev/github.com/rushteam/beauty)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rushteam/beauty)](https://goreportcard.com/report/github.com/rushteam/beauty)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+[English](README.md) · **中文**
+
+</div>
+
+---
 
 Beauty 有一个很小的核心(`beauty.New(...).Start(ctx)`),把任意多个服务放在同一套优雅停机的
 生命周期下运行;并提供一大批**机制而非策略**的能力包——每个包只解决一个问题、不侵入你的业务。

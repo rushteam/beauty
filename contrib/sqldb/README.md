@@ -8,7 +8,8 @@
 go get github.com/rushteam/beauty/contrib/sqldb@latest
 ```
 
-> 端到端可运行样例(sqlc 生成代码 + 读写分离,sqlite 免真库):[`example/`](example)。
+> 可运行样例(sqlite 免真库):[`example/`](example)(sqlc + 读写分离)、
+> [`example/outbox/`](example/outbox)(事务性发件箱模式,"改库+发消息"原子性)。
 
 ## 配合 sqlc(推荐:显式读写句柄)
 

@@ -42,6 +42,10 @@
     MiniMax/通义千问(DashScope)/DeepSeek 等 **OpenAI 兼容**端点换 `WithBaseURL` 即用(提供
     `BaseURL*` 常量);**Azure OpenAI** 用 `NewAzure`(api-key 头 + deployment 路径 + api-version);
     AWS Bedrock 因 SigV4 + 按模型报文需独立适配(不在本模块)。
+  - **`contrib/mcp`**——Model Context Protocol 集成,薄封装官方 `modelcontextprotocol/go-sdk`:把服务
+    暴露成 AI 工具/资源/提示(`AddTool[In,Out]` 由 SDK 泛型**自动反射 JSON Schema**)、`HTTPHandler`
+    (Streamable HTTP,挂 webserver)、`NewStdioService`(结构上满足 `beauty.Service`);客户端 `DialHTTP`/
+    `DialCommand`/`Connect` + `ListTools`/`CallTool`。InMemory + httptest 端到端单测,`-race` 通过。不 import 核心。
   - **`contrib/vector`**——RAG / 语义检索的向量存储抽象(**纯标准库、零外部依赖**)。`Store` 接口
     (Upsert/Query topK/Delete)+ `MemoryStore`(暴力余弦,并发安全,dev/小规模直用)+ `Cosine` 助手;
     配 `contrib/llm` 的 Embedder 搭 RAG,大规模换 pgvector/qdrant 实现同接口。单测覆盖余弦与增查删/降序/混维。

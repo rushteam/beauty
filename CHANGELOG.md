@@ -182,6 +182,9 @@
   生成项目内置版本注入（`VERSION` + `-ldflags -X`）与统一 Makefile。
 
 ### Changed
+- **ci**：新增 GitHub Actions(`.github/workflows/ci.yml`):core 作业跑 gofmt/vet/build/`go test -race`
+  + **校验核心不 import contrib** + govulncheck;contrib 作业按模块矩阵(9 个)各自 gofmt/vet/test/
+  govulncheck;tools 作业 build/vet。配套对全仓做了一次 `gofmt` 统一。
 - **infra/redis**：`NewClient` 支持 OTel 埋点——新增 `WithTracing()`/`WithMetrics()` 选项,基于
   `redisotel` 给每条 redis 命令产生 span 与命令级 metrics(用 beauty telemetry 配好的全局
   Tracer/Meter Provider,未配则 no-op);`Config` 补 `PoolSize`/`MinIdleConns`/`DialTimeout`/
@@ -208,6 +211,9 @@
   8 个 Go 标准库漏洞(crypto/tls、crypto/x509、net/http HTTP/2 无限循环、html/template
   XSS 等)。修复后 `govulncheck ./...` 可达漏洞归零(其余 dependabot 告警均为不可达的
   间接依赖噪音)。
+- **contrib/toolchain**：为全部 contrib 模块(gorm/sqldb/elasticsearch/nats/natsjs/kafka/llm/
+  vector/mcp)固定 `toolchain go1.26.5`,消除各自 govulncheck 判定为可达的标准库漏洞。全仓
+  (核心 + 全 contrib)`govulncheck` 可达漏洞归零;GitHub 提示的 14 个依赖告警经核实均为**不可达**噪音。
 
 ### Fixed
 - **tools**：修复模板与框架 API 漂移导致生成项目无法编译的问题（中间件接口、

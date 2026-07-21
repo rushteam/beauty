@@ -41,9 +41,10 @@ cd contrib/gorm && go test ./...
 | [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(consumer group;at-least-once,提交后确认) | segmentio/kafka-go |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
-| [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding + Fallback/Retry/Metered(OpenAI/Anthropic) | 无(纯 stdlib) |
+| [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 薄 **agent 循环**(`llm/agent`,含**人工审批**)+ **会话记忆**(`llm/agent/session`)+ **Agent Skills**(`llm/agent/skills`,SKILL.md)(OpenAI/Anthropic) | 无(纯 stdlib) |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |
+| [`contrib/mcpagent`](mcpagent) | 胶水:把 `mcp` 的远程工具桥接成 `llm/agent.Tool`,喂给 agent.Runner 的工具循环 | llm + mcp + go-sdk |
 | [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
 | [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
 
@@ -52,6 +53,7 @@ cd contrib/gorm && go test ./...
 github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/gorm`、`contrib/sqldb`、
 `contrib/elasticsearch`、`contrib/llm`、`contrib/vector`、`contrib/mcp` 不依赖核心,可完全独立使用
 (其中 `llm`/`vector` 纯标准库、零外部依赖;`mcp` 的 `Service` 结构上满足 `beauty.Service`)。
+`contrib/mcpagent` 不依赖核心,但依赖 `llm` 与 `mcp`(胶水模块,`go.mod` 用 `replace` 本地联调)。
 
 ## 版本
 

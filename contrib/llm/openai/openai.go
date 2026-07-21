@@ -98,19 +98,86 @@ var (
 )
 
 type chatReq struct {
-	Model       string        `json:"model"`
-	Messages    []llm.Message `json:"messages"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	Temperature float64       `json:"temperature,omitempty"`
-	Stop        []string      `json:"stop,omitempty"`
-	Stream      bool          `json:"stream,omitempty"`
+	Model       string       `json:"model"`
+	Messages    []oaiMessage `json:"messages"`
+	MaxTokens   int          `json:"max_tokens,omitempty"`
+	Temperature float64      `json:"temperature,omitempty"`
+	Stop        []string     `json:"stop,omitempty"`
+	Stream      bool         `json:"stream,omitempty"`
+	Tools       []oaiTool    `json:"tools,omitempty"`
+	ToolChoice  any          `json:"tool_choice,omitempty"`
 }
 
-func buildMessages(req llm.Request) []llm.Message {
-	if req.System == "" {
-		return req.Messages
+// oaiMessage 是 OpenAI 的线上消息格式(与中立的 llm.Message 不同:工具调用用 tool_calls/
+// tool_call_id 表达)。纯文本消息只有 role+content,序列化结果与旧版逐字节一致。
+type oaiMessage struct {
+	Role       string        `json:"role"`
+	Content    string        `json:"content"`
+	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+type oaiToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"` // OpenAI 用 JSON 字符串承载入参
+	} `json:"function"`
+}
+
+type oaiTool struct {
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		Parameters  json.RawMessage `json:"parameters,omitempty"`
+	} `json:"function"`
+}
+
+// buildMessages 把中立 Request 翻译成 OpenAI 线上消息(含 system 前置、工具调用/结果映射)。
+func buildMessages(req llm.Request) []oaiMessage {
+	msgs := make([]oaiMessage, 0, len(req.Messages)+1)
+	if req.System != "" {
+		msgs = append(msgs, oaiMessage{Role: string(llm.System), Content: req.System})
 	}
-	return append([]llm.Message{{Role: llm.System, Content: req.System}}, req.Messages...)
+	for _, m := range req.Messages {
+		om := oaiMessage{Role: string(m.Role), Content: m.Content, ToolCallID: m.ToolCallID}
+		for _, tc := range m.ToolCalls {
+			oc := oaiToolCall{ID: tc.ID, Type: "function"}
+			oc.Function.Name = tc.Name
+			oc.Function.Arguments = string(tc.Arguments)
+			om.ToolCalls = append(om.ToolCalls, oc)
+		}
+		msgs = append(msgs, om)
+	}
+	return msgs
+}
+
+func buildTools(defs []llm.ToolDef) []oaiTool {
+	if len(defs) == 0 {
+		return nil
+	}
+	ts := make([]oaiTool, len(defs))
+	for i, d := range defs {
+		ts[i].Type = "function"
+		ts[i].Function.Name = d.Name
+		ts[i].Function.Description = d.Description
+		ts[i].Function.Parameters = d.Parameters
+	}
+	return ts
+}
+
+// buildToolChoice 把中立 ToolChoice 映射为 OpenAI 的 tool_choice(字符串或指定工具对象)。
+func buildToolChoice(tc string) any {
+	switch tc {
+	case "":
+		return nil
+	case "auto", "none", "required":
+		return tc
+	default: // 具体工具名 → 强制调用它
+		return map[string]any{"type": "function", "function": map[string]string{"name": tc}}
+	}
 }
 
 // endpoint 按 OpenAI / Azure 语义构造某个 API 的完整 URL。kind 如 "chat/completions"、"embeddings"。
@@ -151,6 +218,7 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	resp, err := c.post(ctx, "chat/completions", chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
+		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: request: %w", err)
@@ -162,8 +230,11 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	var out struct {
 		Model   string `json:"model"`
 		Choices []struct {
-			Message      llm.Message `json:"message"`
-			FinishReason string      `json:"finish_reason"`
+			Message struct {
+				Content   string        `json:"content"`
+				ToolCalls []oaiToolCall `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
@@ -177,15 +248,23 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	if len(out.Choices) > 0 {
 		r.Content = out.Choices[0].Message.Content
 		r.StopReason = out.Choices[0].FinishReason
+		for _, tc := range out.Choices[0].Message.ToolCalls {
+			r.ToolCalls = append(r.ToolCalls, llm.ToolCall{
+				ID: tc.ID, Name: tc.Function.Name, Arguments: json.RawMessage(tc.Function.Arguments),
+			})
+		}
 	}
 	return r, nil
 }
 
 // Stream 实现 llm.Client(SSE:data: {json} ... data: [DONE])。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
+	// 注:v1 的流式只透传文本增量,不解析流式 tool_calls 分片(工具循环走 Generate,见 llm/agent)。
+	// tools 仍随请求发出,便于模型在最后一轮直接产出文本。
 	body := chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,
+		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
 	}
 	resp, err := c.post(ctx, "chat/completions", body)
 	if err != nil {

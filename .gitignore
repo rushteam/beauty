@@ -6,3 +6,6 @@
 go.work
 go.work.sum
 
+# claude code 本地配置(机器本地,不入库)
+.claude/settings.local.json
+

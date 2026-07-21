@@ -15,6 +15,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -25,12 +26,35 @@ const (
 	System    Role = "system"
 	User      Role = "user"
 	Assistant Role = "assistant"
+	Tool      Role = "tool" // 工具执行结果消息(承载 ToolCallID 对应的返回)
 )
 
-// Message 是一条对话消息。
+// Message 是一条对话消息。纯文本对话只用 Role+Content;工具调用往返时,assistant 回合可能带
+// ToolCalls(模型要求调用哪些工具),随后一条 Role=Tool、ToolCallID 指向该调用的消息回传结果。
+// 各 provider 负责把本结构翻译成自家线格式(OpenAI tool_calls / Anthropic content blocks),
+// 故本结构的字段是 provider 无关的中立表示,不直接当作某家的请求体。
 type Message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // 仅 assistant:模型请求调用的工具
+	ToolCallID string     `json:"tool_call_id,omitempty"` // 仅 Role=Tool:对应 ToolCall.ID
+}
+
+// ToolDef 声明一个可供模型调用的工具:名字、给模型看的描述、入参 JSON Schema。
+// Parameters 是一个 JSON Schema object(可由使用方手写,或经 contrib/mcp 的反射产出),
+// 各 provider 原样透传给模型。这里只是"声明",工具怎么执行是 policy(见 llm/agent)。
+type ToolDef struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ToolCall 是模型在一次生成里发起的一次工具调用请求。ID 是 provider 侧的调用标识,
+// 回传结果时对应到 Message.ToolCallID;Arguments 是模型给出的入参(JSON,按 ToolDef.Parameters)。
+type ToolCall struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 // Request 是一次生成请求。System 便于单独给系统提示(Anthropic 用顶层 system,
@@ -42,6 +66,12 @@ type Request struct {
 	MaxTokens   int
 	Temperature float64
 	Stop        []string
+
+	// Tools 是本次可供模型调用的工具声明(为空则退化成纯对话)。
+	Tools []ToolDef
+	// ToolChoice 控制是否/如何调用工具:""或"auto"(模型自决)、"none"(禁用)、
+	// "required"(必须调用某个)、或直接给某个工具名(强制调用它)。provider 各自映射。
+	ToolChoice string
 }
 
 // Usage 是 token 用量(用于计量/计费)。
@@ -50,12 +80,14 @@ type Usage struct {
 	OutputTokens int
 }
 
-// Response 是一次非流式生成的结果。
+// Response 是一次非流式生成的结果。当模型决定调用工具时,ToolCalls 非空(此时 Content 可能为空),
+// StopReason 通常为 "tool_calls"(OpenAI)/"tool_use"(Anthropic)。
 type Response struct {
 	Content    string
 	Model      string
 	StopReason string
 	Usage      Usage
+	ToolCalls  []ToolCall
 }
 
 // Chunk 是流式生成的一个增量片段。Delta 是本次新增文本;结束时 Done=true 且可能带最终 Usage;

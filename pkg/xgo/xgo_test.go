@@ -87,13 +87,12 @@ func TestWaitGroupWithContext(t *testing.T) {
 }
 
 func TestPanicHandling(t *testing.T) {
-	var panicCaught bool
-	var panicValue any
-
+	// panicHandler 在 worker goroutine 里执行，且发生在 wg.Done 之后（Done 在 task.fn 的
+	// defer 里、先于 executeTask 的 recover 运行），因此 wg.Wait() 返回时 handler 可能尚未跑完。
+	// 用带缓冲 channel 把值送出来做同步（而非共享变量 + sleep），既消除数据竞争又不靠时序。
+	caught := make(chan any, 1)
 	p := New(WithPanicHandler(func(taskName string, pv any, stack []byte) {
-		panicCaught = true
-		panicValue = pv
-		// taskName 在这个测试中为空，因为我们没有设置任务名称
+		caught <- pv // taskName 此测试中为空（未设置任务名）
 	}))
 	defer p.Close()
 
@@ -101,16 +100,15 @@ func TestPanicHandling(t *testing.T) {
 	wg.Go(func() {
 		panic("test panic")
 	})
-
 	wg.Wait()
-	time.Sleep(time.Millisecond * 10) // 给 panic handler 一点时间
 
-	if !panicCaught {
+	select {
+	case pv := <-caught:
+		if pv != "test panic" {
+			t.Errorf("expected panic value 'test panic', got %v", pv)
+		}
+	case <-time.After(time.Second):
 		t.Error("panic should have been caught")
-	}
-
-	if panicValue != "test panic" {
-		t.Errorf("expected panic value 'test panic', got %v", panicValue)
 	}
 }
 

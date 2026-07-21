@@ -53,13 +53,103 @@ func New(apiKey string, opts ...Option) *Client {
 var _ llm.Client = (*Client)(nil)
 
 type messagesReq struct {
-	Model       string        `json:"model"`
-	System      string        `json:"system,omitempty"`
-	Messages    []llm.Message `json:"messages"`
-	MaxTokens   int           `json:"max_tokens"`
-	Temperature float64       `json:"temperature,omitempty"`
-	StopSeqs    []string      `json:"stop_sequences,omitempty"`
-	Stream      bool          `json:"stream,omitempty"`
+	Model       string       `json:"model"`
+	System      string       `json:"system,omitempty"`
+	Messages    []antMessage `json:"messages"`
+	MaxTokens   int          `json:"max_tokens"`
+	Temperature float64      `json:"temperature,omitempty"`
+	StopSeqs    []string     `json:"stop_sequences,omitempty"`
+	Stream      bool         `json:"stream,omitempty"`
+	Tools       []antTool    `json:"tools,omitempty"`
+	ToolChoice  any          `json:"tool_choice,omitempty"`
+}
+
+// antMessage 的 Content 既可是纯文本字符串,也可是 content block 数组(工具往返时用后者)。
+type antMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+// antBlock 是 Anthropic 的 content block:text / tool_use(助手发起调用)/ tool_result(回传结果)。
+type antBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`        // type=text
+	ID        string          `json:"id,omitempty"`          // type=tool_use
+	Name      string          `json:"name,omitempty"`        // type=tool_use
+	Input     json.RawMessage `json:"input,omitempty"`       // type=tool_use
+	ToolUseID string          `json:"tool_use_id,omitempty"` // type=tool_result
+	Content   string          `json:"content,omitempty"`     // type=tool_result
+}
+
+type antTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
+// buildMessages 把中立消息翻译成 Anthropic 消息:tool 结果并入一个 user 回合(多 tool_result 块),
+// 带 ToolCalls 的 assistant 回合转成 text + tool_use 块;纯文本仍用字符串 content(与旧版一致)。
+func buildMessages(msgs []llm.Message) []antMessage {
+	out := make([]antMessage, 0, len(msgs))
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
+		switch {
+		case m.Role == llm.Tool:
+			blocks := []antBlock{{Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content}}
+			for i+1 < len(msgs) && msgs[i+1].Role == llm.Tool { // 合并连续工具结果为一个 user 回合
+				i++
+				blocks = append(blocks, antBlock{Type: "tool_result", ToolUseID: msgs[i].ToolCallID, Content: msgs[i].Content})
+			}
+			out = append(out, antMessage{Role: "user", Content: blocks})
+		case m.Role == llm.Assistant && len(m.ToolCalls) > 0:
+			var blocks []antBlock
+			if m.Content != "" {
+				blocks = append(blocks, antBlock{Type: "text", Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				input := tc.Arguments
+				if len(input) == 0 {
+					input = json.RawMessage("{}")
+				}
+				blocks = append(blocks, antBlock{Type: "tool_use", ID: tc.ID, Name: tc.Name, Input: input})
+			}
+			out = append(out, antMessage{Role: string(m.Role), Content: blocks})
+		default:
+			out = append(out, antMessage{Role: string(m.Role), Content: m.Content})
+		}
+	}
+	return out
+}
+
+func buildTools(defs []llm.ToolDef) []antTool {
+	if len(defs) == 0 {
+		return nil
+	}
+	ts := make([]antTool, len(defs))
+	for i, d := range defs {
+		schema := d.Parameters
+		if len(schema) == 0 {
+			schema = json.RawMessage(`{"type":"object","properties":{}}`) // Anthropic 要求 input_schema 必填
+		}
+		ts[i] = antTool{Name: d.Name, Description: d.Description, InputSchema: schema}
+	}
+	return ts
+}
+
+// buildToolChoice 映射中立 ToolChoice 到 Anthropic 的 tool_choice 对象。
+func buildToolChoice(tc string) any {
+	switch tc {
+	case "":
+		return nil
+	case "auto":
+		return map[string]string{"type": "auto"}
+	case "none":
+		return map[string]string{"type": "none"}
+	case "required":
+		return map[string]string{"type": "any"} // Anthropic 用 "any" 表示"必须调用某个"
+	default:
+		return map[string]string{"type": "tool", "name": tc}
+	}
 }
 
 func (c *Client) build(req llm.Request, stream bool) messagesReq {
@@ -68,8 +158,9 @@ func (c *Client) build(req llm.Request, stream bool) messagesReq {
 		maxTok = defaultMaxTok // Anthropic 要求 max_tokens 必填
 	}
 	return messagesReq{
-		Model: req.Model, System: req.System, Messages: req.Messages,
+		Model: req.Model, System: req.System, Messages: buildMessages(req.Messages),
 		MaxTokens: maxTok, Temperature: req.Temperature, StopSeqs: req.Stop, Stream: stream,
+		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
 	}
 }
 
@@ -107,8 +198,11 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 		Model      string `json:"model"`
 		StopReason string `json:"stop_reason"`
 		Content    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			ID    string          `json:"id"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
 		} `json:"content"`
 		Usage struct {
 			InputTokens  int `json:"input_tokens"`
@@ -118,18 +212,22 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("anthropic: decode: %w", err)
 	}
-	var sb strings.Builder
-	for _, blk := range out.Content {
-		if blk.Type == "text" {
-			sb.WriteString(blk.Text)
-		}
-	}
-	return &llm.Response{
-		Content:    sb.String(),
+	r := &llm.Response{
 		Model:      out.Model,
 		StopReason: out.StopReason,
 		Usage:      llm.Usage{InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens},
-	}, nil
+	}
+	var sb strings.Builder
+	for _, blk := range out.Content {
+		switch blk.Type {
+		case "text":
+			sb.WriteString(blk.Text)
+		case "tool_use":
+			r.ToolCalls = append(r.ToolCalls, llm.ToolCall{ID: blk.ID, Name: blk.Name, Arguments: blk.Input})
+		}
+	}
+	r.Content = sb.String()
+	return r, nil
 }
 
 // Stream 实现 llm.Client(SSE:content_block_delta 增量、message_delta 带输出 token、message_stop)。

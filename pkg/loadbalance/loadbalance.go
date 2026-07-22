@@ -1,11 +1,13 @@
 // Package loadbalance 提供通用的负载均衡算法原语,不绑定任何 RPC/服务发现框架。
 //
-// 三个算法:
+// 四个算法:
 //   - ConsistentHash:一致性哈希(虚拟节点 + maphash),按 key 路由到稳定节点,
 //     支持权重与副本,适合"会话粘性 / 带状态分片"场景;
 //   - WeightedRoundRobin:平滑加权轮询(nginx SWRR),按权重比例均匀分发,
 //     避免低权重节点被连续命中,适合"按容量分配流量"场景;
-//   - RoundRobin:无权重轮询,atomic 游标,无锁高吞吐,适合节点等价的场景。
+//   - RoundRobin:无权重轮询,atomic 游标,无锁高吞吐,适合节点等价的场景;
+//   - P2C:Power of Two Choices + EWMA(见 p2c.go),按实时延迟/在途数选更优节点,
+//     需结果反馈(Pick 返回 done 回调),压长尾、避慢节点,适合动态负载差异大的场景。
 //
 // 节点由调用方提供,实现 Node 接口(ID 用于虚拟节点命名,Weight 用于权重计算)。
 // 算法本身是纯计算,并发安全:ConsistentHash 构建后只读;WeightedRoundRobin

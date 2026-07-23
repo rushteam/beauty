@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/afterwork"
 	perr "github.com/rushteam/beauty/pkg/errors"
@@ -220,5 +221,91 @@ func TestHandler_Ratelimit_429(t *testing.T) {
 	h.ServeHTTP(rec2, req)
 	if rec2.Code != http.StatusTooManyRequests {
 		t.Fatalf("second: code=%d want 429", rec2.Code)
+	}
+}
+
+// tagMW 记录进出顺序并可选短路,用于验证中间件挂载与顺序。
+func tagMW(name string, log *[]string, block bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			*log = append(*log, name)
+			if block {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// WithMiddleware:挂上的中间件应执行,放行则到达业务函数。
+func TestHandler_WithMiddleware_Passthrough(t *testing.T) {
+	var seq []string
+	h := handler.New("", okHandler(), handler.WithMiddleware(tagMW("mw", &seq, false)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/", strings.NewReader(`{"Msg":"hi"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("放行应到业务函数, code=%d", rec.Code)
+	}
+	if len(seq) != 1 || seq[0] != "mw" {
+		t.Fatalf("中间件应被执行, seq=%v", seq)
+	}
+}
+
+// 中间件可提前短路,业务函数不执行。
+func TestHandler_WithMiddleware_ShortCircuit(t *testing.T) {
+	var reached atomic.Bool
+	fn := func(ctx context.Context, req *echoReq) (*echoResp, error) {
+		reached.Store(true)
+		return &echoResp{}, nil
+	}
+	var seq []string
+	h := handler.New("", handler.Func[echoReq, echoResp](fn), handler.WithMiddleware(tagMW("guard", &seq, true)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/", strings.NewReader(`{"Msg":"x"}`)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("短路应返回 403, code=%d", rec.Code)
+	}
+	if reached.Load() {
+		t.Fatal("短路后业务函数不应执行")
+	}
+}
+
+// 多个中间件:靠前者在更外层(先执行)。
+func TestHandler_WithMiddleware_Order(t *testing.T) {
+	var seq []string
+	h := handler.New("", okHandler(),
+		handler.WithMiddleware(tagMW("a", &seq, false), tagMW("b", &seq, false)))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/", strings.NewReader(`{"Msg":"hi"}`)))
+	if len(seq) != 2 || seq[0] != "a" || seq[1] != "b" {
+		t.Fatalf("靠前者应在更外层先执行, seq=%v", seq)
+	}
+}
+
+// 用户中间件在 ratelimit 之外:即使请求被限流拦截(429),外层中间件仍会执行。
+func TestHandler_WithMiddleware_OutermostBeforeRatelimit(t *testing.T) {
+	var seq []string
+	lim := ratelimit.NewSlidingWindow(1, time.Hour) // 窗口内只允许 1 次
+	defer lim.Stop()
+	h := handler.New("", okHandler(),
+		handler.WithMiddleware(tagMW("outer", &seq, false)),
+		handler.WithRatelimit(lim, func(*http.Request) string { return "k" }),
+	)
+	req := func() *http.Request { return httptest.NewRequest("POST", "/", strings.NewReader(`{"Msg":"hi"}`)) }
+
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req()) // 第 1 次:放行
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("第 1 次应放行, code=%d", rec1.Code)
+	}
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req()) // 第 2 次:被限流 429
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("第 2 次应被限流 429, code=%d", rec2.Code)
+	}
+	// 两次请求外层中间件都执行了(证明它在 ratelimit 之外)。
+	if len(seq) != 2 {
+		t.Fatalf("外层中间件应在限流之外、两次都执行, seq=%v", seq)
 	}
 }

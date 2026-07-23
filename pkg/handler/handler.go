@@ -10,6 +10,9 @@
 //   - WithInject(deps):把任意依赖(DB、cache、client...)装入 ctx 供 handler 取;
 //   - WithAfterwork:挂上 afterwork.Middleware,handler 里 afterwork.Defer(...)
 //     投递的响应后副作用在响应返回后跑完;
+//   - WithRatelimit:声明式限流;
+//   - WithMiddleware:挂任意标准中间件(func(http.Handler) http.Handler)于最外层——
+//     核心不依赖 contrib,故可即插即用如 contrib/wasm 的过滤器等;
 //   - 返回的 error 自动经 errors.WriteHTTP 归一化为统一错误响应。
 //
 // 用法:
@@ -75,6 +78,7 @@ type Handler[I any, O any] struct {
 	afterOpts []afterwork.Option
 	rlLimiter ratelimit.Limiter
 	rlKeyFn   ratelimit.KeyFunc
+	mws       []func(http.Handler) http.Handler
 }
 
 // Option 配置 Handler。
@@ -88,6 +92,7 @@ type config struct {
 	afterOpts []afterwork.Option
 	rlLimiter ratelimit.Limiter
 	rlKeyFn   ratelimit.KeyFunc
+	mws       []func(http.Handler) http.Handler
 }
 
 // WithMethod 设置允许的 HTTP 方法(如 "POST")。空表示不限。
@@ -121,6 +126,20 @@ func WithRatelimit(l ratelimit.Limiter, keyFn ratelimit.KeyFunc) Option {
 	return func(c *config) { c.rlLimiter = l; c.rlKeyFn = keyFn }
 }
 
+// WithMiddleware 附加任意标准 HTTP 中间件(func(http.Handler) http.Handler),挂在包装链的
+// **最外层**——先于 ratelimit/afterwork/auth 执行,可提前短路(拒绝/改写)。多次传入或一次传多个时,
+// **靠前的在更外层**(WithMiddleware(a, b) 中 a 包住 b 包住其余)。
+//
+// 核心不依赖 contrib,故通过这个通用口即插即用任意中间件——例如把 contrib/wasm 的过滤器绑上:
+//
+//	handler.New(method, fn,
+//	    handler.WithMiddleware(wasm.Middleware(mod)), // wasm 沙箱过滤器
+//	    handler.WithRatelimit(lim, keyFn),
+//	)
+func WithMiddleware(mw ...func(http.Handler) http.Handler) Option {
+	return func(c *config) { c.mws = append(c.mws, mw...) }
+}
+
 // New 创建声明式 Handler。method 可为空(不限方法);fn 是业务函数。
 // opts 依次应用 WithAuth / WithInject / WithAfterwork 等。
 func New[I any, O any](method string, fn Func[I, O], opts ...Option) *Handler[I, O] {
@@ -137,19 +156,24 @@ func New[I any, O any](method string, fn Func[I, O], opts ...Option) *Handler[I,
 		afterOpts: cfg.afterOpts,
 		rlLimiter: cfg.rlLimiter,
 		rlKeyFn:   cfg.rlKeyFn,
+		mws:       cfg.mws,
 	}
 }
 
 // ServeHTTP 实现 http.Handler。
-// 包装顺序(由外到内):ratelimit → afterwork → handle(auth+inject+body+fn)。
-// 限流最外层(超限不解析 body);afterwork 次之(响应后副作用跑完才放行)。
+// 包装顺序(由外到内):WithMiddleware(用户中间件)→ ratelimit → afterwork → handle(auth+inject+body+fn)。
+// 用户中间件最外层(可提前短路);限流次之(超限不解析 body);afterwork 再次(响应后副作用跑完才放行)。
 func (h *Handler[I, O]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handler := http.HandlerFunc(h.handle)
+	var handler http.Handler = http.HandlerFunc(h.handle)
 	if h.afterMW {
-		handler = afterwork.Middleware(h.afterOpts...)(handler).(http.HandlerFunc)
+		handler = afterwork.Middleware(h.afterOpts...)(handler)
 	}
 	if h.rlLimiter != nil && h.rlKeyFn != nil {
-		handler = ratelimit.Middleware(h.rlLimiter, h.rlKeyFn)(handler).(http.HandlerFunc)
+		handler = ratelimit.Middleware(h.rlLimiter, h.rlKeyFn)(handler)
+	}
+	// 用户中间件挂最外层;倒序应用使靠前者在更外层。
+	for i := len(h.mws) - 1; i >= 0; i-- {
+		handler = h.mws[i](handler)
 	}
 	handler.ServeHTTP(w, r)
 }

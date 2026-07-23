@@ -2,8 +2,11 @@ package wasm_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -409,5 +412,133 @@ func TestMiddleware_AddRequestHeaders(t *testing.T) {
 
 	if len(got) != 3 || got[0] != "orig" || got[1] != "a" || got[2] != "b" {
 		t.Fatalf("Add 应保留已有并追加, got %v", got)
+	}
+}
+
+// buildClockGuest:导入 env.now_unix_milli()->i64,导出 run()->i64 直接转调它。
+func buildClockGuest() []byte {
+	m := append([]byte{}, wasmMagic...)
+	t := funcType(nil, []byte{i64}) // ()->i64,now 与 run 同型
+	m = append(m, section(1, vecItems(t))...)
+	m = append(m, section(2, vecItems(importFunc("env", "now_unix_milli", 0)))...)
+	m = append(m, section(3, vecItems(uleb(0)))...) // run: type0
+	m = append(m, section(7, vecItems(exportEntry("run", 0x00, 1)))...)
+	instrs := []byte{0x10, 0x00, 0x0b} // call 0; end
+	m = append(m, section(10, vecItems(codeEntry(instrs)))...)
+	return m
+}
+
+// 内置 WithLog:guest 调 env.log(0,2) 打出内存里的 "hi"。
+func TestHostFunc_WithLog(t *testing.T) {
+	ctx := context.Background()
+	var buf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	rt, err := wasm.New(ctx, wasm.WithLog(logger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+	mod, err := rt.Compile(ctx, buildLog(1))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	inst, err := mod.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+	if _, err := inst.Call(ctx, "run"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(buf.String(), "hi") {
+		t.Fatalf("WithLog 应记录 guest 的日志, got %q", buf.String())
+	}
+}
+
+// 内置 WithClock:guest 调 env.now_unix_milli() 拿到 >0 的毫秒时间戳。
+func TestHostFunc_WithClock(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx, wasm.WithClock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+	mod, err := rt.Compile(ctx, buildClockGuest())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	inst, err := mod.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+	res, err := inst.Call(ctx, "run")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if int64(res[0]) <= 0 {
+		t.Fatalf("now_unix_milli 应返回 >0 的时间戳, got %d", int64(res[0]))
+	}
+}
+
+// 实例池 + 并发:池化复用下,大量并发请求仍应得到正确决策(-race 验证池并发安全)。
+func TestMiddleware_PoolConcurrent(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { rt.Close(ctx) })
+	mod, err := rt.Compile(ctx, buildMiddleware([]byte(`{"action":"next"}`)))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	h := wasm.Middleware(mod, wasm.WithPool(4))(next)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 25; j++ {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+				if rec.Code != http.StatusOK || rec.Body.String() != "ok" {
+					t.Errorf("池化并发下决策错误: code=%d body=%q", rec.Code, rec.Body.String())
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// 可观测:WithObserver 应在每次执行后收到动作/耗时。
+func TestMiddleware_Observer(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { rt.Close(ctx) })
+	mod, err := rt.Compile(ctx, buildMiddleware([]byte(`{"action":"deny","status":403}`)))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	var ev wasm.Event
+	var n int
+	h := wasm.Middleware(mod, wasm.WithObserver(func(e wasm.Event) { ev = e; n++ }))(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if n != 1 {
+		t.Fatalf("observer 应被调用一次, got %d", n)
+	}
+	if ev.Action != "deny" || ev.Err != nil {
+		t.Fatalf("event = %+v", ev)
 	}
 }

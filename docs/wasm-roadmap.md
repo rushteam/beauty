@@ -15,7 +15,8 @@
 - 高层封装:**HTTP 中间件即 wasm 模块**——请求元数据 → wasm `handle` → 决策(放行/拒绝/改写请求头/状态码);
 - `pkg/handler.WithMiddleware` 通用口,声明式绑定 wasm(核心零 contrib 依赖)。
 
-剩余打磨(非收口必需):实例池、真实 guest 示例(TinyGo/`//go:wasmexport`)、请求 body 访问、内置 host func、可观测。
+已补打磨:实例池(`WithPool`)、内置 host functions(`WithLog`/`WithClock`)、可观测(`WithObserver`)。
+剩余(非必需):真实 guest 示例(TinyGo/`//go:wasmexport` 编译验证)、请求 body 访问。
 
 用途:自定义中间件/过滤器、限流/鉴权/改写策略、WAF 规则、可编程 webhook。
 

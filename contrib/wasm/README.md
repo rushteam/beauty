@@ -27,6 +27,9 @@ rt, _ := wasm.New(ctx,
 )
 defer rt.Close(ctx)
 
+// 内置 host functions(仍需显式授予):
+//   wasm.WithLog(logger)  → env.log(ptr,len)     guest 打日志
+//   wasm.WithClock()      → env.now_unix_milli()  guest 读时间(默认无 WASI 时钟)
 mod, _ := rt.Compile(ctx, wasmBytes) // 编译一次,复用
 inst, _ := mod.Instantiate(ctx)      // 每次得到独立内存的实例(非并发安全)
 defer inst.Close(ctx)
@@ -42,7 +45,11 @@ mod, _ := rt.Compile(ctx, filterWasm)
 mux := http.NewServeMux()
 handler := wasm.Middleware(mod,
     wasm.WithTimeout(100*time.Millisecond), // 执行超时,中断死循环(超时按 fail 策略处理)
-)(yourHandler) // 每请求实例化一次,保证隔离
+    wasm.WithPool(16),                       // 实例池复用(降低实例化开销;省略则每请求新建)
+    wasm.WithObserver(func(e wasm.Event) {   // 可观测:接指标/日志/追踪(不绑具体实现)
+        // e.Action("next"/"deny"/"error") / e.Err / e.Duration
+    }),
+)(yourHandler)
 // wasm.WithFailOpen(true)  出错/超时时放行(默认 fail-closed 返回 500,适合鉴权/WAF)
 ```
 

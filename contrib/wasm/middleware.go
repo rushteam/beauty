@@ -1,8 +1,11 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -26,6 +29,10 @@ type Request struct {
 	Path    string            `json:"path"`
 	Query   string            `json:"query,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// Body:仅当中间件启用 WithBody 时非空——请求体前 maxBytes 字节的 **base64**(二进制安全)。
+	Body string `json:"body,omitempty"`
+	// BodyTruncated:请求体超过 maxBytes、Body 被截断时为 true(下游仍收到完整 body)。
+	BodyTruncated bool `json:"bodyTruncated,omitempty"`
 }
 
 // Decision 是 guest 返回的决策(JSON)。
@@ -56,6 +63,7 @@ type mwConfig struct {
 	timeout  time.Duration
 	poolSize int
 	observer func(Event)
+	bodyMax  int
 }
 
 // Event 是一次 wasm 中间件执行的可观测事件(执行后回调,用于接指标/日志/追踪)。
@@ -75,6 +83,11 @@ func WithPool(size int) MiddlewareOption { return func(c *mwConfig) { c.poolSize
 
 // WithObserver 注册执行后回调,收到 Event(动作/错误/耗时)——接 OTel/日志/指标由你定,故本包不绑具体实现。
 func WithObserver(fn func(Event)) MiddlewareOption { return func(c *mwConfig) { c.observer = fn } }
+
+// WithBody 让 guest 能看到请求体(默认**不**读 body,零成本)。maxBytes>0 时,中间件读取请求体前
+// maxBytes 字节(base64 放进 Request.Body,超出置 BodyTruncated=true),并**完整还原**给下游——
+// 因此 guest 可见部分受限(内存有界),下游仍收到完整 body。<=0 表示不启用。
+func WithBody(maxBytes int) MiddlewareOption { return func(c *mwConfig) { c.bodyMax = maxBytes } }
 
 // WithFailOpen 设置 wasm 出错时的行为:true=放行(可用性优先),false(默认)=拦截并返回 500
 // (安全优先,适合鉴权/WAF 类过滤器)。执行超时也算"出错",按此策略处理。
@@ -177,7 +190,20 @@ func runOnce(r *http.Request, mod *Module, pool *Pool, cfg *mwConfig) (Decision,
 	if err != nil {
 		return Decision{}, err
 	}
-	dec, err := exchange(ctx, inst, r, cfg)
+	// 按需读取请求体(opt-in);读后已还原 r.Body,下游不受影响。
+	var body []byte
+	var truncated bool
+	if cfg.bodyMax > 0 {
+		if body, truncated, err = captureBody(r, cfg.bodyMax); err != nil {
+			if pool != nil {
+				pool.Put(context.Background(), inst)
+			} else {
+				_ = inst.Close(context.Background())
+			}
+			return Decision{}, err
+		}
+	}
+	dec, err := exchange(ctx, inst, r, body, truncated, cfg)
 	// 用 background 做归还/关闭,避免请求 ctx 已取消(超时)影响清理。
 	if pool != nil && err == nil {
 		pool.Put(context.Background(), inst)
@@ -188,8 +214,8 @@ func runOnce(r *http.Request, mod *Module, pool *Pool, cfg *mwConfig) (Decision,
 }
 
 // exchange 在给定实例上跑一次:写请求→handle→读决策。
-func exchange(ctx context.Context, inst *Instance, r *http.Request, cfg *mwConfig) (Decision, error) {
-	reqBytes, err := json.Marshal(buildRequest(r))
+func exchange(ctx context.Context, inst *Instance, r *http.Request, body []byte, truncated bool, cfg *mwConfig) (Decision, error) {
+	reqBytes, err := json.Marshal(buildRequest(r, body, truncated))
 	if err != nil {
 		return Decision{}, err
 	}
@@ -215,15 +241,39 @@ func exchange(ctx context.Context, inst *Instance, r *http.Request, cfg *mwConfi
 
 // _ 保持 api 依赖被 middleware.go 直接引用(EncodeU32),便于阅读。
 
-func buildRequest(r *http.Request) Request {
+func buildRequest(r *http.Request, body []byte, truncated bool) Request {
 	h := make(map[string]string, len(r.Header))
 	for k := range r.Header {
 		h[k] = r.Header.Get(k)
 	}
-	return Request{
+	req := Request{
 		Method:  r.Method,
 		Path:    r.URL.Path,
 		Query:   r.URL.RawQuery,
 		Headers: h,
 	}
+	if body != nil {
+		req.Body = base64.StdEncoding.EncodeToString(body)
+		req.BodyTruncated = truncated
+	}
+	return req
+}
+
+// captureBody 读取请求体前 max 字节供 guest 使用,并把**完整** body 还原回 r.Body 供下游读取
+// (仅在内存中缓冲已读部分,超出部分仍以流的方式透传,内存有界)。
+func captureBody(r *http.Request, max int) (head []byte, truncated bool, err error) {
+	if r.Body == nil || max <= 0 {
+		return nil, false, nil
+	}
+	buf, err := io.ReadAll(io.LimitReader(r.Body, int64(max)+1)) // 多读 1 字节探测是否超长
+	if err != nil {
+		return nil, false, err
+	}
+	if len(buf) > max {
+		// 超长:guest 只见前 max 字节;下游读到 已读缓冲 + 剩余流 = 完整 body。
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf), r.Body))
+		return buf[:max], true, nil
+	}
+	r.Body = io.NopCloser(bytes.NewReader(buf))
+	return buf, false, nil
 }

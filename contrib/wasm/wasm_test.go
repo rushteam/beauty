@@ -2,6 +2,7 @@ package wasm_test
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -540,5 +541,62 @@ func TestMiddleware_Observer(t *testing.T) {
 	}
 	if ev.Action != "deny" || ev.Err != nil {
 		t.Fatalf("event = %+v", ev)
+	}
+}
+
+// WithBody:guest 可见前 maxBytes,但下游仍收到完整 body(且超长置 truncated,不影响下游)。
+func TestMiddleware_WithBody_DownstreamIntact(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { rt.Close(ctx) })
+	mod, err := rt.Compile(ctx, buildMiddleware([]byte(`{"action":"next"}`)))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	var gotBody string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	})
+	h := wasm.Middleware(mod, wasm.WithBody(4))(next) // guest 只见前 4 字节
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("hello world")))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d", rec.Code)
+	}
+	if gotBody != "hello world" {
+		t.Fatalf("下游应收到完整 body, got %q", gotBody)
+	}
+}
+
+// 不启用 WithBody:body 不被读取,下游完整可读(零成本路径)。
+func TestMiddleware_NoBody_DownstreamIntact(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { rt.Close(ctx) })
+	mod, err := rt.Compile(ctx, buildMiddleware([]byte(`{"action":"next"}`)))
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	var gotBody string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	})
+	h := wasm.Middleware(mod)(next) // 未启用 body
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("payload")))
+	if gotBody != "payload" {
+		t.Fatalf("下游应收到完整 body, got %q", gotBody)
 	}
 }

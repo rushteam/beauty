@@ -45,9 +45,27 @@ OPA 把 Rego 编译成 wasm,在 wazero 沙箱里执行,实现 `pkg/authz.Enforce
 - ✅ 实例池(每 slot 独立 Runtime + memory,并发安全);`SetData` 热更新外部数据;
 - 纯 Go(wazero),无 CGo、无外部进程,比完整 OPA SDK 轻量得多。
 
+## Tier 4 —— FaaS-lite:wasm 函数即 HTTP Handler · 已落地(`contrib/wasm`)
+
+beauty 作为 wasm 函数宿主:用户上传 .wasm → 注册到路径 → 实例池处理请求。
+与 Middleware 共享 alloc/handle ABI,区别在于 guest 输出 **Response**(status + headers + body)
+而非 Decision(next/deny)。
+
+- ✅ `Handler(mod)`:把单个 wasm 模块包装成 `http.Handler`;
+- ✅ `Router`:FaaS 路由器——`Register`/`Deregister`/`RegisterBytes` 热插拔;
+- ✅ 精确匹配 > 最长前缀匹配;并发安全;支持实例池(`WithHandlerPool`);
+- ✅ 超时(`WithHandlerTimeout`)+ 请求体传入(`WithHandlerBody`)。
+
+用法:
+
+```go
+router := wasm.NewRouter(rt)
+router.RegisterBytes(ctx, "/greet", greetWasm, wasm.WithHandlerPool(8))
+http.Handle("/fn/", http.StripPrefix("/fn", router))
+```
+
 ## 备选(暂不排期)
 
-- FaaS-lite:beauty 作为 wasm 函数宿主(路由 → 用户上传的 wasm 函数,实例池)。
 - Proxy-Wasm ABI 兼容:复用现成 Envoy Wasm 过滤器(工程量大)。
 - js/wasm:把 `gameloop`/`spatial`(AOI)/`presence` 的共享逻辑编到浏览器做客户端预测。
 - GOOS=wasip1 部署到 wasm 运行时:wasip1 网络受限,当前仅适合纯计算 handler/worker。

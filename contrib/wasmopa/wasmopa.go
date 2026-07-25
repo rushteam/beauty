@@ -39,8 +39,8 @@ type Policy struct {
 	dataJSON []byte
 	epID     int32
 
-	instMu sync.Mutex
-	pool   []*opaInstance
+	pool chan *opaInstance
+	sem  chan struct{} // 限制并发实例化数
 }
 
 type opaInstance struct {
@@ -73,22 +73,25 @@ func WithEntrypoint(id int32) Option { return func(p *Policy) { p.epID = id } }
 
 // New 编译 OPA wasm 模块并创建 Policy。wasmBytes 由 `opa build -t wasm` 生成的 policy.wasm。
 func New(wasmBytes []byte, opts ...Option) (*Policy, error) {
-	// 先验证一次能否编译+实例化
-	inst, err := newOPAInstance(wasmBytes)
-	if err != nil {
-		return nil, err
-	}
-
 	p := &Policy{
 		wasmBytes: wasmBytes,
 		timeout:   5 * time.Second,
 		poolSz:    4,
 		dataJSON:  []byte("{}"),
-		pool:      []*opaInstance{inst},
 	}
 	for _, o := range opts {
 		o(p)
 	}
+
+	// 预创建一个实例验证 wasm 可用
+	inst, err := newOPAInstance(wasmBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	p.pool = make(chan *opaInstance, p.poolSz)
+	p.sem = make(chan struct{}, p.poolSz)
+	p.pool <- inst
 	return p, nil
 }
 
@@ -249,12 +252,10 @@ func buildEnvModule() []byte {
 
 // Close 关闭 Policy 及所有缓存的 wazero Runtime。
 func (p *Policy) Close() error {
-	p.instMu.Lock()
-	for _, inst := range p.pool {
+	close(p.pool)
+	for inst := range p.pool {
 		inst.rt.Close(context.Background())
 	}
-	p.pool = nil
-	p.instMu.Unlock()
 	return nil
 }
 
@@ -313,27 +314,37 @@ func (p *Policy) Authorize(ctx context.Context, sub authz.Subject, action, resou
 // --- 实例池 ---
 
 func (p *Policy) getInstance(ctx context.Context) (*opaInstance, error) {
-	p.instMu.Lock()
-	if len(p.pool) > 0 {
-		inst := p.pool[len(p.pool)-1]
-		p.pool = p.pool[:len(p.pool)-1]
-		p.instMu.Unlock()
+	// 先尝试从池中非阻塞获取
+	select {
+	case inst := <-p.pool:
 		return inst, nil
+	default:
 	}
-	p.instMu.Unlock()
 
-	return newOPAInstance(p.wasmBytes)
+	// 池空:用 semaphore 限制并发新建数,避免同时 JIT 编译爆炸
+	select {
+	case p.sem <- struct{}{}:
+		inst, err := newOPAInstance(p.wasmBytes)
+		if err != nil {
+			<-p.sem
+			return nil, err
+		}
+		return inst, nil
+	case inst := <-p.pool:
+		return inst, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (p *Policy) putInstance(inst *opaInstance) {
-	p.instMu.Lock()
-	if len(p.pool) < p.poolSz {
-		p.pool = append(p.pool, inst)
-		p.instMu.Unlock()
-		return
+	select {
+	case p.pool <- inst:
+	default:
+		// 池满,释放实例并归还 semaphore slot
+		inst.rt.Close(context.Background())
+		<-p.sem
 	}
-	p.instMu.Unlock()
-	inst.rt.Close(context.Background())
 }
 
 // --- OPA eval 协议 ---

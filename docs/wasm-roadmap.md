@@ -21,19 +21,32 @@
 
 用途:自定义中间件/过滤器、限流/鉴权/改写策略、WAF 规则、可编程 webhook。
 
-## Tier 2 —— 用 wasm 沙箱执行 agent 工具 / skills 脚本
+## Tier 2 —— 用 wasm 沙箱执行 agent 工具 / skills 脚本 · 已落地(`contrib/wasmagent`)
 
 接 `contrib/llm/agent` 已有工作:`skills.EnableExec` 目前跑**本地脚本**(默认关,因等于信任任意本地命令)。
 改为在 wazero WASI 沙箱内运行 → 从"信任本地脚本"变成"能力受限、无法逃逸"的执行,补上 agent 平台的
 安全短板(E2B/code-interpreter 思路,但纯 Go 内嵌、无外部进程)。
 
-- 给 `agent.Tool` 增加 wasm 执行器,或 skills 增 `WithWasmSandbox`;
-- 顺带为"LLM 生成的代码"提供安全运行环境(code-interpreter 雏形);
-- 依赖 Tier 1 的运行时。
+- ✅ `skills.ScriptExecutor` 类型 + `WithScriptExecutor` 注入口;
+- ✅ `contrib/wasmagent.NewWasmExecutor`:适配 skills.ScriptExecutor,wasm 沙箱执行技能脚本;
+- ✅ `contrib/wasmagent.ToolFrom`:把预编译 wasm 模块直接包装成 agent.Tool;
+- ◻ LLM 生成代码的安全运行环境(code-interpreter 雏形,需嵌入一个解释器 guest)。
+
+## Tier 3 —— 策略即 wasm · 已落地(`contrib/wasmopa`)
+
+OPA 把 Rego 编译成 wasm,在 wazero 沙箱里执行,实现 `pkg/authz.Enforcer`:
+
+    opa build -t wasm -e 'authz/allow' policy.rego → policy.wasm
+    → wasmopa.New(wasmBytes) → authz.Enforcer
+
+- ✅ OPA wasm ABI 1.2+ 协议(`opa_eval` 一次性求值);
+- ✅ `Policy.Eval(ctx, input)`:通用策略求值,可用于 governance / 任意 Rego 决策;
+- ✅ `Policy.Authorize(ctx, sub, action, resource)`:实现 `authz.Enforcer`;
+- ✅ 实例池(每 slot 独立 Runtime + memory,并发安全);`SetData` 热更新外部数据;
+- 纯 Go(wazero),无 CGo、无外部进程,比完整 OPA SDK 轻量得多。
 
 ## 备选(暂不排期)
 
-- 策略即 wasm:OPA 把 Rego 编译成 wasm,接 `pkg/authz` / `governance`。
 - FaaS-lite:beauty 作为 wasm 函数宿主(路由 → 用户上传的 wasm 函数,实例池)。
 - Proxy-Wasm ABI 兼容:复用现成 Envoy Wasm 过滤器(工程量大)。
 - js/wasm:把 `gameloop`/`spatial`(AOI)/`presence` 的共享逻辑编到浏览器做客户端预测。

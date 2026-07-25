@@ -21,7 +21,16 @@ type Skills struct {
 	order       []string
 	allowExec   bool
 	execTimeout time.Duration
+	executor    ScriptExecutor
 }
+
+// ScriptExecutor 是脚本执行器:在(可能沙箱化的)环境里运行技能脚本。
+// path 是脚本绝对路径(已通过路径穿越校验、已确认登记在该技能的 scripts/ 清单内);
+// cwd 是技能目录;args 是模型给的参数。返回喂回模型的输出文本。
+//
+// 默认执行器是本地进程(exec.Command);用 WithScriptExecutor 可替换成沙箱执行
+// (如 contrib/wasmagent 的 wasm 执行器)——把"信任本地脚本"变成"能力受限、无法逃逸"。
+type ScriptExecutor func(ctx context.Context, path, cwd string, args []string) (string, error)
 
 // Load 从若干 loader 加载全部技能(按名去重,后者覆盖先者)。
 func Load(loaders ...Loader) (*Skills, error) {
@@ -48,6 +57,14 @@ func (s *Skills) EnableExec(timeout time.Duration) *Skills {
 	if timeout > 0 {
 		s.execTimeout = timeout
 	}
+	return s
+}
+
+// WithScriptExecutor 用自定义执行器替换默认的本地进程执行(exec.Command)——
+// 典型用法是接 contrib/wasmagent 的 wasm 沙箱执行器。仍需 EnableExec 开启执行。
+// 返回自身便于链式调用。
+func (s *Skills) WithScriptExecutor(exec ScriptExecutor) *Skills {
+	s.executor = exec
 	return s
 }
 
@@ -211,10 +228,17 @@ func (s *Skills) getScript(ctx context.Context, args json.RawMessage) (string, e
 	}
 	cctx, cancel := context.WithTimeout(ctx, s.execTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, path, in.Args...)
-	cmd.Dir = sk.SourcePath
-	out, runErr := cmd.CombinedOutput()
-	res := map[string]any{"skill_name": sk.Name, "script_path": in.ScriptPath, "output": string(out)}
+	var out string
+	var runErr error
+	if s.executor != nil {
+		out, runErr = s.executor(cctx, path, sk.SourcePath, in.Args)
+	} else {
+		cmd := exec.CommandContext(cctx, path, in.Args...)
+		cmd.Dir = sk.SourcePath
+		o, e := cmd.CombinedOutput()
+		out, runErr = string(o), e
+	}
+	res := map[string]any{"skill_name": sk.Name, "script_path": in.ScriptPath, "output": out}
 	if cctx.Err() == context.DeadlineExceeded {
 		res["error"] = fmt.Sprintf("执行超时(%s)", s.execTimeout)
 	} else if runErr != nil {

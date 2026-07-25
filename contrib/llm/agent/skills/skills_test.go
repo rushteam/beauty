@@ -195,3 +195,40 @@ func TestLoad_ValidationErrors(t *testing.T) {
 		t.Fatal("非法 name 应报错")
 	}
 }
+
+// WithScriptExecutor:注入的执行器替换默认本地进程执行,并收到 path/cwd/args。
+func TestTool_WithScriptExecutor(t *testing.T) {
+	sk := loadOne(t)
+	sk.EnableExec(5 * time.Second)
+	var gotPath, gotCwd string
+	var gotArgs []string
+	sk.WithScriptExecutor(func(_ context.Context, path, cwd string, args []string) (string, error) {
+		gotPath, gotCwd, gotArgs = path, cwd, args
+		return "sandboxed-out", nil
+	})
+	call := toolByName(t, sk, "get_skill_script")
+	out, _ := call(context.Background(),
+		json.RawMessage(`{"skill_name":"greeter","script_path":"hello.sh","execute":true,"args":["a","b"]}`))
+	m := decode(t, out)
+	if m["error"] != nil || m["output"] != "sandboxed-out" {
+		t.Fatalf("应走注入的执行器: %v", m)
+	}
+	if !strings.HasSuffix(gotPath, filepath.Join("scripts", "hello.sh")) {
+		t.Fatalf("executor 收到的 path 不对: %q", gotPath)
+	}
+	if gotCwd == "" || len(gotArgs) != 2 {
+		t.Fatalf("executor 应收到 cwd 与 args: cwd=%q args=%v", gotCwd, gotArgs)
+	}
+}
+
+// 未设 executor 时,默认仍走本地进程(向后兼容)。
+func TestTool_DefaultLocalExecUnchanged(t *testing.T) {
+	sk := loadOne(t)
+	sk.EnableExec(5 * time.Second)
+	call := toolByName(t, sk, "get_skill_script")
+	out, _ := call(context.Background(), json.RawMessage(`{"skill_name":"greeter","script_path":"hello.sh","execute":true}`))
+	m := decode(t, out)
+	if m["error"] != nil || !strings.Contains(m["output"].(string), "hi-from-script") {
+		t.Fatalf("默认本地执行应照旧工作: %v", m)
+	}
+}

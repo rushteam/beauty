@@ -20,6 +20,7 @@ host functions 与外界交互。资源上限:**内存**用 `WithMemoryLimitPage
 ctx := context.Background()
 rt, _ := wasm.New(ctx,
     wasm.WithMemoryLimitPages(16), // 每实例最多 16*64KiB
+    wasm.WithCacheDir("/var/cache/beauty-wasm"), // 磁盘编译缓存:重启免 JIT
     wasm.WithHostFunc("env", "log", func(_ context.Context, m api.Module, ptr, n uint32) {
         buf, _ := m.Memory().Read(ptr, n) // 显式授予 guest 的“打日志”能力
         log.Print(string(buf))
@@ -27,6 +28,9 @@ rt, _ := wasm.New(ctx,
 )
 defer rt.Close(ctx)
 
+// 内置 host functions(仍需显式授予):
+//   wasm.WithLog(logger)  → env.log(ptr,len)     guest 打日志
+//   wasm.WithClock()      → env.now_unix_milli()  guest 读时间(默认无 WASI 时钟)
 mod, _ := rt.Compile(ctx, wasmBytes) // 编译一次,复用
 inst, _ := mod.Instantiate(ctx)      // 每次得到独立内存的实例(非并发安全)
 defer inst.Close(ctx)
@@ -42,8 +46,16 @@ mod, _ := rt.Compile(ctx, filterWasm)
 mux := http.NewServeMux()
 handler := wasm.Middleware(mod,
     wasm.WithTimeout(100*time.Millisecond), // 执行超时,中断死循环(超时按 fail 策略处理)
-)(yourHandler) // 每请求实例化一次,保证隔离
+    wasm.WithPool(16),                       // 实例池复用(降低实例化开销;省略则每请求新建)
+    wasm.WithWarm(4),                        // 启动预热 4 个空闲实例(需 WithPool)
+    wasm.WithBody(64*1024),                  // 可选:让 guest 看到请求体前 64KB(默认不读,零成本)
+    wasm.WithObserver(func(e wasm.Event) {   // 可观测:接指标/日志/追踪(不绑具体实现)
+        // e.Action("next"/"deny"/"error") / e.Err / e.Duration
+    }),
+)(yourHandler)
 // wasm.WithFailOpen(true)  出错/超时时放行(默认 fail-closed 返回 500,适合鉴权/WAF)
+// WithBody:guest 只见前 maxBytes(Request.Body 为 base64,超长置 BodyTruncated=true),
+//   下游始终收到完整 body;不启用则完全不读 body。
 ```
 
 ### guest ABI
@@ -108,4 +120,130 @@ Go 用 `GOOS=wasip1 GOARCH=wasm` + `//go:wasmexport`)。真实 guest 应做健�
 
 选加载哪个模块、授予哪些 host 能力、内存上限、出错 fail-open/closed 都是 policy。本包只做
 "编译 + 沙箱 + ABI + beauty 挂载"。单测用**手工编码的极小 wasm**(无需工具链/WASI)覆盖
-Runtime / host func / 内存 / 中间件全链路。
+Runtime / host func / 内存 / 中间件 / FaaS 全链路。
+
+## FaaS-lite:wasm 函数即 HTTP Handler
+
+与 Middleware 共享同一 guest ABI(`alloc`/`handle`),但 guest 输出的不是决策(Decision),
+而是**完整 HTTP 响应**(Response)——直接作为终端处理器,无需下游 handler。
+
+### 单函数 Handler
+
+```go
+mod, _ := rt.Compile(ctx, greetWasm)
+h := wasm.Handler(mod,
+    wasm.WithHandlerPool(8),                   // 实例池(复用降低开销)
+    wasm.WithHandlerWarm(4),                   // 启动预热
+    wasm.WithHandlerTimeout(5*time.Second),    // 执行超时
+    wasm.WithHandlerBody(4096),                // guest 可见请求体(前 4KB)
+    wasm.WithHandlerObserver(func(e wasm.HandlerEvent) {
+        // e.Status / e.Err / e.Duration
+    }),
+)
+http.Handle("/greet", h)
+```
+
+### Router:多函数路由 + 热插拔
+
+```go
+router := wasm.NewRouter(rt)
+
+// 从字节码注册(一步编译+挂载)
+router.RegisterBytes(ctx, "/greet", greetWasm, wasm.WithHandlerPool(8))
+router.RegisterBytes(ctx, "/echo", echoWasm)
+
+// 前缀匹配:以 "/" 结尾的模式匹配所有子路径
+router.RegisterBytes(ctx, "/api/", apiWasm)
+// GET /api/users → 匹配 "/api/"
+// GET /api/special → 若注册了精确路径则优先精确匹配
+
+// 挂到 ServeMux(StripPrefix 去掉公共前缀)
+http.Handle("/fn/", http.StripPrefix("/fn", router))
+
+// 热更新:同路径再次 Register 即替换(旧实例池自动回收)
+router.RegisterBytes(ctx, "/greet", greetV2Wasm)
+
+// 注销
+router.Deregister("/greet")
+
+// 查看当前注册的所有路径
+patterns := router.Patterns() // ["/echo", "/api/"]
+
+// 指标快照(Functions 瞬时;Hits/Misses 累计)
+st := router.Stats() // {Functions:2, Hits:42, Misses:3}
+```
+
+### guest Response 格式
+
+guest 的 `handle` 返回 Response JSON(而非 Decision):
+
+```jsonc
+{
+  "status": 200,                          // HTTP 状态码(0 或省略按 200)
+  "headers": {"Content-Type": "text/plain"}, // 响应头(可选)
+  "body": "Hello, world!"                 // 响应体(可选)
+}
+```
+
+### 用 Go 写 FaaS guest
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "unsafe"
+)
+
+type Request struct {
+    Method  string            `json:"method"`
+    Path    string            `json:"path"`
+    Query   string            `json:"query"`
+    Headers map[string]string `json:"headers"`
+    Body    string            `json:"body"`
+}
+
+type Response struct {
+    Status  int               `json:"status"`
+    Headers map[string]string `json:"headers,omitempty"`
+    Body    string            `json:"body,omitempty"`
+}
+
+var buf [65536]byte
+
+//go:wasmexport alloc
+func alloc(size int32) int32 {
+    return int32(uintptr(unsafe.Pointer(&buf[0])))
+}
+
+//go:wasmexport handle
+func handle(ptr, length int32) int64 {
+    input := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
+    var req Request
+    json.Unmarshal(input, &req)
+
+    resp := Response{
+        Status:  200,
+        Headers: map[string]string{"Content-Type": "application/json"},
+        Body:    `{"hello":"` + req.Path + `"}`,
+    }
+    out, _ := json.Marshal(resp)
+    copy(buf[:], out)
+
+    outPtr := int64(uintptr(unsafe.Pointer(&buf[0])))
+    return (outPtr << 32) | int64(len(out))
+}
+
+func main() {}
+```
+
+编译:`GOOS=wasip1 GOARCH=wasm go build -o fn.wasm .`
+
+### Middleware vs Handler 对照
+
+| | Middleware | Handler (FaaS) |
+|---|---|---|
+| 角色 | 中间件(过滤/拦截) | 终端处理器(生产响应) |
+| guest 输出 | `Decision`(next/deny) | `Response`(status+headers+body) |
+| 挂载 | `wasm.Middleware(mod)(next)` | `wasm.Handler(mod)` 或 `Router` |
+| 场景 | WAF、鉴权、限流、改写 | Serverless 函数、计算端点、webhook |

@@ -46,6 +46,8 @@ cd contrib/gorm && go test ./...
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |
 | [`contrib/mcpagent`](mcpagent) | 胶水:把 `mcp` 的远程工具桥接成 `llm/agent.Tool`,喂给 agent.Runner 的工具循环 | llm + mcp + go-sdk |
 | [`contrib/wasm`](wasm) | WebAssembly 插件运行时(wazero):沙箱化 wasm 模块 + host functions + "HTTP 中间件即 wasm" | tetratelabs/wazero |
+| [`contrib/wasmagent`](wasmagent) | 胶水:把 `wasm` 的沙箱执行能力接到 `llm/agent`(技能脚本 wasm 执行 + wasm 模块即 agent.Tool) | wasm + llm |
+| [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
 | [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
 | [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
 

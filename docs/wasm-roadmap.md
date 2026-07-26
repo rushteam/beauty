@@ -15,24 +15,59 @@
 - 高层封装:**HTTP 中间件即 wasm 模块**——请求元数据 → wasm `handle` → 决策(放行/拒绝/改写请求头/状态码);
 - `pkg/handler.WithMiddleware` 通用口,声明式绑定 wasm(核心零 contrib 依赖)。
 
-剩余打磨(非收口必需):实例池、真实 guest 示例(TinyGo/`//go:wasmexport`)、请求 body 访问、内置 host func、可观测。
+已补打磨:实例池(`WithPool`)+预热(`WithWarm`/`Pool.Warm`)、磁盘编译缓存(`WithCacheDir`)、
+内置 host functions(`WithLog`/`WithClock`)、可观测(`WithObserver`/`WithHandlerObserver`)、
+请求体访问(`WithBody`,opt-in 限长、下游不受影响)、Router 指标(`Stats`)。
+剩余(非必需):真实 guest 示例(TinyGo/`//go:wasmexport` 编译验证)。
 
 用途:自定义中间件/过滤器、限流/鉴权/改写策略、WAF 规则、可编程 webhook。
 
-## Tier 2 —— 用 wasm 沙箱执行 agent 工具 / skills 脚本
+## Tier 2 —— 用 wasm 沙箱执行 agent 工具 / skills 脚本 · 已落地(`contrib/wasmagent`)
 
 接 `contrib/llm/agent` 已有工作:`skills.EnableExec` 目前跑**本地脚本**(默认关,因等于信任任意本地命令)。
 改为在 wazero WASI 沙箱内运行 → 从"信任本地脚本"变成"能力受限、无法逃逸"的执行,补上 agent 平台的
 安全短板(E2B/code-interpreter 思路,但纯 Go 内嵌、无外部进程)。
 
-- 给 `agent.Tool` 增加 wasm 执行器,或 skills 增 `WithWasmSandbox`;
-- 顺带为"LLM 生成的代码"提供安全运行环境(code-interpreter 雏形);
-- 依赖 Tier 1 的运行时。
+- ✅ `skills.ScriptExecutor` 类型 + `WithScriptExecutor` 注入口;
+- ✅ `contrib/wasmagent.NewWasmExecutor`:适配 skills.ScriptExecutor,wasm 沙箱执行技能脚本;
+- ✅ `contrib/wasmagent.ToolFrom`:把预编译 wasm 模块直接包装成 agent.Tool;
+- ◻ LLM 生成代码的安全运行环境(code-interpreter 雏形,需嵌入一个解释器 guest)。
+
+## Tier 3 —— 策略即 wasm · 已落地(`contrib/wasmopa`)
+
+OPA 把 Rego 编译成 wasm,在 wazero 沙箱里执行,实现 `pkg/authz.Enforcer`:
+
+    opa build -t wasm -e 'authz/allow' policy.rego → policy.wasm
+    → wasmopa.New(wasmBytes) → authz.Enforcer
+
+- ✅ OPA wasm ABI 1.2+ 协议(`opa_eval` 一次性求值);
+- ✅ `Policy.Eval(ctx, input)`:通用策略求值,可用于 governance / 任意 Rego 决策;
+- ✅ `Policy.Authorize(ctx, sub, action, resource)`:实现 `authz.Enforcer`;
+- ✅ 实例池(每 slot 独立 Runtime + memory,并发安全);`SetData` 热更新外部数据;
+- 纯 Go(wazero),无 CGo、无外部进程,比完整 OPA SDK 轻量得多。
+
+## Tier 4 —— FaaS-lite:wasm 函数即 HTTP Handler · 已落地(`contrib/wasm`)
+
+beauty 作为 wasm 函数宿主:用户上传 .wasm → 注册到路径 → 实例池处理请求。
+与 Middleware 共享 alloc/handle ABI,区别在于 guest 输出 **Response**(status + headers + body)
+而非 Decision(next/deny)。
+
+- ✅ `Handler(mod)`:把单个 wasm 模块包装成 `http.Handler`;
+- ✅ `Router`:FaaS 路由器——`Register`/`Deregister`/`RegisterBytes` 热插拔;
+- ✅ 精确匹配 > 最长前缀匹配;并发安全;支持实例池(`WithHandlerPool`)+预热(`WithHandlerWarm`);
+- ✅ 超时(`WithHandlerTimeout`)+ 请求体传入(`WithHandlerBody`)+ 可观测(`WithHandlerObserver`);
+- ✅ `Router.Stats()`:Functions / Hits / Misses。
+
+用法:
+
+```go
+router := wasm.NewRouter(rt)
+router.RegisterBytes(ctx, "/greet", greetWasm, wasm.WithHandlerPool(8))
+http.Handle("/fn/", http.StripPrefix("/fn", router))
+```
 
 ## 备选(暂不排期)
 
-- 策略即 wasm:OPA 把 Rego 编译成 wasm,接 `pkg/authz` / `governance`。
-- FaaS-lite:beauty 作为 wasm 函数宿主(路由 → 用户上传的 wasm 函数,实例池)。
 - Proxy-Wasm ABI 兼容:复用现成 Envoy Wasm 过滤器(工程量大)。
 - js/wasm:把 `gameloop`/`spatial`(AOI)/`presence` 的共享逻辑编到浏览器做客户端预测。
 - GOOS=wasip1 部署到 wasm 运行时:wasip1 网络受限,当前仅适合纯计算 handler/worker。

@@ -2,10 +2,10 @@
 
 # Beauty
 
-**开箱即用的 Go 微服务框架**
+**一套生命周期跑微服务 —— 顺带实时媒体，以及 WASM · Agent 沙箱**
 
-用一套生命周期编排 HTTP · gRPC · 定时 · 实时 · 媒体等服务 ——
-内建配置、发现、韧性、消息与可观测。
+HTTP · gRPC · 定时 · 房间 · 流媒体，都挂在同一个 `app.Start(ctx)`。
+需要直播链路或 AI/策略插件时，还是这套核心来宿主。
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/rushteam/beauty.svg)](https://pkg.go.dev/github.com/rushteam/beauty)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rushteam/beauty)](https://goreportcard.com/report/github.com/rushteam/beauty)
@@ -19,20 +19,23 @@
 ---
 
 Beauty 有一个很小的核心(`beauty.New(...).Start(ctx)`),把任意多个服务放在同一套优雅停机的
-生命周期下运行;并提供一大批**机制而非策略**的能力包——每个包只解决一个问题、不侵入你的业务。
-依赖较重或可选的集成(GORM、Kafka、LLM…)以**独立模块**放在 [`contrib/`](contrib) 下,用什么才引什么。
+生命周期下运行——**机制而非策略**:每个包只解决一个问题、不侵入你的业务。依赖较重或可选的栈
+(GORM、Kafka、LLM、WASM…)以**独立模块**放在 [`contrib/`](contrib) 下,用什么才引什么。
+
+选 Beauty 的三个理由:
+
+| 主线 | 你得到什么 |
+|---|---|
+| **统一生命周期** | HTTP、gRPC(含网关)、定时任务、MQ 消费者、任意自定义 `Service`,共用一次 `Start` / 优雅停机。 |
+| **实时 + 媒体** | WebSocket / SSE / 扇出、游戏循环 + AOI/在线;以及 RTMP → HLS / LL-HLS、WebRTC WHIP/WHEP + SFU——都是 Service,不是另一套栈。 |
+| **WASM · Agent** | wazero 沙箱跑 HTTP 过滤器、FaaS 函数、OPA/Rego 鉴权、LLM agent 工具/技能——纯 Go、无 CGo。 |
 
 ## 亮点
 
-- **统一服务**:HTTP、gRPC(含网关)、定时任务,以及任意自定义 `Service`,都在一个 `app.Start(ctx)` 下优雅停机。
-- **配置与发现**:配置中心热更新(nacos/etcd/consul/k8s)、服务发现、分布式锁/选主、带 TTL 的 KV。
-- **韧性**:限流、熔断、过载保护、退避;重试 + 熔断已接进 HTTP/gRPC 客户端。
-- **实时**:WebSocket / SSE / 扇出广播、QUIC 传输、定步长游戏循环、空间 AOI 与在线状态。
-- **媒体**:RTMP 采集、HLS / LL-HLS origin、WebRTC WHIP/WHEP 与 SFU 会议室、多路流管理。
-- **消息**:传输无关的消息队列抽象 +「消费者即 Service」,broker 绑定在 contrib。
-- **可观测**:OpenTelemetry trace 与 metrics、带 trace 关联的 slog 日志、构建信息、pprof。
-- **横向扩展**:一致性哈希分片,把有状态服务(房间/流/会话)路由到多副本。
-- **contrib 模块**:数据(GORM、database/sql + sqlc)、搜索、MQ broker(NATS/JetStream/Kafka)、以及 **AI**(LLM 客户端、向量/RAG、MCP)。
+- **统一生命周期**:一个 `app.Start(ctx)` 管 HTTP、gRPC、定时任务和任意 `Service`;配置/发现/韧性/可观测内建。
+- **实时 + 媒体**:WS/SSE/QUIC、定步长游戏循环、空间 AOI 与在线;RTMP 采集、HLS / LL-HLS origin、WebRTC WHIP/WHEP + SFU、多路流管理。
+- **WASM · Agent**:[`contrib/wasm`](contrib/wasm)(中间件 / FaaS-lite 路由)、[`contrib/wasmopa`](contrib/wasmopa)(Rego→wasm 鉴权)、[`contrib/wasmagent`](contrib/wasmagent)(沙箱 agent 工具);LLM / RAG / MCP 见 [`contrib/llm`](contrib/llm) · [`contrib/vector`](contrib/vector) · [`contrib/mcp`](contrib/mcp)。路线图:[`docs/wasm-roadmap.md`](docs/wasm-roadmap.md)。
+- **其余能力**:配置热更新(nacos/etcd/consul/k8s)、服务发现、分布式锁/选主、限流/熔断/过载保护、传输无关 MQ、OpenTelemetry、一致性哈希分片,以及 contrib 里的数据/搜索/broker 模块。
 
 ## 安装
 
@@ -112,6 +115,7 @@ app.Start(ctx) // 阻塞到收到信号;各服务一并停机
 | 韧性 | `pkg/ratelimit`、`pkg/governance/{circuitbreaker,overloadctrl}`、`pkg/backoff` |
 | 实时 | `pkg/ws`、`pkg/sse`、`pkg/stream`、`pkg/quic`、`pkg/gameloop`、`pkg/spatial`、`pkg/presence` |
 | 媒体 | `pkg/media/rtmp`、`pkg/hls`、`pkg/media/hlsmux`、`pkg/media/webrtc`(含 `sfu`)、`pkg/media`(hub/supervisor/metrics) |
+| WASM / Agent | `contrib/wasm`(中间件 + FaaS)、`contrib/wasmopa`(OPA/Rego)、`contrib/wasmagent`(agent 工具/技能);见 [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) |
 | 消息 | `pkg/mq`、`pkg/eventbus`、`pkg/webhook`、`pkg/delayqueue`、`pkg/scheduler` |
 | 一致性 | `pkg/saga`、`pkg/txn`、`pkg/idempotency` |
 | 可观测 | `pkg/service/telemetry`、`pkg/service/logger`、`pkg/buildinfo`、`pkg/service/pprof` |
@@ -147,6 +151,9 @@ app := beauty.New(beauty.WithService(consumer))
 | [`contrib/llm`](contrib/llm) | provider 无关 LLM 客户端(对话/流式/embedding,OpenAI/Anthropic/Azure/兼容) | `…/contrib/llm` |
 | [`contrib/vector`](contrib/vector) | 向量存储 / RAG 语义检索 | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client(把服务暴露成 AI 工具) | `…/contrib/mcp` |
+| [`contrib/wasm`](contrib/wasm) | wazero 运行时:HTTP 中间件、FaaS-lite 路由、host funcs、池/缓存 | `…/contrib/wasm` |
+| [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm 策略,实现 `pkg/authz.Enforcer` | `…/contrib/wasmopa` |
+| [`contrib/wasmagent`](contrib/wasmagent) | 沙箱 agent 工具 / 技能(`ScriptExecutor` + `agent.Tool`) | `…/contrib/wasmagent` |
 
 路径前缀均为 `github.com/rushteam/beauty`。详见 [`contrib/README.md`](contrib/README.md)。
 
@@ -159,6 +166,7 @@ OpenTelemetry 贯穿框架:trace 与 metrics 走 `pkg/service/telemetry`,日志�
 ## 文档
 
 - [`docs/`](docs) —— 配置、中间件、服务发现、日志、实时组件等。
+- [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) —— WASM 分层(运行时、agent、OPA、FaaS)。
 - [`examples/`](examples) —— 大部分功能的可运行示例。
 - [`CHANGELOG.md`](CHANGELOG.md) —— 重要变更。
 - [`docs/media-validation.md`](docs/media-validation.md) —— 媒体链路真机验证清单。

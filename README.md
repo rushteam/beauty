@@ -2,10 +2,10 @@
 
 # Beauty
 
-**A batteries-included Go microservices framework**
+**One lifecycle for microservices — plus realtime media, and WASM · Agent sandboxes**
 
-Compose HTTP · gRPC · cron · realtime · media services under one lifecycle —
-config, discovery, resilience, messaging and observability built in.
+HTTP · gRPC · cron · rooms · streams under a single `app.Start(ctx)`.
+When you need live media or AI/policy plugins, the same core hosts them.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/rushteam/beauty.svg)](https://pkg.go.dev/github.com/rushteam/beauty)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rushteam/beauty)](https://goreportcard.com/report/github.com/rushteam/beauty)
@@ -18,23 +18,25 @@ config, discovery, resilience, messaging and observability built in.
 
 ---
 
-Beauty gives you a small core (`beauty.New(...).Start(ctx)`) that runs any number of
-services under a single graceful lifecycle, plus a broad set of **mechanisms, not policy**:
-each package solves one problem and stays out of your business logic. Heavy or optional
-integrations (GORM, Kafka, LLM, …) live as **independent modules** under [`contrib/`](contrib)
-so you only pull what you use.
+Beauty is a small core (`beauty.New(...).Start(ctx)`) that runs any number of services
+under one graceful lifecycle — **mechanisms, not policy**: each package solves one problem
+and stays out of your business logic. Heavy or optional stacks (GORM, Kafka, LLM, WASM…)
+live as **independent modules** under [`contrib/`](contrib); pull only what you use.
+
+Three reasons people pick Beauty:
+
+| Pillar | What you get |
+|---|---|
+| **Unified lifecycle** | HTTP, gRPC (+ gateway), cron, MQ consumers, and any custom `Service` share one `Start` / graceful shutdown. |
+| **Realtime + media** | WebSocket / SSE / fan-out, game loop + AOI/presence, plus RTMP → HLS / LL-HLS and WebRTC WHIP/WHEP + SFU — as services, not a separate stack. |
+| **WASM · Agent** | wazero sandboxes for HTTP filters, FaaS handlers, OPA/Rego authz, and LLM agent tools/skills — pure Go, no CGo. |
 
 ## Highlights
 
-- **Unified services** — HTTP, gRPC (+ gateway), cron, and any custom `Service` under one `app.Start(ctx)` with graceful shutdown.
-- **Config & discovery** — config center with hot reload (nacos/etcd/consul/k8s), service discovery, distributed lock / leader election, TTL-KV.
-- **Resilience** — rate limiting, circuit breaking, load shedding, backoff; retry + circuit breaker wired into the HTTP/gRPC clients.
-- **Realtime** — WebSocket / SSE / fan-out broadcaster, QUIC transport, a fixed-timestep game loop, spatial AOI & presence.
-- **Media** — RTMP ingest, HLS / LL-HLS origin, WebRTC WHIP/WHEP and an SFU room, multi-stream hub.
-- **Messaging** — a transport-agnostic message-queue abstraction with a consumer-as-Service, plus broker bindings in contrib.
-- **Observability** — OpenTelemetry traces & metrics, slog logging with trace correlation, build info, pprof.
-- **Scale-out** — consistent-hash sharding to route stateful services (rooms/streams/sessions) across replicas.
-- **contrib modules** — data (GORM, database/sql + sqlc), search, MQ brokers (NATS/JetStream/Kafka), and **AI** (LLM clients, vector/RAG, MCP).
+- **Unified lifecycle** — one `app.Start(ctx)` for HTTP, gRPC, cron, and anything implementing `Service`; config/discovery/resilience/observability built in.
+- **Realtime + media** — WS/SSE/QUIC, fixed-timestep game loop, spatial AOI & presence; RTMP ingest, HLS / LL-HLS origin, WebRTC WHIP/WHEP + SFU room, multi-stream hub.
+- **WASM · Agent** — [`contrib/wasm`](contrib/wasm) (middleware / FaaS-lite router), [`contrib/wasmopa`](contrib/wasmopa) (Rego→wasm authz), [`contrib/wasmagent`](contrib/wasmagent) (sandboxed agent tools); LLM / RAG / MCP in [`contrib/llm`](contrib/llm) · [`contrib/vector`](contrib/vector) · [`contrib/mcp`](contrib/mcp). See [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md).
+- **Also included** — config hot reload (nacos/etcd/consul/k8s), service discovery, dlock/leader, rate limit / circuit break / load shedding, transport-agnostic MQ, OpenTelemetry, consistent-hash sharding, and data/search/broker modules in contrib.
 
 ## Install
 
@@ -114,6 +116,7 @@ app.Start(ctx) // blocks until signal; drains all services
 | Resilience | `pkg/ratelimit`, `pkg/governance/{circuitbreaker,overloadctrl}`, `pkg/backoff` |
 | Realtime | `pkg/ws`, `pkg/sse`, `pkg/stream`, `pkg/quic`, `pkg/gameloop`, `pkg/spatial`, `pkg/presence` |
 | Media | `pkg/media/rtmp`, `pkg/hls`, `pkg/media/hlsmux`, `pkg/media/webrtc` (+ `sfu`), `pkg/media` (hub/supervisor/metrics) |
+| WASM / Agent | `contrib/wasm` (middleware + FaaS), `contrib/wasmopa` (OPA/Rego), `contrib/wasmagent` (agent tools/skills); see [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) |
 | Messaging | `pkg/mq`, `pkg/eventbus`, `pkg/webhook`, `pkg/delayqueue`, `pkg/scheduler` |
 | Consistency | `pkg/saga`, `pkg/txn`, `pkg/idempotency` |
 | Observability | `pkg/service/telemetry`, `pkg/service/logger`, `pkg/buildinfo`, `pkg/service/pprof` |
@@ -151,6 +154,9 @@ independently) — import only what you need; the core dependency graph stays le
 | [`contrib/llm`](contrib/llm) | provider-agnostic LLM client (chat/stream/embed, OpenAI/Anthropic/Azure/compatible) | `…/contrib/llm` |
 | [`contrib/vector`](contrib/vector) | vector store / RAG semantic search | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client (expose services as AI tools) | `…/contrib/mcp` |
+| [`contrib/wasm`](contrib/wasm) | wazero runtime: HTTP middleware, FaaS-lite router, host funcs, pool/cache | `…/contrib/wasm` |
+| [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm policies as `pkg/authz.Enforcer` | `…/contrib/wasmopa` |
+| [`contrib/wasmagent`](contrib/wasmagent) | sandboxed agent tools / skills (`ScriptExecutor` + `agent.Tool`) | `…/contrib/wasmagent` |
 
 Prefix each path with `github.com/rushteam/beauty`. See [`contrib/README.md`](contrib/README.md).
 
@@ -164,6 +170,7 @@ Configure an exporter once and the media/mq/client layers emit metrics automatic
 ## Documentation
 
 - [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more.
+- [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) — WASM tiers (runtime, agent, OPA, FaaS).
 - [`examples/`](examples) — runnable demos for most features.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
 - [`docs/media-validation.md`](docs/media-validation.md) — real-device checklist for the media stack.

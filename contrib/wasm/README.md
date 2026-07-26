@@ -20,6 +20,7 @@ host functions 与外界交互。资源上限:**内存**用 `WithMemoryLimitPage
 ctx := context.Background()
 rt, _ := wasm.New(ctx,
     wasm.WithMemoryLimitPages(16), // 每实例最多 16*64KiB
+    wasm.WithCacheDir("/var/cache/beauty-wasm"), // 磁盘编译缓存:重启免 JIT
     wasm.WithHostFunc("env", "log", func(_ context.Context, m api.Module, ptr, n uint32) {
         buf, _ := m.Memory().Read(ptr, n) // 显式授予 guest 的“打日志”能力
         log.Print(string(buf))
@@ -46,6 +47,7 @@ mux := http.NewServeMux()
 handler := wasm.Middleware(mod,
     wasm.WithTimeout(100*time.Millisecond), // 执行超时,中断死循环(超时按 fail 策略处理)
     wasm.WithPool(16),                       // 实例池复用(降低实例化开销;省略则每请求新建)
+    wasm.WithWarm(4),                        // 启动预热 4 个空闲实例(需 WithPool)
     wasm.WithBody(64*1024),                  // 可选:让 guest 看到请求体前 64KB(默认不读,零成本)
     wasm.WithObserver(func(e wasm.Event) {   // 可观测:接指标/日志/追踪(不绑具体实现)
         // e.Action("next"/"deny"/"error") / e.Err / e.Duration
@@ -131,8 +133,12 @@ Runtime / host func / 内存 / 中间件 / FaaS 全链路。
 mod, _ := rt.Compile(ctx, greetWasm)
 h := wasm.Handler(mod,
     wasm.WithHandlerPool(8),                   // 实例池(复用降低开销)
+    wasm.WithHandlerWarm(4),                   // 启动预热
     wasm.WithHandlerTimeout(5*time.Second),    // 执行超时
     wasm.WithHandlerBody(4096),                // guest 可见请求体(前 4KB)
+    wasm.WithHandlerObserver(func(e wasm.HandlerEvent) {
+        // e.Status / e.Err / e.Duration
+    }),
 )
 http.Handle("/greet", h)
 ```
@@ -162,6 +168,9 @@ router.Deregister("/greet")
 
 // 查看当前注册的所有路径
 patterns := router.Patterns() // ["/echo", "/api/"]
+
+// 指标快照(Functions 瞬时;Hits/Misses 累计)
+st := router.Stats() // {Functions:2, Hits:42, Misses:3}
 ```
 
 ### guest Response 格式

@@ -27,7 +27,16 @@ type HandlerConfig struct {
 	handleFn string
 	timeout  time.Duration
 	poolSize int
+	warm     int
 	bodyMax  int
+	observer func(HandlerEvent)
+}
+
+// HandlerEvent 是一次 FaaS handler 执行的可观测事件。
+type HandlerEvent struct {
+	Status   int           // HTTP 状态码(出错时为 500)
+	Err      error         // 非 nil 表示执行出错(含超时)
+	Duration time.Duration // 本次执行耗时(实例获取 + handle)
 }
 
 // HandlerOption 配置 wasm handler。
@@ -43,6 +52,11 @@ func WithHandlerPool(size int) HandlerOption {
 	return func(c *HandlerConfig) { c.poolSize = size }
 }
 
+// WithHandlerWarm 启动时预建 n 个空闲实例(需配合 WithHandlerPool)。
+func WithHandlerWarm(n int) HandlerOption {
+	return func(c *HandlerConfig) { c.warm = n }
+}
+
 // WithHandlerBody 设置请求体最大可见字节(base64 传给 guest)。
 func WithHandlerBody(maxBytes int) HandlerOption {
 	return func(c *HandlerConfig) { c.bodyMax = maxBytes }
@@ -51,6 +65,11 @@ func WithHandlerBody(maxBytes int) HandlerOption {
 // WithHandlerFuncNames 覆盖 guest 导出函数名。
 func WithHandlerFuncNames(alloc, handle string) HandlerOption {
 	return func(c *HandlerConfig) { c.allocFn, c.handleFn = alloc, handle }
+}
+
+// WithHandlerObserver 注册执行后回调(延迟/错误/状态码)——接 OTel/日志/指标由你定。
+func WithHandlerObserver(fn func(HandlerEvent)) HandlerOption {
+	return func(c *HandlerConfig) { c.observer = fn }
 }
 
 // Handler 把一个 wasm 模块包装成 http.Handler:每个请求传入 Request JSON,guest 返回
@@ -64,8 +83,12 @@ func Handler(mod *Module, opts ...HandlerOption) http.Handler {
 	var pool *Pool
 	if cfg.poolSize > 0 {
 		pool = mod.NewPool(cfg.poolSize)
+		if cfg.warm > 0 {
+			_ = pool.Warm(context.Background(), cfg.warm)
+		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		ctx := r.Context()
 		if cfg.timeout > 0 {
 			var cancel context.CancelFunc
@@ -81,6 +104,7 @@ func Handler(mod *Module, opts ...HandlerOption) http.Handler {
 			inst, err = mod.Instantiate(ctx)
 		}
 		if err != nil {
+			observeHandler(cfg, 500, err, start)
 			http.Error(w, "wasm: instance error", http.StatusInternalServerError)
 			return
 		}
@@ -90,6 +114,7 @@ func Handler(mod *Module, opts ...HandlerOption) http.Handler {
 		if cfg.bodyMax > 0 {
 			if body, truncated, err = captureBody(r, cfg.bodyMax); err != nil {
 				closeOrPut(pool, inst, true)
+				observeHandler(cfg, 500, err, start)
 				http.Error(w, "wasm: read body error", http.StatusInternalServerError)
 				return
 			}
@@ -98,6 +123,7 @@ func Handler(mod *Module, opts ...HandlerOption) http.Handler {
 		resp, err := callHandler(ctx, inst, r, body, truncated, cfg)
 		if err != nil {
 			closeOrPut(pool, inst, true)
+			observeHandler(cfg, 500, err, start)
 			http.Error(w, "wasm: execution error", http.StatusInternalServerError)
 			return
 		}
@@ -114,7 +140,14 @@ func Handler(mod *Module, opts ...HandlerOption) http.Handler {
 		if resp.Body != "" {
 			_, _ = w.Write([]byte(resp.Body))
 		}
+		observeHandler(cfg, status, nil, start)
 	})
+}
+
+func observeHandler(cfg *HandlerConfig, status int, err error, start time.Time) {
+	if cfg.observer != nil {
+		cfg.observer(HandlerEvent{Status: status, Err: err, Duration: time.Since(start)})
+	}
 }
 
 func callHandler(ctx context.Context, inst *Instance, r *http.Request, body []byte, truncated bool, cfg *HandlerConfig) (Response, error) {

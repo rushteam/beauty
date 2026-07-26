@@ -15,8 +15,9 @@
 - 高层封装:**HTTP 中间件即 wasm 模块**——请求元数据 → wasm `handle` → 决策(放行/拒绝/改写请求头/状态码);
 - `pkg/handler.WithMiddleware` 通用口,声明式绑定 wasm(核心零 contrib 依赖)。
 
-已补打磨:实例池(`WithPool`)、内置 host functions(`WithLog`/`WithClock`)、可观测(`WithObserver`)、
-请求体访问(`WithBody`,opt-in 限长、下游不受影响)。
+已补打磨:实例池(`WithPool`)+预热(`WithWarm`/`Pool.Warm`)、磁盘编译缓存(`WithCacheDir`)、
+内置 host functions(`WithLog`/`WithClock`)、可观测(`WithObserver`/`WithHandlerObserver`)、
+请求体访问(`WithBody`,opt-in 限长、下游不受影响)、Router 指标(`Stats`)。
 剩余(非必需):真实 guest 示例(TinyGo/`//go:wasmexport` 编译验证)。
 
 用途:自定义中间件/过滤器、限流/鉴权/改写策略、WAF 规则、可编程 webhook。
@@ -53,8 +54,9 @@ beauty 作为 wasm 函数宿主:用户上传 .wasm → 注册到路径 → 实�
 
 - ✅ `Handler(mod)`:把单个 wasm 模块包装成 `http.Handler`;
 - ✅ `Router`:FaaS 路由器——`Register`/`Deregister`/`RegisterBytes` 热插拔;
-- ✅ 精确匹配 > 最长前缀匹配;并发安全;支持实例池(`WithHandlerPool`);
-- ✅ 超时(`WithHandlerTimeout`)+ 请求体传入(`WithHandlerBody`)。
+- ✅ 精确匹配 > 最长前缀匹配;并发安全;支持实例池(`WithHandlerPool`)+预热(`WithHandlerWarm`);
+- ✅ 超时(`WithHandlerTimeout`)+ 请求体传入(`WithHandlerBody`)+ 可观测(`WithHandlerObserver`);
+- ✅ `Router.Stats()`:Functions / Hits / Misses。
 
 用法:
 

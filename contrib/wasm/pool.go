@@ -40,6 +40,35 @@ func (p *Pool) Put(ctx context.Context, inst *Instance) {
 	}
 }
 
+// Warm 启动时预建最多 n 个空闲实例,摊掉首批请求的冷启动。n 超过池容量时按容量截断;
+// 已有空闲实例时只补足差额。任一实例化失败则返回错误(已建的仍留在池中)。
+func (p *Pool) Warm(ctx context.Context, n int) error {
+	if n < 1 {
+		return nil
+	}
+	capN := cap(p.idle)
+	if n > capN {
+		n = capN
+	}
+	need := n - len(p.idle)
+	for i := 0; i < need; i++ {
+		inst, err := p.mod.Instantiate(ctx)
+		if err != nil {
+			return err
+		}
+		select {
+		case p.idle <- inst:
+		default:
+			_ = inst.Close(ctx)
+			return nil
+		}
+	}
+	return nil
+}
+
+// Idle 返回当前空闲实例数(瞬时值,仅供观测)。
+func (p *Pool) Idle() int { return len(p.idle) }
+
 // Close 关闭并清空所有空闲实例。在途实例由各自持有者负责关闭。
 func (p *Pool) Close(ctx context.Context) {
 	for {

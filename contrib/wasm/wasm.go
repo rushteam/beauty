@@ -23,7 +23,8 @@ import (
 // Runtime 是 wasm 运行时(持有 wazero.Runtime 与已注册的 host functions)。并发安全:
 // 编译/实例化可并发;单个 Instance 不可并发。用 New 构造,用完 Close。
 type Runtime struct {
-	rt wazero.Runtime
+	rt    wazero.Runtime
+	cache wazero.CompilationCache // 可选;WithCacheDir 时持有,Close 时一并关闭
 }
 
 // Option 配置 Runtime。
@@ -31,6 +32,7 @@ type Option func(*config)
 
 type config struct {
 	memoryLimitPages uint32 // 每个实例的线性内存上限(页,1 页=64KiB);0=用 wazero 默认
+	cacheDir         string // 非空时启用磁盘编译缓存(跨进程复用 JIT)
 	hostFuncs        []hostFunc
 }
 
@@ -42,6 +44,12 @@ type hostFunc struct {
 // WithMemoryLimitPages 限制每个实例的线性内存页数(1 页 = 64KiB)。防止 guest 撑爆内存。
 func WithMemoryLimitPages(pages uint32) Option {
 	return func(c *config) { c.memoryLimitPages = pages }
+}
+
+// WithCacheDir 启用磁盘编译缓存:Compile 结果持久化到 dir,进程重启后免 JIT 重编译。
+// dir 不存在时自动创建。空字符串无效(忽略)。同一 dir 可被多个 Runtime 共享。
+func WithCacheDir(dir string) Option {
+	return func(c *config) { c.cacheDir = dir }
 }
 
 // WithHostFunc 注册一个 host function 供 guest import。fn 是普通 Go 函数,签名只能用
@@ -69,6 +77,17 @@ func New(ctx context.Context, opts ...Option) (*Runtime, error) {
 	if cfg.memoryLimitPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(cfg.memoryLimitPages)
 	}
+
+	var cache wazero.CompilationCache
+	if cfg.cacheDir != "" {
+		c, err := wazero.NewCompilationCacheWithDir(cfg.cacheDir)
+		if err != nil {
+			return nil, fmt.Errorf("wasm: 编译缓存 %q: %w", cfg.cacheDir, err)
+		}
+		cache = c
+		rtCfg = rtCfg.WithCompilationCache(cache)
+	}
+
 	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
 
 	// 注册 host functions(按 module 分组)。
@@ -83,14 +102,25 @@ func New(ctx context.Context, opts ...Option) (*Runtime, error) {
 		}
 		if _, err := b.Instantiate(ctx); err != nil {
 			_ = rt.Close(ctx)
+			if cache != nil {
+				_ = cache.Close(ctx)
+			}
 			return nil, fmt.Errorf("wasm: 注册 host module %q: %w", mod, err)
 		}
 	}
-	return &Runtime{rt: rt}, nil
+	return &Runtime{rt: rt, cache: cache}, nil
 }
 
 // Close 关闭运行时(释放所有实例与编译缓存)。
-func (r *Runtime) Close(ctx context.Context) error { return r.rt.Close(ctx) }
+func (r *Runtime) Close(ctx context.Context) error {
+	err := r.rt.Close(ctx)
+	if r.cache != nil {
+		if e := r.cache.Close(ctx); e != nil && err == nil {
+			err = e
+		}
+	}
+	return err
+}
 
 // Module 是编译后的 wasm 模块。编译一次,可多次 Instantiate(每次得到独立内存的实例)。
 type Module struct {

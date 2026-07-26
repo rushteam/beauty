@@ -405,3 +405,170 @@ func TestRouter_ExactOverPrefix(t *testing.T) {
 		t.Fatalf("prefix should catch others, got %q", rec.Body.String())
 	}
 }
+
+func TestHandler_Observer(t *testing.T) {
+	resp := `{"status":201,"body":"ok"}`
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+
+	mod, err := rt.Compile(ctx, buildFaaSGuest([]byte(resp)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var ev wasm.HandlerEvent
+	h := wasm.Handler(mod, wasm.WithHandlerObserver(func(e wasm.HandlerEvent) { ev = e }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if ev.Status != 201 {
+		t.Fatalf("observer status: want 201, got %d", ev.Status)
+	}
+	if ev.Err != nil {
+		t.Fatalf("observer err: %v", ev.Err)
+	}
+	if ev.Duration <= 0 {
+		t.Fatalf("observer duration should be >0")
+	}
+}
+
+func TestHandler_WithWarm(t *testing.T) {
+	resp := `{"status":200,"body":"warm"}`
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+
+	mod, err := rt.Compile(ctx, buildFaaSGuest([]byte(resp)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := wasm.Handler(mod, wasm.WithHandlerPool(4), wasm.WithHandlerWarm(2))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "warm" {
+		t.Fatalf("warm handler: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRouter_Stats(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+
+	resp := `{"status":200,"body":"ok"}`
+	mod, _ := rt.Compile(ctx, buildFaaSGuest([]byte(resp)))
+
+	router := wasm.NewRouter(rt)
+	router.Register("/a", mod)
+	router.Register("/b", mod)
+
+	st := router.Stats()
+	if st.Functions != 2 {
+		t.Fatalf("Functions: want 2, got %d", st.Functions)
+	}
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/a", nil))
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/nope", nil))
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/b", nil))
+
+	st = router.Stats()
+	if st.Hits != 2 {
+		t.Fatalf("Hits: want 2, got %d", st.Hits)
+	}
+	if st.Misses != 1 {
+		t.Fatalf("Misses: want 1, got %d", st.Misses)
+	}
+}
+
+func TestPool_WarmAndIdle(t *testing.T) {
+	ctx := context.Background()
+	rt, err := wasm.New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close(ctx)
+
+	mod, err := rt.Compile(ctx, buildAdd())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := mod.NewPool(4)
+	if err := pool.Warm(ctx, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got := pool.Idle(); got != 3 {
+		t.Fatalf("Idle after warm: want 3, got %d", got)
+	}
+	inst, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pool.Idle(); got != 2 {
+		t.Fatalf("Idle after Get: want 2, got %d", got)
+	}
+	pool.Put(ctx, inst)
+	if got := pool.Idle(); got != 3 {
+		t.Fatalf("Idle after Put: want 3, got %d", got)
+	}
+	pool.Close(ctx)
+}
+
+func TestRuntime_WithCacheDir(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	rt1, err := wasm.New(ctx, wasm.WithCacheDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod1, err := rt1.Compile(ctx, buildAdd())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst1, err := mod1.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := inst1.Call(ctx, "add", 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res[0] != 5 {
+		t.Fatalf("add: want 5, got %d", res[0])
+	}
+	_ = inst1.Close(ctx)
+	_ = rt1.Close(ctx)
+
+	// 新 Runtime 复用同一缓存目录,应能编译并调用
+	rt2, err := wasm.New(ctx, wasm.WithCacheDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt2.Close(ctx)
+	mod2, err := rt2.Compile(ctx, buildAdd())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst2, err := mod2.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst2.Close(ctx)
+	res, err = inst2.Call(ctx, "add", 10, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res[0] != 30 {
+		t.Fatalf("cached add: want 30, got %d", res[0])
+	}
+}

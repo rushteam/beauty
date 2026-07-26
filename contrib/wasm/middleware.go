@@ -62,6 +62,7 @@ type mwConfig struct {
 	handleFn string
 	timeout  time.Duration
 	poolSize int
+	warm     int
 	observer func(Event)
 	bodyMax  int
 }
@@ -80,6 +81,9 @@ type MiddlewareOption func(*mwConfig)
 // 注意:池化实例会被**复用**,guest 不能依赖"每次调用都是全新状态"——应在 handle 内自行重置
 // (如复位其分配器)。出错/超时的实例不会放回(直接丢弃)。size<=0 表示不启用池(每请求新建)。
 func WithPool(size int) MiddlewareOption { return func(c *mwConfig) { c.poolSize = size } }
+
+// WithWarm 在中间件创建时预建 n 个空闲实例(需配合 WithPool)。n 超过池容量时按容量截断。
+func WithWarm(n int) MiddlewareOption { return func(c *mwConfig) { c.warm = n } }
 
 // WithObserver 注册执行后回调,收到 Event(动作/错误/耗时)——接 OTel/日志/指标由你定,故本包不绑具体实现。
 func WithObserver(fn func(Event)) MiddlewareOption { return func(c *mwConfig) { c.observer = fn } }
@@ -115,6 +119,9 @@ func Middleware(mod *Module, opts ...MiddlewareOption) func(http.Handler) http.H
 	var pool *Pool
 	if cfg.poolSize > 0 {
 		pool = mod.NewPool(cfg.poolSize)
+		if cfg.warm > 0 {
+			_ = pool.Warm(context.Background(), cfg.warm)
+		}
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

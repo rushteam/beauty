@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beauty Framework — Architecture</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&family=Source+Code+Pro:wght@400;500&display=swap');
+
+  /* ──────── Nature / Science Publication Palette ──────── */
+  :root {
+    /* Core neutrals  –  论文级灰度 */
+    --bg:           #FAFAFA;
+    --bg-card:      #FFFFFF;
+    --bg-code:      #F5F5F5;
+    --border:       #E0E0E0;
+    --border-strong:#BDBDBD;
+    --text:         #212121;
+    --text-sec:     #424242;
+    --text-muted:   #757575;
+    --text-dim:     #9E9E9E;
+    --rule:         #EEEEEE;
+
+    /* Nature 经典双色：蓝 / 红 */
+    --nature-blue:   #2166AC;
+    --nature-blue-l: #4393C3;
+    --nature-blue-s: #08519C;
+    --nature-blue-bg: #EFF6FF;
+    --nature-red:    #D6604D;
+    --nature-red-l:  #F4A582;
+    --nature-red-bg: #FFF5F0;
+
+    /* 分类八色（colorblind 兼容） */
+    --c-blue:   #3182BD;
+    --c-cyan:   #31A354;
+    --c-green:  #31A354;
+    --c-orange: #E6550D;
+    --c-purple: #756BB1;
+    --c-pink:   #E7298A;
+    --c-teal:   #238B45;
+    --c-gold:   #EC7014;
+    --c-gray:   #525252;
+
+    /* Shadow */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+
+    /* Fonts */
+    --font-sans: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    --font-mono: 'Source Code Pro', 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ──────── Header / Hero ──────── */
+  .hero {
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--border);
+    padding: 56px 24px 40px;
+    text-align: center;
+  }
+
+  .hero-inner {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--nature-blue);
+    background: var(--nature-blue-bg);
+    border: 1px solid rgba(33,102,172,0.2);
+    padding: 4px 14px;
+    border-radius: 3px;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    font-size: 2.8rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 12px;
+    line-height: 1.1;
+  }
+
+  h1 .accent { color: var(--nature-blue); }
+
+  .subtitle {
+    font-size: 1.05rem;
+    color: var(--text-sec);
+    max-width: 640px;
+    margin: 0 auto 24px;
+    font-weight: 400;
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-muted);
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 3px 10px;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+
+  .tag:hover {
+    color: var(--nature-blue);
+    border-color: var(--nature-blue-l);
+    background: var(--nature-blue-bg);
+  }
+
+  /* ──────── Stats Bar ──────── */
+  .stats {
+    max-width: 1000px;
+    margin: -20px auto 0;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    z-index: 10;
+  }
+
+  .stat {
+    background: #FFFFFF;
+    padding: 20px 16px;
+    text-align: center;
+  }
+
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--nature-blue);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  /* ──────── Container ──────── */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 24px 60px;
+  }
+
+  /* ──────── Section Header ──────── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 48px 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--nature-blue);
+  }
+
+  .section-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--nature-blue);
+    background: var(--nature-blue-bg);
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .section-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+
+  .section-desc {
+    color: var(--text-muted);
+    font-size: 13.5px;
+    margin-bottom: 20px;
+    max-width: 800px;
+  }
+
+  /* ──────── Card ──────── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 24px;
+    transition: box-shadow 0.2s, border-color 0.2s;
+  }
+
+  .card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--border-strong);
+  }
+
+  .card.full { grid-column: 1 / -1; }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .card-icon {
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  .card-icon.blue   { background: #DBEAFE; color: var(--nature-blue); }
+  .card-icon.red    { background: #FEE2E2; color: var(--nature-red); }
+  .card-icon.green  { background: #DCFCE7; color: #166534; }
+  .card-icon.purple { background: #EDE9FE; color: #5B21B6; }
+  .card-icon.orange { background: #FFEDD5; color: #C2410C; }
+  .card-icon.teal   { background: #CCFBF1; color: #115E59; }
+
+  .card-meta {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 2px;
+  }
+
+  .card-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .card-desc {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0 0 16px 50px;
+    line-height: 1.55;
+  }
+
+  .mermaid-wrap {
+    display: flex;
+    justify-content: center;
+    overflow-x: auto;
+    padding: 4px 0;
+  }
+
+  .mermaid-wrap .mermaid svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* ──────── Footer ──────── */
+  .footer {
+    text-align: center;
+    padding: 32px 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12.5px;
+  }
+
+  .footer a {
+    color: var(--nature-blue);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .footer a:hover { text-decoration: underline; }
+
+  /* ──────── Scrollbar ──────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D0D0D0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #B0B0B0; }
+
+  /* ──────── Responsive ──────── */
+  @media (max-width: 900px) {
+    h1 { font-size: 2rem; }
+    .grid { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════ HERO ══════════════ -->
+<header class="hero">
+  <div class="hero-inner">
+    <div class="badge">Go Microservice Framework</div>
+    <h1>Beauty <span class="accent">Framework</span></h1>
+    <p class="subtitle">一套生命周期跑微服务 —— HTTP · gRPC · 定时任务 · 实时媒体 · WASM Agent 沙箱</p>
+    <div class="tags">
+      <span class="tag">HTTP/HTTPS</span>
+      <span class="tag">gRPC</span>
+      <span class="tag">Cron Scheduler</span>
+      <span class="tag">WebSocket / SSE / QUIC</span>
+      <span class="tag">Service Discovery</span>
+      <span class="tag">OpenTelemetry</span>
+      <span class="tag">WASM</span>
+      <span class="tag">LLM / MCP</span>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════ STATS ══════════════ -->
+<div class="stats">
+  <div class="stat">
+    <div class="stat-value">70+</div>
+    <div class="stat-label">工具包 (pkg/*)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">17</div>
+    <div class="stat-label">contrib 扩展模块</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">12</div>
+    <div class="stat-label">内置中间件</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">5</div>
+    <div class="stat-label">服务发现后端</div>
+  </div>
+</div>
+
+<!-- ══════════════ CONTENT ══════════════ -->
+<main class="container">
+
+  <!-- Section 1 -->
+  <div class="section-header">
+    <span class="section-num">FIG. 1</span>
+    <span class="section-title">整体架构总览</span>
+  </div>
+  <p class="section-desc">Beauty 核心极小（<code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-code);padding:1px 5px;border-radius:3px;">beauty.New</code> → <code style="font-family:var(--font-mono);font-size:12px;background:var(--bg-code);padding:1px 5px;border-radius:3px;">App.Start</code>），通过 Option 函数式选项组合任意 Service，统一生命周期管理。</p>
+
+  <div class="card full">
+    <div class="mermaid-wrap"><div class="mermaid">
+graph TB
+    subgraph UserApp["① 用户业务层"]
+        direction TB
+        A1["业务 Handlers"]
+        A2["领域逻辑 domain"]
+        A3["自定义 Service"]
+    end
+    subgraph Core["② Beauty 核心"]
+        direction LR
+        B1["App 结构体"]
+        B2["New + Options"]
+        B3["Start 生命周期"]
+        B4["startService 编排"]
+    end
+    subgraph Services["③ 内建服务"]
+        direction LR
+        C1["webserver"]
+        C2["grpcserver"]
+        C3["cron 定时"]
+        C4["pprof 调试"]
+    end
+    subgraph Cross["④ 横切组件"]
+        direction LR
+        D1["config 热加载"]
+        D2["telemetry Trace/Metric"]
+        D3["logger"]
+    end
+    subgraph MW["⑤ 中间件链"]
+        E1["accesslog → requestid → recovery<br/>ratelimit → auth → circuitbreaker → timeout"]
+    end
+    subgraph SD["⑥ 服务发现"]
+        direction LR
+        F1["Registry / Discovery 接口"]
+        F2["etcd · consul · nacos · polaris · k8s"]
+    end
+    subgraph Client["⑦ 客户端"]
+        direction LR
+        G1["HTTP Client"]
+        G2["gRPC Client"]
+    end
+    subgraph Utils["⑧ 工具库"]
+        H1["cache · dlock · idgen · kvstore<br/>mq · eventbus · saga · txn<br/>ws · sse · quic · gameloop<br/>ratelimit · hedge · backoff · shard"]
+    end
+    subgraph Ext["⑨ contrib 扩展"]
+        direction LR
+        I1["gorm · sqldb · kafka · nats"]
+        I2["llm · mcp · vector"]
+        I3["wasm · wasmopa · wasmagent"]
+        I4["casbin · openfga"]
+    end
+    UserApp -->|"Option 注入"| Core
+    Core --> Services
+    Core --> Cross
+    Services --> MW --> A1
+    Services -->|"Ready"| Core
+    Core -->|"Register"| SD
+    Client -->|"Find/Watch"| SD
+    Cross -.->|"热更新/追踪"| Services
+    A2 --> Utils
+    A2 --> Ext
+    Client -->|"LB 策略"| Services
+    </div></div>
+  </div>
+
+  <!-- Section 2 -->
+  <div class="section-header">
+    <span class="section-num">FIG. 2</span>
+    <span class="section-title">启动与生命周期流程</span>
+  </div>
+  <p class="section-desc">每个 Service 启动时创建两个 goroutine：编排协程（就绪 → 注册 → 关停顺序）和 serve 协程（实际运行服务），两协程协作实现优雅停机。</p>
+
+  <div class="card full">
+    <div class="mermaid-wrap"><div class="mermaid">
+flowchart TD
+    START(["main() 入口"]) --> NEW["beauty.New(...)"]
+    NEW --> LOOP{"遍历 Option"}
+    LOOP -->|"WithWebServer"| O1["+ HTTP Service"]
+    LOOP -->|"WithGrpcServer"| O2["+ gRPC Service"]
+    LOOP -->|"WithCrontab"| O3["+ Cron Service"]
+    LOOP -->|"WithService"| O4["+ 自定义 Service"]
+    LOOP -->|"WithRegistry"| O5["+ Registry"]
+    LOOP -->|"WithComponent"| O6["c.Init() + After hook"]
+    O1 & O2 & O3 & O4 & O5 & O6 --> APP["返回 *App"]
+    APP --> RUN["app.Start(ctx)"]
+    RUN --> SIG["注册 SIGINT/SIGTERM"]
+    SIG --> BEFORE["runHooks(BeforeRun)"]
+    BEFORE --> READY["ready = 1"]
+    READY --> FORK["每个 Service 调用 startService()"]
+    FORK --> G1["🧵 编排协程<br/>等 Ready → Register → 等关停<br/>→ Deregister → drainDelay → stopServe"]
+    FORK --> G2["🧵 serve 协程<br/>srv.Start(serveCtx)"]
+    G1 --> STOP["收到关停信号"]
+    G2 -->|"服务退出"| STOP
+    STOP --> WAIT["svcWg.Wait()<br/>等所有服务退出"]
+    WAIT --> AFTER["runHooks(AfterRun)<br/>停 Watch/Tracer/cleanup"]
+    AFTER --> END(["logger.Sync() → 返回"])
+    style START fill:#2166AC,color:#fff,stroke:#08519C,stroke-width:2px
+    style END fill:#D6604D,color:#fff,stroke:#B2182B,stroke-width:2px
+    style G1 fill:#3182BD,color:#fff,stroke:#08519C
+    style G2 fill:#756BB1,color:#fff,stroke:#54278F
+    style NEW fill:#EFF6FF,color:#2166AC,stroke:#2166AC,stroke-width:1px
+    style RUN fill:#EFF6FF,color:#2166AC,stroke:#2166AC,stroke-width:1px
+    </div></div>
+  </div>
+
+  <!-- Section 3 -->
+  <div class="section-header">
+    <span class="section-num">FIG. 3</span>
+    <span class="section-title">HTTP 请求处理流程</span>
+  </div>
+  <p class="section-desc">洋葱模型中间件：请求从外到内穿过中间件链，响应从内到外逆序返回。OTel 追踪在最外层，业务逻辑在中心。</p>
+
+  <div class="card full">
+    <div class="mermaid-wrap"><div class="mermaid">
+flowchart LR
+    C["Client"] -->|"HTTP Request"| OT["otelhttp<br/>Trace Span"]
+    OT --> M1["accesslog"]
+    M1 --> M2["requestid"]
+    M2 --> M3["recovery"]
+    M3 --> M4["timeout"]
+    M4 --> M5["ratelimit"]
+    M5 --> M6["auth/authz"]
+    M6 --> M7["circuitbreaker"]
+    M7 --> MUX["ServeMux<br/>路由"]
+    MUX --> H["业务 Handler"]
+    H --> D["domain<br/>业务逻辑"]
+    D -->|"远程调用"| CLI["HTTP/gRPC Client"]
+    CLI --> DISC["服务发现 + LB"]
+    DISC --> REM["远程实例"]
+    D --> DB[("DB / Cache")]
+    H -->|"Response 逆序"| C
+    style C fill:#2166AC,color:#fff,stroke:#08519C,stroke-width:1.5px
+    style DB fill:#E6550D,color:#fff,stroke:#A63603,stroke-width:1.5px
+    style REM fill:#31A354,color:#fff,stroke:#006D2C,stroke-width:1.5px
+    style D fill:#EFF6FF,color:#2166AC,stroke:#2166AC
+    style OT fill:#FFF5F0,color:#D6604D,stroke:#D6604D
+    </div></div>
+  </div>
+
+  <!-- Bottom Grid -->
+  <div class="section-header">
+    <span class="section-num">FIG. 4–7</span>
+    <span class="section-title">核心机制详情</span>
+  </div>
+
+  <div class="grid">
+    <!-- 4. 优雅停机时序 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon red">⏹</div>
+        <div>
+          <div class="card-meta">FIG. 4 — Shutdown Sequence</div>
+          <div class="card-title">优雅停机时序</div>
+        </div>
+      </div>
+      <div class="card-desc">先注销 → 排空等待（drainDelay）→ 停服务 → 等 in-flight 请求 → After hooks，实现滚动发布零停机。</div>
+      <div class="mermaid-wrap"><div class="mermaid">
+sequenceDiagram
+    participant S as Signal
+    participant App as App
+    participant O as Orchestrator
+    participant Sv as Service
+    participant R as Registry
+    participant L as LB/Client
+    S->>App: SIGINT/SIGTERM
+    App->>App: cancel(ctx)
+    App->>O: ctx.Done()
+    O->>R: deregister()
+    R-->>L: instance offline
+    Note over O,L: drainDelay wait<br/>LB drains traffic
+    O->>Sv: stopServe()
+    Sv->>Sv: Shutdown(timeout)<br/>wait in-flight
+    Sv-->>App: Start() returns
+    App->>App: svcWg.Wait()
+    App->>App: AfterRun hooks
+      </div></div>
+    </div>
+
+    <!-- 5. 服务发现 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon purple">🔍</div>
+        <div>
+          <div class="card-meta">FIG. 5 — Service Discovery</div>
+          <div class="card-title">服务发现与客户端调用</div>
+        </div>
+      </div>
+      <div class="card-desc">Server Listen 成功后 Register 到注册中心（keepalive 租约），Client Watch 端点列表本地缓存，调用时走负载均衡策略。</div>
+      <div class="mermaid-wrap"><div class="mermaid">
+flowchart TD
+    subgraph P["Provider"]
+        p["webserver/grpcserver<br/>Listen → Ready()"]
+    end
+    subgraph R["Registry"]
+        r["etcd/consul/nacos<br/>Register + keepalive"]
+    end
+    subgraph C["Consumer"]
+        c1["Client.Start → Watch"]
+        c2["endpoints cache"]
+        c3["DoWith/Do call"]
+    end
+    subgraph L["Load Balance"]
+        l["WRR / P2C / Hash<br/>filter + retry"]
+    end
+    p -->|"Register"| r
+    c1 -->|"Watch"| r
+    r -->|"Notify"| c2
+    c3 --> c2 --> l -->|"invoke"| p
+    style p fill:#31A354,color:#fff,stroke:#006D2C,stroke-width:1.5px
+    style r fill:#E6550D,color:#fff,stroke:#A63603,stroke-width:1.5px
+    style c3 fill:#2166AC,color:#fff,stroke:#08519C,stroke-width:1.5px
+      </div></div>
+    </div>
+
+    <!-- 6. 配置热更新 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon orange">⚙️</div>
+        <div>
+          <div class="card-meta">FIG. 6 — Hot Config Reload</div>
+          <div class="card-title">配置热更新流程</div>
+        </div>
+      </div>
+      <div class="card-desc">conf.Loader Watch 配置源变更，先 Unmarshal 校验再提交；坏配置不会覆盖上一份可用值，保证始终可用。</div>
+      <div class="mermaid-wrap"><div class="mermaid">
+flowchart LR
+    S["配置源<br/>file / etcd / nacos<br/>consul / k8s"] -->|"Watch"| L["conf.Loader"]
+    L -->|"callback"| CC["configComponent"]
+    CC --> U["Unmarshal"]
+    U --> V{"valid?"}
+    V -->|"yes"| CB["onChange(cfg)"]
+    CB --> AT["atomic.Pointer<br/>thread-safe swap"]
+    AT --> B["biz reads cfg"]
+    V -->|"no"| E["log error<br/>keep old cfg"]
+    style S fill:#756BB1,color:#fff,stroke:#54278F,stroke-width:1.5px
+    style B fill:#31A354,color:#fff,stroke:#006D2C,stroke-width:1.5px
+    style E fill:#D6604D,color:#fff,stroke:#B2182B,stroke-width:1.5px
+    style V fill:#FFF5F0,color:#D6604D,stroke:#D6604D
+      </div></div>
+    </div>
+
+    <!-- 7. 分层依赖 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon teal">📊</div>
+        <div>
+          <div class="card-meta">FIG. 7 — Layered Dependencies</div>
+          <div class="card-title">分层依赖关系</div>
+        </div>
+      </div>
+      <div class="card-desc">七层架构，依赖方向自上而下，核心极小——「机制而非策略」，用什么才引什么，按需组装。</div>
+      <div class="mermaid-wrap"><div class="mermaid">
+graph TB
+    L1["① User App<br/>main.go"] --> L2["② Beauty API<br/>beauty.go · service.go"]
+    L2 --> L3["③ Built-in Services<br/>webserver · grpc · cron"]
+    L2 --> L4["④ Middleware<br/>auth · ratelimit · recovery"]
+    L2 --> L5["⑤ Clients<br/>http · grpcclient"]
+    L3 --> L4
+    L3 --> L6["⑥ Utilities (70+)<br/>cache · mq · ws · saga"]
+    L4 --> L6
+    L5 --> L6
+    L1 --> L6
+    L1 --> L7["⑦ contrib Extensions<br/>gorm · kafka · llm · wasm"]
+    L6 --> L7
+    style L1 fill:#D6604D,color:#fff,stroke:#B2182B,stroke-width:1.5px
+    style L2 fill:#2166AC,color:#fff,stroke:#08519C,stroke-width:1.5px
+    style L7 fill:#31A354,color:#fff,stroke:#006D2C,stroke-width:1.5px
+      </div></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<footer class="footer">
+  <p><code style="font-family:var(--font-mono);font-size:11px;background:var(--bg-code);padding:2px 6px;border-radius:3px;">github.com/rushteam/beauty</code> · Go 1.26 · MIT License</p>
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      // ──── Base ────
+      background: '#FFFFFF',
+      primaryColor: '#F0F4F8',
+      primaryTextColor: '#212121',
+      primaryBorderColor: '#2166AC',
+      secondaryColor: '#F5F0FF',
+      secondaryBorderColor: '#756BB1',
+      tertiaryColor: '#FFF5F0',
+      tertiaryBorderColor: '#D6604D',
+
+      // ──── Lines & Text ────
+      lineColor: '#757575',
+      textColor: '#424242',
+      mainBkg: '#FFFFFF',
+      nodeBkg: '#F8FAFC',
+      nodeBorder: '#2166AC',
+      clusterBkg: '#FAFAFA',
+      clusterBorder: '#E0E0E0',
+      titleColor: '#212121',
+      edgeLabelBackground: '#FFFFFF',
+
+      // ──── Font ────
+      fontFamily: '"Source Sans Pro", "Segoe UI", Helvetica, Arial, sans-serif',
+      fontSize: '13px',
+
+      // ──── Sequence ────
+      actorBkg: '#F0F4F8',
+      actorBorder: '#2166AC',
+      actorTextColor: '#212121',
+      actorLineColor: '#BDBDBD',
+      signalColor: '#424242',
+      signalTextColor: '#424242',
+      labelBoxBkgColor: '#F8FAFC',
+      labelBoxBorderColor: '#E0E0E0',
+      labelTextColor: '#424242',
+      loopTextColor: '#212121',
+      noteBkgColor: '#FFFBEB',
+      noteBorderColor: '#D97706',
+      noteTextColor: '#92400E',
+      activationBorderColor: '#2166AC',
+      activationBkgColor: '#DBEAFE',
+      sequenceNumberColor: '#FFFFFF',
+    },
+    flowchart: {
+      curve: 'basis',
+      padding: 18,
+      htmlLabels: true,
+      nodeSpacing: 36,
+      rankSpacing: 44,
+      useMaxWidth: true
+    },
+    sequence: {
+      actorMargin: 56,
+      boxMargin: 12,
+      mirrorActors: true,
+      useMaxWidth: true,
+      messageAlign: 'center',
+      noteMargin: 10,
+      width: 160,
+      height: 44
+    }
+  });
+</script>
+</body>
+</html>

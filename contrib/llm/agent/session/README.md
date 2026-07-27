@@ -17,7 +17,7 @@ cli := openai.New(key)
 r := &agent.Runner{Client: cli /*, Tools: ... */}
 
 mgr := &session.Manager{
-    Store: session.NewMemoryStore(), // 生产可换 sqldb/redis 实现(实现 session.Store 即可)
+    Store: session.NewMemoryStore(), // 或 session.NewFileStore("./sessions") 落盘
     Summarizer: &session.Summarizer{ // 可选:超阈值滚动摘要
         Client: cli, Model: "gpt-4o-mini", MaxMessages: 20, KeepRecent: 6,
     },
@@ -30,8 +30,8 @@ resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{
 })
 ```
 
-- **`Store`**:`Load(id)`(不存在返回 `nil,nil`)/`Save`。内置并发安全的 `MemoryStore`;
-  生产实现 sqldb/redis 版即可(接口一个)。
+- **`Store`**:`Load(id)`(不存在返回 `nil,nil`)/`Save`。内置并发安全的 `MemoryStore`,以及
+  `FileStore`(每会话一个 JSON 文件,零依赖持久化);生产也可自建 sqldb/redis 实现同一接口。
 - **`Manager.Run(ctx, id, runner, req)`**:`req.Messages` 只放**本轮新输入**;返回后本轮
   user 输入与最终 assistant 回复已追加进会话。旧摘要作为系统背景注入下一轮。
 - **`Summarizer`**:消息数超过 `MaxMessages` 时,把最早的一批折叠进 `Summary`,只留最近
@@ -39,5 +39,5 @@ resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{
 
 ## 边界
 
-存哪、何时摘要、保留多少条、摘要用哪个模型都是 policy(可配)。本包只做接口 + 内存实现 + 编排。
+存哪、何时摘要、保留多少条、摘要用哪个模型都是 policy(可配)。本包只做接口 + MemoryStore + FileStore + 编排。
 注:`Manager` 持久化的是 user/assistant 回合(对话历史),单次 `Run` 内部的工具往返是临时的,不入库。

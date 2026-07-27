@@ -287,6 +287,9 @@ func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit 
 			usage = *c.Usage
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resp := &llm.Response{Content: content.String(), ToolCalls: toolCalls, Usage: usage, Model: req.Model}
 	// provider 未给出流式 tool_calls、又没有任何文本,而请求声明了工具 → 回退 Generate
 	if len(req.Tools) > 0 && len(toolCalls) == 0 && content.Len() == 0 {
@@ -359,6 +362,9 @@ func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, 
 		emit(Event{Type: EventToolStart, Step: step, ToolCall: &tc})
 	}
 	result, fatal := r.dispatch(ctx, byName, tc)
+	if fatal != nil {
+		return toolOutcome{tc: tc, result: result, fatal: fatal}
+	}
 	if emit != nil {
 		tc := tc
 		emit(Event{Type: EventToolResult, Step: step, ToolCall: &tc, Result: result})
@@ -368,7 +374,7 @@ func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, 
 			return toolOutcome{tc: tc, result: result, fatal: err}
 		}
 	}
-	return toolOutcome{tc: tc, result: result, fatal: fatal}
+	return toolOutcome{tc: tc, result: result}
 }
 
 func (t Tool) effectivePerm() Permission {

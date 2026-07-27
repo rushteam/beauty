@@ -8,8 +8,8 @@
 //   - 工具来源与本包解耦:Tool.Call 就是普通 Go 函数,把 contrib/mcp 的远程工具、本地函数、HTTP
 //     调用等适配成 Tool 只需几行(见 example),故本包不 import mcp,保持零外部依赖。
 //
-// v1 只走非流式(Client.Generate)循环:工具往返需要完整的 ToolCall 才能执行,流式分片拼装
-// 留作后续。最终文本如需流式,可在拿到终态后由调用方自行再发一次 Stream。
+// 支持 Run(同步)与 RunStream(事件流,ctx 可取消);工具权限三态 Allow/Ask/Deny;
+// AgentAsTool / Chain 做薄多 agent 编排。
 package agent
 
 import (
@@ -21,18 +21,32 @@ import (
 	"github.com/rushteam/beauty/contrib/llm"
 )
 
+// Permission 是工具调用权限三态。
+type Permission int
+
+const (
+	// PermitAllow 直接执行(默认)。
+	PermitAllow Permission = iota
+	// PermitAsk 执行前经 Runner.Approve 人工确认。
+	PermitAsk
+	// PermitDeny 策略拒绝,不执行;拒绝说明喂回模型。
+	PermitDeny
+)
+
 // Tool 是一个可被模型调用的工具:Def 是给模型看的声明(名字/描述/入参 schema),
 // Call 是实际执行——收到模型给的入参(JSON),返回喂回模型的文本结果。
 // Call 返回 error 时,错误信息会作为工具结果回传给模型(让它自行重试或纠正),而不是中断整个循环。
 //
-// Approval=true 表示该工具是敏感操作,执行前需经 Runner.Approve 人工确认(未设 Approve 时照常执行)。
+// Permission 控制是否可执行;Approval=true 是旧字段,等价于 Permission=PermitAsk
+// (仅当 Permission 仍为默认 Allow 时生效,便于兼容存量代码)。
 type Tool struct {
-	Def      llm.ToolDef
-	Call     func(ctx context.Context, args json.RawMessage) (string, error)
-	Approval bool
+	Def        llm.ToolDef
+	Call       func(ctx context.Context, args json.RawMessage) (string, error)
+	Permission Permission
+	Approval   bool // deprecated: use Permission=PermitAsk
 }
 
-// Func 是构造 Tool 的便捷函数。
+// Func 是构造 Tool 的便捷函数(默认 PermitAllow)。
 func Func(name, description string, parameters json.RawMessage, call func(context.Context, json.RawMessage) (string, error)) Tool {
 	return Tool{Def: llm.ToolDef{Name: name, Description: description, Parameters: parameters}, Call: call}
 }
@@ -50,6 +64,30 @@ type Decision struct {
 	Reason   string
 }
 
+// EventType 标识 RunStream 中的事件种类。
+type EventType string
+
+const (
+	EventStep       EventType = "step"        // 模型返回一轮(可能含 tool_calls)
+	EventToolStart  EventType = "tool_start"  // 即将执行工具
+	EventToolResult EventType = "tool_result" // 工具执行完毕(含拒绝/错误文本)
+	EventFinal      EventType = "final"       // 终态文本回复
+	EventError      EventType = "error"       // 循环失败(含 MaxSteps / 审批失败 / ctx 取消)
+)
+
+// Event 是 RunStream 推送的一条事件。字段按 Type 选用:
+//   - step/final: Response
+//   - tool_start / tool_result: ToolCall (+ Result 仅 result)
+//   - error: Err (+ 可选 Response 为最后一次模型输出)
+type Event struct {
+	Type     EventType
+	Step     int
+	Response *llm.Response
+	ToolCall *llm.ToolCall
+	Result   string
+	Err      error
+}
+
 // Runner 驱动 agent 循环。Client 可以是任意 llm.Client(含 Fallback/Retry/Metered/Guard 叠加后的)。
 type Runner struct {
 	Client   llm.Client
@@ -57,24 +95,46 @@ type Runner struct {
 	MaxSteps int // <=0 时用 DefaultMaxSteps
 
 	// OnStep 在每次模型返回后回调(step 从 1 起),用于埋点/日志/观察工具调用。可为 nil。
+	// RunStream 场景更推荐消费 Event;OnStep 仍会触发以保持兼容。
 	OnStep func(step int, resp *llm.Response)
 
-	// Approve 是工具级人工审批门:执行标记 Approval 的工具前调用。返回 Approved=false → 拒绝理由
-	// 喂回模型继续;返回 error → 视为审批失败,中止整个 Run。为 nil 时,带 Approval 的工具照常执行
-	// (即未启用审批)。实现可阻塞等待人工确认(如从 channel/HTTP 拿决定)。
+	// Approve 是工具级人工审批门:执行 PermitAsk(或旧 Approval)工具前调用。
+	// 返回 Approved=false → 拒绝理由喂回模型继续;返回 error → 中止整个 Run。
+	// 为 nil 时,Ask 工具仍会执行(未启用审批)。实现可阻塞等待人工确认。
 	Approve func(ctx context.Context, tc llm.ToolCall) (Decision, error)
 }
 
-// Run 跑完整的工具循环并返回终态响应。req 里带 Model / Messages(system 用 Request.System 或
-// 一条 system 消息)/ 温度等;Runner 会自动注入 Tools 并逐轮追加 assistant/tool 消息。
+// Run 跑完整的工具循环并返回终态响应。ctx 取消会中止循环。
 // req.Messages 不会被就地修改(内部使用副本)。
 func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	return r.run(ctx, req, nil)
+}
+
+// RunStream 异步跑循环,通过 channel 推送 Event。channel 在结束时关闭。
+// ctx 取消会尽快停止(当前 Generate/工具调用依赖其 ctx),并推送 EventError。
+// 调用方应排空 channel 直至关闭,以免泄漏 goroutine。
+func (r *Runner) RunStream(ctx context.Context, req llm.Request) <-chan Event {
+	ch := make(chan Event, 16)
+	go func() {
+		defer close(ch)
+		// 始终投递事件(不因 ctx 取消而丢弃终态 error);调用方应排空直至关闭。
+		emit := func(e Event) { ch <- e }
+		resp, err := r.run(ctx, req, emit)
+		if err != nil {
+			emit(Event{Type: EventError, Response: resp, Err: err})
+			return
+		}
+		emit(Event{Type: EventFinal, Response: resp})
+	}()
+	return ch
+}
+
+func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*llm.Response, error) {
 	maxSteps := r.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = DefaultMaxSteps
 	}
 
-	// 工具声明与按名索引(一次构建,循环复用)。
 	defs := make([]llm.ToolDef, len(r.Tools))
 	byName := make(map[string]Tool, len(r.Tools))
 	for i, t := range r.Tools {
@@ -83,12 +143,14 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.Response, error
 	}
 	req.Tools = defs
 
-	// 复制消息,避免修改调用方切片。
 	msgs := make([]llm.Message, len(req.Messages))
 	copy(msgs, req.Messages)
 
 	var last *llm.Response
 	for step := 1; step <= maxSteps; step++ {
+		if err := ctx.Err(); err != nil {
+			return last, err
+		}
 		req.Messages = msgs
 		resp, err := r.Client.Generate(ctx, req)
 		if err != nil {
@@ -98,23 +160,44 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.Response, error
 		if r.OnStep != nil {
 			r.OnStep(step, resp)
 		}
+		if emit != nil {
+			emit(Event{Type: EventStep, Step: step, Response: resp})
+		}
 
-		// 无工具调用 → 终态,返回。
 		if len(resp.ToolCalls) == 0 {
 			return resp, nil
 		}
 
-		// 记录 assistant 这一回合(含它请求的工具调用),再逐个执行、把结果作为 tool 消息追加。
 		msgs = append(msgs, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
 		for _, tc := range resp.ToolCalls {
+			if err := ctx.Err(); err != nil {
+				return last, err
+			}
+			tc := tc
+			if emit != nil {
+				emit(Event{Type: EventToolStart, Step: step, ToolCall: &tc})
+			}
 			result, fatal := r.dispatch(ctx, byName, tc)
-			if fatal != nil { // 审批失败等致命错误:中止整个 Run
+			if emit != nil {
+				emit(Event{Type: EventToolResult, Step: step, ToolCall: &tc, Result: result})
+			}
+			if fatal != nil {
 				return last, fatal
 			}
 			msgs = append(msgs, llm.Message{Role: llm.Tool, ToolCallID: tc.ID, Content: result})
 		}
 	}
 	return last, ErrMaxSteps
+}
+
+func (t Tool) effectivePerm() Permission {
+	if t.Permission != PermitAllow {
+		return t.Permission
+	}
+	if t.Approval {
+		return PermitAsk
+	}
+	return PermitAllow
 }
 
 // dispatch 执行一次工具调用,返回喂回模型的文本结果。未知工具、被拒绝、执行出错都转成文本回传,
@@ -124,17 +207,22 @@ func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.To
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", tc.Name), nil
 	}
-	if t.Approval && r.Approve != nil {
-		dec, err := r.Approve(ctx, tc)
-		if err != nil {
-			return "", fmt.Errorf("agent: approval for %q: %w", tc.Name, err)
-		}
-		if !dec.Approved {
-			msg := fmt.Sprintf("工具 %q 的调用被拒绝", tc.Name)
-			if dec.Reason != "" {
-				msg += ": " + dec.Reason
+	switch t.effectivePerm() {
+	case PermitDeny:
+		return fmt.Sprintf("工具 %q 被策略拒绝(deny),不可调用", tc.Name), nil
+	case PermitAsk:
+		if r.Approve != nil {
+			dec, err := r.Approve(ctx, tc)
+			if err != nil {
+				return "", fmt.Errorf("agent: approval for %q: %w", tc.Name, err)
 			}
-			return msg, nil
+			if !dec.Approved {
+				msg := fmt.Sprintf("工具 %q 的调用被拒绝", tc.Name)
+				if dec.Reason != "" {
+					msg += ": " + dec.Reason
+				}
+				return msg, nil
+			}
 		}
 	}
 	out, err := t.Call(ctx, tc.Arguments)

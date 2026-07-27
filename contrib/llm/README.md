@@ -87,7 +87,6 @@ r := &agent.Runner{
         agent.Func("get_weather", "查天气",
             json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}}}`),
             func(ctx context.Context, args json.RawMessage) (string, error) {
-                // 解析 args,执行,返回喂回模型的文本
                 return `{"temp":25,"cond":"晴"}`, nil
             }),
     },
@@ -95,11 +94,89 @@ r := &agent.Runner{
 resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o",
     Messages: []llm.Message{{Role: llm.User, Content: "北京天气?"}}})
 fmt.Println(resp.Content)
+
+// 事件流 + ctx 可取消(step / tool_start / tool_result / final / error)
+ctx, cancel := context.WithCancel(ctx)
+defer cancel()
+for ev := range r.RunStream(ctx, req) {
+    switch ev.Type {
+    case agent.EventToolResult:
+        log.Println(ev.ToolCall.Name, ev.Result)
+    case agent.EventFinal:
+        fmt.Println(ev.Response.Content)
+    case agent.EventError:
+        return ev.Err
+    }
+}
 ```
 
 工具来源与本包解耦:`agent.Tool.Call` 是普通函数,把 [`contrib/mcp`](../mcp) 的远程工具
 (`session.CallTool`)适配成 `agent.Tool` 只需几行(见 [`contrib/mcpagent`](../mcpagent)),
 故本包不 import mcp、保持零依赖。
+
+### 工具权限三态 + 多 Agent 薄编排
+
+- **Permission**:`PermitAllow`(默认) / `PermitAsk`(经 `Approve`) / `PermitDeny`(策略拒绝)。
+  旧字段 `Approval: true` 仍等价于 Ask。
+- **AgentAsTool**:把子 `Runner` 包成工具,父 agent 可委托子任务。
+- **Chain**:按序跑多个 Runner(上一步终态文本作为下一步输入)。
+
+```go
+sub := &agent.Runner{Client: cli, Tools: researchTools}
+parent := &agent.Runner{Client: cli, Tools: []agent.Tool{
+    agent.AgentAsTool("research", "调研子任务", sub, agent.WithAgentToolModel("gpt-4o")),
+    {Def: dangerDef, Call: dangerCall, Permission: agent.PermitAsk},
+}}
+
+chain := &agent.Chain{Steps: []agent.ChainStep{
+    {Name: "draft", Runner: drafter, Model: "gpt-4o"},
+    {Name: "review", Runner: reviewer, Model: "gpt-4o", System: "严格审稿"},
+}}
+resp, _ = chain.Run(ctx, req)
+```
+
+### 人工审批(human-in-the-loop)
+
+给敏感工具标 `Permission: agent.PermitAsk`(或旧 `Approval: true`),并设 `Runner.Approve`:
+执行前先过审批门。返回 `Approved:false` 把拒绝理由喂回模型继续;返回 error 视为审批失败、中止整个 Run。
+
+```go
+r := &agent.Runner{
+    Client: cli,
+    Tools:  []agent.Tool{{Def: ..., Call: ..., Permission: agent.PermitAsk}},
+    Approve: func(ctx context.Context, tc llm.ToolCall) (agent.Decision, error) {
+        ok := askHuman(tc)
+        return agent.Decision{Approved: ok, Reason: "需管理员确认"}, nil
+    },
+}
+```
+
+### 会话记忆(`llm/agent/session`)
+
+`session.Manager` 在 `Runner` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
+历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;也可自建 sqldb/redis。
+
+```go
+store, _ := session.NewFileStore("./data/sessions")
+mgr := &session.Manager{Store: store,
+    Summarizer: &session.Summarizer{Client: cli, Model: "gpt-4o-mini", MaxMessages: 20, KeepRecent: 6}}
+resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
+    Messages: []llm.Message{{Role: llm.User, Content: "接着上次说"}}})
+```
+
+详见 [`llm/agent/session`](agent/session)。
+
+### 长期记忆工具(`llm/agent/memory`)
+
+跨会话的薄记忆:`memory_add` / `memory_search` / `memory_delete`,默认可挂到 `Runner.Tools`。
+内存实现用子串检索;需要语义检索时自行实现 `memory.Store`(接 `contrib/vector` + Embedder)。
+
+```go
+import "github.com/rushteam/beauty/contrib/llm/agent/memory"
+
+mem := memory.NewMemoryStore()
+r.Tools = append(r.Tools, memory.Tools(mem, "user-42")...)
+```
 
 ## Agent Skills(`llm/agent/skills`)
 
@@ -118,37 +195,6 @@ resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o", System: sk.SystemPrompt(),
 
 脚本执行默认关闭(只读),`sk.EnableExec(30*time.Second)` 显式开启;文件访问带路径穿越防护。
 详见 [`llm/agent/skills`](agent/skills)。
-
-### 人工审批(human-in-the-loop)
-
-给敏感工具标 `Approval: true`,并设 `Runner.Approve`:执行前先过审批门。返回 `Approved:false`
-把拒绝理由喂回模型继续;返回 error 视为审批失败、中止整个 Run。`Approve` 可阻塞等待人工确认
-(从 channel / HTTP 拿决定)。
-
-```go
-r := &agent.Runner{
-    Client: cli,
-    Tools:  []agent.Tool{{Def: ..., Call: ..., Approval: true}}, // 敏感工具
-    Approve: func(ctx context.Context, tc llm.ToolCall) (agent.Decision, error) {
-        ok := askHuman(tc) // 你的确认逻辑(可阻塞)
-        return agent.Decision{Approved: ok, Reason: "需管理员确认"}, nil
-    },
-}
-```
-
-### 会话记忆(`llm/agent/session`)
-
-`session.Manager` 在 `Runner` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
-历史与摘要自动拼进请求。`Store` 接口 + 内置 `MemoryStore`(生产可换 sqldb/redis)。
-
-```go
-mgr := &session.Manager{Store: session.NewMemoryStore(),
-    Summarizer: &session.Summarizer{Client: cli, Model: "gpt-4o-mini", MaxMessages: 20, KeepRecent: 6}}
-resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
-    Messages: []llm.Message{{Role: llm.User, Content: "接着上次说"}}})
-```
-
-详见 [`llm/agent/session`](agent/session)。
 
 ## 输入护栏(guardrails)
 

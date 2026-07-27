@@ -2,8 +2,8 @@
 // Manager 是 Runner 之上的薄编排——加载历史 → 拼进请求(旧摘要作为系统上下文 + 历史消息) →
 // 跑 Runner → 回写本轮 user/assistant → 按需摘要 → 保存。
 //
-// 边界(机制而非策略):存哪(内存/sqldb/redis)由 Store 决定;何时摘要、保留多少条、摘要用哪个
-// 模型都可配。本包只做接口 + 内存实现 + 编排,纯标准库,零外部依赖。
+// 边界(机制而非策略):存哪(内存/文件/sqldb/redis)由 Store 决定;何时摘要、保留多少条、摘要用哪个
+// 模型都可配。本包只做接口 + MemoryStore + FileStore(JSON 落盘) + 编排,纯标准库,零外部依赖。
 package session
 
 import (

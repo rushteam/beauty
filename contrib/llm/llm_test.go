@@ -221,3 +221,158 @@ func collect(t *testing.T, ch <-chan llm.Chunk) (text string, done bool) {
 	}
 	return sb.String(), done
 }
+
+// ---- Cache ----
+
+func TestCache_Generate(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = io.WriteString(w, `{"model":"m","choices":[{"message":{"content":"cached"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	defer srv.Close()
+	cli := openai.New("k", openai.WithBaseURL(srv.URL))
+	cc := llm.Cache(cli, llm.NewMemoryCacheStore(100))
+
+	req := llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}
+	r1, err := cc.Generate(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := cc.Generate(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r1.Content != "cached" || r2.Content != "cached" {
+		t.Fatalf("r1=%q r2=%q", r1.Content, r2.Content)
+	}
+	if calls != 1 {
+		t.Fatalf("should call API once, got %d", calls)
+	}
+	st := cc.Stats()
+	if st.Hits != 1 || st.Misses != 1 {
+		t.Fatalf("stats=%+v", st)
+	}
+}
+
+func TestCache_SkipNonZeroTemp(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = io.WriteString(w, `{"model":"m","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{}}`)
+	}))
+	defer srv.Close()
+	cli := openai.New("k", openai.WithBaseURL(srv.URL))
+	cc := llm.Cache(cli, llm.NewMemoryCacheStore(100))
+
+	req := llm.Request{Model: "m", Temperature: 0.7, Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}
+	_, _ = cc.Generate(context.Background(), req)
+	_, _ = cc.Generate(context.Background(), req)
+	if calls != 2 {
+		t.Fatalf("non-zero temp should not cache, calls=%d", calls)
+	}
+}
+
+func TestCache_Stream(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		sse(w,
+			`data: {"choices":[{"delta":{"content":"ab"}}]}`,
+			`data: {"choices":[{"delta":{"content":"cd"}}]}`,
+			`data: [DONE]`,
+		)
+	}))
+	defer srv.Close()
+	cli := openai.New("k", openai.WithBaseURL(srv.URL))
+	cc := llm.Cache(cli, llm.NewMemoryCacheStore(100))
+
+	req := llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}
+	ch, err := cc.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := collect(t, ch)
+	if got != "abcd" {
+		t.Fatalf("first stream=%q", got)
+	}
+	// second call should be cached
+	ch2, err := cc.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := collect(t, ch2)
+	if got2 != "abcd" {
+		t.Fatalf("cached stream=%q", got2)
+	}
+	if calls != 1 {
+		t.Fatalf("API called %d times", calls)
+	}
+}
+
+// ---- Budget ----
+
+func TestBudget(t *testing.T) {
+	cli := openaiMock(t)
+	bc := llm.Budget(cli, 10) // budget of 10 tokens
+
+	req := llm.Request{Model: "gpt-4o", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}
+	_, err := bc.Generate(context.Background(), req) // uses 3+2=5 tokens
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bc.Used() != 5 {
+		t.Fatalf("used=%d", bc.Used())
+	}
+	if bc.Remaining() != 5 {
+		t.Fatalf("remaining=%d", bc.Remaining())
+	}
+	_, err = bc.Generate(context.Background(), req) // uses another 5 → 10 total
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = bc.Generate(context.Background(), req) // should be blocked
+	if err != llm.ErrBudgetExceeded {
+		t.Fatalf("expected budget exceeded, got %v", err)
+	}
+	bc.Reset()
+	if bc.Used() != 0 {
+		t.Fatal("reset failed")
+	}
+}
+
+// ---- Output Guard ----
+
+func TestOutputGuard_Generate(t *testing.T) {
+	cli := openaiMock(t)
+	safe := llm.GuardOutput(cli, llm.MaxOutputLen(3))
+
+	_, err := safe.Generate(context.Background(), llm.Request{Model: "x", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
+	if err == nil {
+		t.Fatal("should block: 'hi there' > 3 runes")
+	}
+	var ge *llm.GuardError
+	if !strings.Contains(err.Error(), "max_output_len") {
+		t.Fatalf("err=%v, want GuardError", err)
+	}
+	_ = ge
+}
+
+func TestOutputGuard_Stream(t *testing.T) {
+	cli := openaiMock(t)
+	safe := llm.GuardOutput(cli, llm.MaxOutputLen(3))
+
+	ch, err := safe.Stream(context.Background(), llm.Request{Model: "x", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotErr error
+	for c := range ch {
+		if c.Err != nil {
+			gotErr = c.Err
+		}
+	}
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "max_output_len") {
+		t.Fatalf("stream should get output guard error, got %v", gotErr)
+	}
+}

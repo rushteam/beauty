@@ -99,23 +99,34 @@ var (
 )
 
 type chatReq struct {
-	Model       string       `json:"model"`
-	Messages    []oaiMessage `json:"messages"`
-	MaxTokens   int          `json:"max_tokens,omitempty"`
-	Temperature float64      `json:"temperature,omitempty"`
-	Stop        []string     `json:"stop,omitempty"`
-	Stream      bool         `json:"stream,omitempty"`
-	Tools       []oaiTool    `json:"tools,omitempty"`
-	ToolChoice  any          `json:"tool_choice,omitempty"`
+	Model          string       `json:"model"`
+	Messages       []oaiMessage `json:"messages"`
+	MaxTokens      int          `json:"max_tokens,omitempty"`
+	Temperature    float64      `json:"temperature,omitempty"`
+	Stop           []string     `json:"stop,omitempty"`
+	Stream         bool         `json:"stream,omitempty"`
+	Tools          []oaiTool    `json:"tools,omitempty"`
+	ToolChoice     any          `json:"tool_choice,omitempty"`
+	ResponseFormat any          `json:"response_format,omitempty"`
 }
 
-// oaiMessage 是 OpenAI 的线上消息格式(与中立的 llm.Message 不同:工具调用用 tool_calls/
-// tool_call_id 表达)。纯文本消息只有 role+content,序列化结果与旧版逐字节一致。
+// oaiMessage 是 OpenAI 的线上消息格式。Content 可能是 string(纯文本)或 []oaiContentPart(多模态)。
 type oaiMessage struct {
 	Role       string        `json:"role"`
-	Content    string        `json:"content"`
+	Content    any           `json:"content"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+type oaiContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *oaiImageURL  `json:"image_url,omitempty"`
+}
+
+type oaiImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type oaiToolCall struct {
@@ -136,14 +147,19 @@ type oaiTool struct {
 	} `json:"function"`
 }
 
-// buildMessages 把中立 Request 翻译成 OpenAI 线上消息(含 system 前置、工具调用/结果映射)。
+// buildMessages 把中立 Request 翻译成 OpenAI 线上消息(含 system 前置、工具调用/结果映射、多模态)。
 func buildMessages(req llm.Request) []oaiMessage {
 	msgs := make([]oaiMessage, 0, len(req.Messages)+1)
 	if req.System != "" {
 		msgs = append(msgs, oaiMessage{Role: string(llm.System), Content: req.System})
 	}
 	for _, m := range req.Messages {
-		om := oaiMessage{Role: string(m.Role), Content: m.Content, ToolCallID: m.ToolCallID}
+		om := oaiMessage{Role: string(m.Role), ToolCallID: m.ToolCallID}
+		if len(m.Parts) > 0 {
+			om.Content = buildContentParts(m.Parts)
+		} else {
+			om.Content = m.Content
+		}
 		for _, tc := range m.ToolCalls {
 			oc := oaiToolCall{ID: tc.ID, Type: "function"}
 			oc.Function.Name = tc.Name
@@ -153,6 +169,26 @@ func buildMessages(req llm.Request) []oaiMessage {
 		msgs = append(msgs, om)
 	}
 	return msgs
+}
+
+func buildContentParts(parts []llm.Part) []oaiContentPart {
+	out := make([]oaiContentPart, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case llm.PartText:
+			out = append(out, oaiContentPart{Type: "text", Text: p.Text})
+		case llm.PartImage:
+			detail := p.Detail
+			if detail == "" {
+				detail = "auto"
+			}
+			out = append(out, oaiContentPart{
+				Type:     "image_url",
+				ImageURL: &oaiImageURL{URL: p.ImageURL, Detail: detail},
+			})
+		}
+	}
+	return out
 }
 
 func buildTools(defs []llm.ToolDef) []oaiTool {
@@ -214,12 +250,33 @@ func apiError(resp *http.Response) error {
 	return fmt.Errorf("openai: status %s: %s", resp.Status, bytes.TrimSpace(b))
 }
 
+func buildResponseFormat(rf *llm.ResponseFormat) any {
+	if rf == nil || rf.Type == "" || rf.Type == "text" {
+		return nil
+	}
+	if rf.Type == "json_object" {
+		return map[string]string{"type": "json_object"}
+	}
+	if rf.Type == "json_schema" && rf.JSONSchema != nil {
+		return map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   rf.JSONSchema.Name,
+				"schema": rf.JSONSchema.Schema,
+				"strict": rf.JSONSchema.Strict,
+			},
+		}
+	}
+	return map[string]string{"type": rf.Type}
+}
+
 // Generate 实现 llm.Client。
 func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	resp, err := c.post(ctx, "chat/completions", chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
 		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
+		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: request: %w", err)
@@ -265,6 +322,7 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,
 		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
+		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 	}
 	resp, err := c.post(ctx, "chat/completions", body)
 	if err != nil {

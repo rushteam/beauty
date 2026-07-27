@@ -136,6 +136,7 @@ func (m *Manager) RunStream(ctx context.Context, id string, r *agent.Runner, req
 		for ev := range r.RunStream(ctx, full) {
 			if ev.Type == agent.EventFinal {
 				final = ev.Response
+				continue
 			}
 			emit(ev)
 			if ev.Type == agent.EventError {
@@ -147,7 +148,9 @@ func (m *Manager) RunStream(ctx context.Context, id string, r *agent.Runner, req
 		}
 		if err := m.persist(ctx, sess, newMsgs, final.Content); err != nil {
 			emit(agent.Event{Type: agent.EventError, Response: final, Err: err})
+			return
 		}
+		emit(agent.Event{Type: agent.EventFinal, Response: final})
 	}()
 	return ch
 }

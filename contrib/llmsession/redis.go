@@ -61,15 +61,16 @@ func (s *RedisStore) Load(ctx context.Context, id string) (*session.Session, err
 	return &sess, nil
 }
 
-// Save 实现 session.Store。
+// Save 实现 session.Store。不修改传入的 sess 对象。
 func (s *RedisStore) Save(ctx context.Context, sess *session.Session) error {
 	if sess == nil || sess.ID == "" {
 		return fmt.Errorf("llmsession: invalid session")
 	}
-	if sess.UpdatedAt.IsZero() {
-		sess.UpdatedAt = time.Now().UTC()
+	cp := *sess
+	if cp.UpdatedAt.IsZero() {
+		cp.UpdatedAt = time.Now().UTC()
 	}
-	b, err := json.Marshal(sess)
+	b, err := json.Marshal(&cp)
 	if err != nil {
 		return err
 	}

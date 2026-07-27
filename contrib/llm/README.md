@@ -296,6 +296,21 @@ r := &agent.Runner{Client: bc, ...}
 // bc.Used() / bc.Remaining() / bc.Reset()
 ```
 
+## 响应缓存
+
+`Cache` 对相同请求缓存 Response,避免重复 API 调用(省钱/降延迟)。默认仅缓存 temperature=0 的确定性请求;
+Stream 场景:命中时回放为单 Chunk,未命中时正常流式并在 Done 后写缓存。
+
+```go
+store := llm.NewMemoryCacheStore(1024) // 最多 1024 条;或自实现 CacheStore 接 Redis
+cc := llm.Cache(cli, store,
+    llm.WithCacheTTL(30*time.Minute),
+    llm.WithCacheFilter(func(r llm.Request) bool { return true }), // 自定义条件
+)
+r := &agent.Runner{Client: cc, ...}
+fmt.Println(cc.Stats()) // {Hits: 12, Misses: 3}
+```
+
 ## 多厂商适配
 
 **大部分厂商提供 OpenAI 兼容端点,换 `WithBaseURL` 即用同一 `openai` provider,无需专门适配:**

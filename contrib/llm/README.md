@@ -154,7 +154,8 @@ r := &agent.Runner{
 ### 会话记忆(`llm/agent/session`)
 
 `session.Manager` 在 `Runner` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
-历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;也可自建 sqldb/redis。
+历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;
+生产 SQLite/Redis 见 [`contrib/llmsession`](../llmsession)。
 
 ```go
 store, _ := session.NewFileStore("./data/sessions")
@@ -169,13 +170,32 @@ resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
 ### 长期记忆工具(`llm/agent/memory`)
 
 跨会话的薄记忆:`memory_add` / `memory_search` / `memory_delete`,默认可挂到 `Runner.Tools`。
-内存实现用子串检索;需要语义检索时自行实现 `memory.Store`(接 `contrib/vector` + Embedder)。
+内存实现用子串检索;语义检索用 [`contrib/memoryvector`](../memoryvector)(Embedder + vector)。
 
 ```go
-import "github.com/rushteam/beauty/contrib/llm/agent/memory"
+import (
+    "github.com/rushteam/beauty/contrib/llm/agent/memory"
+    "github.com/rushteam/beauty/contrib/memoryvector"
+    "github.com/rushteam/beauty/contrib/vector"
+)
 
-mem := memory.NewMemoryStore()
+mem, _ := memoryvector.New(openai.New(key), vector.NewMemoryStore())
 r.Tools = append(r.Tools, memory.Tools(mem, "user-42")...)
+```
+
+### 中途插话 + Hooks
+
+```go
+steer := agent.NewSteer(8)
+r := &agent.Runner{
+    Client: cli, Tools: tools, Steer: steer,
+    Hooks: agent.Hooks{
+        BeforeModel: func(ctx context.Context, step int, req *llm.Request) error { return nil },
+        AfterTool:   func(ctx context.Context, step int, tc llm.ToolCall, result string) error { return nil },
+    },
+}
+steer.Enqueue("先别删文件,只列出来") // 下一轮 Generate 前注入为 user 消息
+for ev := range r.RunStream(ctx, req) { /* EventSteer 可见插话 */ }
 ```
 
 ## Agent Skills(`llm/agent/skills`)

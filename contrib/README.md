@@ -41,8 +41,10 @@ cd contrib/gorm && go test ./...
 | [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(consumer group;at-least-once,提交后确认) | segmentio/kafka-go |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
-| [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 薄 **agent 循环**(`llm/agent`,含**人工审批**)+ **会话记忆**(`llm/agent/session`)+ **Agent Skills**(`llm/agent/skills`,SKILL.md)(OpenAI/Anthropic) | 无(纯 stdlib) |
+| [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 薄 **agent 循环**(`llm/agent`,含审批/流式事件/Steer/Hooks/Chain)+ **会话记忆** + **Agent Skills** | 无(纯 stdlib) |
+| [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
+| [`contrib/memoryvector`](memoryvector) | 胶水:Embedder + vector → `llm/agent/memory.Store`(语义长期记忆) | llm + vector |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |
 | [`contrib/mcpagent`](mcpagent) | 胶水:把 `mcp` 的远程工具桥接成 `llm/agent.Tool`,喂给 agent.Runner 的工具循环 | llm + mcp + go-sdk |
 | [`contrib/wasm`](wasm) | WebAssembly 插件运行时(wazero):沙箱化 wasm 模块 + host functions + "HTTP 中间件即 wasm" | tetratelabs/wazero |

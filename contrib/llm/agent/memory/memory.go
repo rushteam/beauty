@@ -2,7 +2,7 @@
 // 可直接挂到 Runner 的工具(memory_add / memory_search / memory_delete)。
 //
 // 与 session 包的区别:session 管单次对话历史;memory 管用户级事实/笔记,可被工具读写。
-// 检索默认是子串匹配(零依赖);语义检索可自行实现 Store(接 contrib/vector + Embedder)。
+// 检索默认是子串匹配(零依赖);语义检索用 contrib/memoryvector(Embedder + contrib/vector)。
 package memory
 
 import (

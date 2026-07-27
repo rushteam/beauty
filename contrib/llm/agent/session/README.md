@@ -31,7 +31,8 @@ resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{
 ```
 
 - **`Store`**:`Load(id)`(不存在返回 `nil,nil`)/`Save`。内置并发安全的 `MemoryStore`,以及
-  `FileStore`(每会话一个 JSON 文件,零依赖持久化);生产也可自建 sqldb/redis 实现同一接口。
+  `FileStore`(每会话一个 JSON 文件,零依赖持久化);生产 SQLite/Redis 见
+  [`contrib/llmsession`](../../../llmsession)。
 - **`Manager.Run(ctx, id, runner, req)`**:`req.Messages` 只放**本轮新输入**;返回后本轮
   user 输入与最终 assistant 回复已追加进会话。旧摘要作为系统背景注入下一轮。
 - **`Summarizer`**:消息数超过 `MaxMessages` 时,把最早的一批折叠进 `Summary`,只留最近

@@ -92,11 +92,15 @@ type Response struct {
 
 // Chunk 是流式生成的一个增量片段。Delta 是本次新增文本;结束时 Done=true 且可能带最终 Usage;
 // 出错时 Err 非 nil(随后 channel 关闭)。
+//
+// ToolCalls:支持流式工具调用的 provider 在 Done 时带上组装好的完整调用列表
+// (增量分片过程中可不填);agent.RunStream 据此继续工具循环。
 type Chunk struct {
-	Delta string
-	Usage *Usage
-	Done  bool
-	Err   error
+	Delta     string
+	ToolCalls []ToolCall
+	Usage     *Usage
+	Done      bool
+	Err       error
 }
 
 // Client 是一个对话补全客户端(由各 provider 实现)。

@@ -95,20 +95,25 @@ resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o",
     Messages: []llm.Message{{Role: llm.User, Content: "北京天气?"}}})
 fmt.Println(resp.Content)
 
-// 事件流 + ctx 可取消(step / tool_start / tool_result / final / error)
+// 事件流:模型走 Stream 推 EventToken;工具轮结束后推 step / tool_* / final
 ctx, cancel := context.WithCancel(ctx)
 defer cancel()
 for ev := range r.RunStream(ctx, req) {
     switch ev.Type {
+    case agent.EventToken:
+        fmt.Print(ev.Result) // 增量文本
     case agent.EventToolResult:
         log.Println(ev.ToolCall.Name, ev.Result)
     case agent.EventFinal:
-        fmt.Println(ev.Response.Content)
+        fmt.Println("\n>", ev.Response.Content)
     case agent.EventError:
         return ev.Err
     }
 }
 ```
+
+同轮多个 tool_call **默认并行**;串行:`ParallelTools: agent.Bool(false)`。
+provider 若不支持流式 tool_calls,会自动回退 `Generate`。
 
 工具来源与本包解耦:`agent.Tool.Call` 是普通函数,把 [`contrib/mcp`](../mcp) 的远程工具
 (`session.CallTool`)适配成 `agent.Tool` 只需几行(见 [`contrib/mcpagent`](../mcpagent)),
@@ -165,7 +170,7 @@ resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
     Messages: []llm.Message{{Role: llm.User, Content: "接着上次说"}}})
 ```
 
-详见 [`llm/agent/session`](agent/session)。
+详见 [`llm/agent/session`](agent/session)。也可用 `mgr.RunStream` 转发事件并在 `EventFinal` 时落盘。
 
 ### 长期记忆工具(`llm/agent/memory`)
 

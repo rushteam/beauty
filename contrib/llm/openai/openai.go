@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -258,9 +259,8 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 }
 
 // Stream 实现 llm.Client(SSE:data: {json} ... data: [DONE])。
+// 透传文本增量,并组装流式 tool_calls(按 index 拼接 arguments),在 Done 时带回完整 ToolCalls。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	// 注:v1 的流式只透传文本增量,不解析流式 tool_calls 分片(工具循环走 Generate,见 llm/agent)。
-	// tools 仍随请求发出,便于模型在最后一轮直接产出文本。
 	body := chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,
@@ -280,6 +280,35 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		defer resp.Body.Close()
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		type acc struct {
+			id, name string
+			args     strings.Builder
+		}
+		byIdx := map[int]*acc{}
+		finish := func() {
+			if len(byIdx) == 0 {
+				out <- llm.Chunk{Done: true}
+				return
+			}
+			// 按 index 稳定排序
+			idxs := make([]int, 0, len(byIdx))
+			for i := range byIdx {
+				idxs = append(idxs, i)
+			}
+			sort.Ints(idxs)
+			tcs := make([]llm.ToolCall, 0, len(idxs))
+			for _, i := range idxs {
+				a := byIdx[i]
+				args := a.args.String()
+				if args == "" {
+					args = "{}"
+				}
+				tcs = append(tcs, llm.ToolCall{
+					ID: a.id, Name: a.name, Arguments: json.RawMessage(args),
+				})
+			}
+			out <- llm.Chunk{Done: true, ToolCalls: tcs}
+		}
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
 			data, ok := strings.CutPrefix(line, "data:")
@@ -288,30 +317,58 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			}
 			data = strings.TrimSpace(data)
 			if data == "[DONE]" {
-				out <- llm.Chunk{Done: true}
+				finish()
 				return
 			}
 			var ev struct {
 				Choices []struct {
 					Delta struct {
-						Content string `json:"content"`
+						Content   string `json:"content"`
+						ToolCalls []struct {
+							Index    int    `json:"index"`
+							ID       string `json:"id"`
+							Function struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							} `json:"function"`
+						} `json:"tool_calls"`
 					} `json:"delta"`
 				} `json:"choices"`
 			}
 			if json.Unmarshal([]byte(data), &ev) != nil {
 				continue
 			}
-			if len(ev.Choices) > 0 && ev.Choices[0].Delta.Content != "" {
+			if len(ev.Choices) == 0 {
+				continue
+			}
+			d := ev.Choices[0].Delta
+			if d.Content != "" {
 				select {
-				case out <- llm.Chunk{Delta: ev.Choices[0].Delta.Content}:
+				case out <- llm.Chunk{Delta: d.Content}:
 				case <-ctx.Done():
 					return
 				}
 			}
+			for _, tc := range d.ToolCalls {
+				a, ok := byIdx[tc.Index]
+				if !ok {
+					a = &acc{}
+					byIdx[tc.Index] = a
+				}
+				if tc.ID != "" {
+					a.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					a.name = tc.Function.Name
+				}
+				a.args.WriteString(tc.Function.Arguments)
+			}
 		}
 		if err := sc.Err(); err != nil {
 			out <- llm.Chunk{Err: fmt.Errorf("openai: stream: %w", err)}
+			return
 		}
+		finish()
 	}()
 	return out, nil
 }

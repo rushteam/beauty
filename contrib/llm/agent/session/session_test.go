@@ -72,6 +72,33 @@ func TestManager_PersistsAndInjectsHistory(t *testing.T) {
 	}
 }
 
+func TestManager_RunStream_Persists(t *testing.T) {
+	ctx := context.Background()
+	fc := &replyClient{reply: "流式回复"}
+	r := &agent.Runner{Client: fc}
+	m := &session.Manager{Store: session.NewMemoryStore()}
+
+	var final string
+	for ev := range m.RunStream(ctx, "s-stream", r, user("你好")) {
+		if ev.Type == agent.EventError {
+			t.Fatal(ev.Err)
+		}
+		if ev.Type == agent.EventFinal {
+			final = ev.Response.Content
+		}
+	}
+	if final != "流式回复" {
+		t.Fatalf("final=%q", final)
+	}
+	sess, err := m.Store.Load(ctx, "s-stream")
+	if err != nil || sess == nil {
+		t.Fatalf("load: %v %v", err, sess)
+	}
+	if len(sess.Messages) != 2 || sess.Messages[0].Content != "你好" || sess.Messages[1].Content != "流式回复" {
+		t.Fatalf("sess=%+v", sess)
+	}
+}
+
 // 摘要触发:超阈值后早期消息折叠成 Summary,只保留最近若干条,且下轮作为系统背景注入。
 func TestManager_RollingSummary(t *testing.T) {
 	ctx := context.Background()

@@ -104,6 +104,69 @@ app.Start(ctx) // blocks until signal; drains all services
 - **gRPC** — register your servers; standard health service + retry policy included. REST gateway via `pkg/service/grpcgw`.
 - **Cron** — scheduled jobs that run only on the elected leader.
 
+## Microservices: register · discover · call
+
+The snippet above co-locates services in one process. Across processes, Beauty uses a
+registry (etcd / nacos / …) so providers advertise themselves and callers dial by name —
+with load balancing, label routing, and retries on the client side.
+
+**Provider** — register on start:
+
+```go
+registry := etcdv3.NewRegistry(&etcdv3.Config{
+	Endpoints: []string{"127.0.0.1:2379"},
+	Prefix:    "/beauty",
+	TTL:       10,
+})
+
+app := beauty.New(
+	beauty.WithRegistry(registry),
+	beauty.WithService(grpcserver.New(":9090",
+		func(s *grpc.Server) {
+			pb.RegisterGreeterServer(s, &greeter{})
+		},
+		grpcserver.WithServiceName("helloworld.rpc"),
+		grpcserver.WithMetadata(map[string]string{"env": "production"}),
+	)),
+)
+app.Start(ctx)
+```
+
+**Caller** — discover and invoke (another process / another service):
+
+```go
+conn, err := grpcclient.DialContext(ctx, "beauty://helloworld.rpc?env=production",
+	grpcclient.WithRegistry(registry),
+	grpcclient.WithLoadBalancer("p2c_ewma"),
+)
+if err != nil {
+	return err
+}
+defer conn.Close()
+
+client := pb.NewGreeterClient(conn)
+resp, err := client.SayHello(ctx, &pb.HelloRequest{Name: "beauty"})
+```
+
+Or dial with an embedded registry URL (no separate `Registry` value):
+
+```go
+// etcd://host:port/serviceName  or  nacos://host:port/serviceName?...
+conn, err := grpcclient.DialContext(ctx, "nacos://127.0.0.1:8848/helloworld.rpc")
+```
+
+| Piece | Where |
+|---|---|
+| Register | `beauty.WithRegistry` / `grpcserver.WithAutoServiceDiscovery` |
+| Dial | `grpcclient.DialContext` (`beauty://` · `etcd://` · `nacos://`) |
+| Route | query labels (`env`/`region`/…), weighted / P2C load balancing |
+| HTTP | symmetric API in `pkg/client/http` |
+
+See [`docs/grpc-service-discovery.md`](docs/grpc-service-discovery.md),
+[`docs/grpc-dial-context.md`](docs/grpc-dial-context.md), and
+[`examples/grpc-service-discovery`](examples/grpc-service-discovery) /
+[`examples/grpc-dial-context`](examples/grpc-dial-context).
+
 ## Capability map
 
 | Area | Packages |

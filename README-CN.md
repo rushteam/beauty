@@ -103,6 +103,66 @@ app.Start(ctx) // 阻塞到收到信号;各服务一并停机
 - **gRPC**:注册你的 server;内建标准 health service 与重试策略。REST 网关见 `pkg/service/grpcgw`。
 - **定时任务**:仅在选主 leader 上运行的周期任务。
 
+## 微服务：注册 · 发现 · 调用
+
+上面是「同进程多 Service」;跨进程才是微服务主路径。Beauty 用注册中心(etcd / nacos / …)
+把服务挂出去,调用方按名字拨号——负载均衡、标签路由、重试都在客户端里。
+
+**提供方**——启动时注册到 etcd:
+
+```go
+registry := etcdv3.NewRegistry(&etcdv3.Config{
+	Endpoints: []string{"127.0.0.1:2379"},
+	Prefix:    "/beauty",
+	TTL:       10,
+})
+
+app := beauty.New(
+	beauty.WithRegistry(registry),
+	beauty.WithService(grpcserver.New(":9090",
+		func(s *grpc.Server) {
+			pb.RegisterGreeterServer(s, &greeter{})
+		},
+		grpcserver.WithServiceName("helloworld.rpc"),
+		grpcserver.WithMetadata(map[string]string{"env": "production"}),
+	)),
+)
+app.Start(ctx)
+```
+
+**调用方**——按服务名发现并调用(可在另一个进程 / 另一个服务里):
+
+```go
+conn, err := grpcclient.DialContext(ctx, "beauty://helloworld.rpc?env=production",
+	grpcclient.WithRegistry(registry),
+	grpcclient.WithLoadBalancer("p2c_ewma"),
+)
+if err != nil {
+	return err
+}
+defer conn.Close()
+
+client := pb.NewGreeterClient(conn)
+resp, err := client.SayHello(ctx, &pb.HelloRequest{Name: "beauty"})
+```
+
+也支持直接写注册中心地址,不必先构造 `Registry`:
+
+```go
+// etcd://host:port/serviceName  或  nacos://host:port/serviceName?...
+conn, err := grpcclient.DialContext(ctx, "nacos://127.0.0.1:8848/helloworld.rpc")
+```
+
+| 能力 | 说明 |
+|---|---|
+| 注册 | `beauty.WithRegistry` / `grpcserver.WithAutoServiceDiscovery` |
+| 拨号 | `grpcclient.DialContext`(`beauty://` · `etcd://` · `nacos://`) |
+| 路由 | query 标签过滤(`env`/`region`/…)、加权 / P2C 负载均衡 |
+| HTTP | 对称 API 见 `pkg/client/http` |
+
+更多见 [`docs/grpc-service-discovery.md`](docs/grpc-service-discovery.md)、[`docs/grpc-dial-context.md`](docs/grpc-dial-context.md),
+以及示例 [`examples/grpc-service-discovery`](examples/grpc-service-discovery)、[`examples/grpc-dial-context`](examples/grpc-dial-context)。
+
 ## 能力总览
 
 | 领域 | 包 |

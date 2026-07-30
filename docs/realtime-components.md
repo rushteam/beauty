@@ -1060,6 +1060,213 @@ it, pity := p.Draw()            // pity=true 表示本次由保底触发
 - Alias 表构建后只读、并发安全;`WithRand` 可注入可复现随机源;
 - `Puller` 有 pity 计数状态,非并发安全(每玩家一个)。详见 `examples/loot`。
 
+## 速查:pkg/semaphore（加权信号量 / 舱壁隔离）
+
+限制对共享资源的最大并发占用量。支持加权获取(重操作多占、轻操作少占);
+等权场景(bulkhead/舱壁隔离)是 cost=1 的特殊情况。
+
+```go
+s := semaphore.New(
+    semaphore.WithCapacity(20),                   // 总容量 20
+    semaphore.WithMaxWait(100*time.Millisecond),  // 满时最多等 100ms
+    semaphore.WithOnReject(func() { metrics.Incr("sem.reject") }),
+)
+
+// 等权模式(bulkhead):每次 cost=1
+err := s.Do(ctx, func() error { return callLight() })
+
+// 加权模式:重操作占 5 槽
+err = s.DoWithCost(ctx, 5, func() error { return callHeavy() })
+
+// 底层 API
+s.Acquire(ctx, 3)   // 手动获取
+s.Release(3)        // 手动释放
+s.TryAcquire(2)     // 非阻塞尝试
+
+s.InFlight()        // 当前占用
+s.Available()       // 剩余容量
+s.Capacity()        // 总容量
+```
+
+**典型场景**:
+
+1. **下游 API 并发保护**——对慢接口限最大并发,防止 goroutine 泄洪:
+   ```go
+   var apiSem = semaphore.New(semaphore.WithCapacity(20))
+   func CallSlowAPI(ctx context.Context) error {
+       return apiSem.Do(ctx, func() error { return http.Post(...) })
+   }
+   ```
+
+2. **加权 DB 连接隔离**——重查询多占、轻查询少占,共享连接池:
+   ```go
+   var dbSem = semaphore.New(semaphore.WithCapacity(100))
+   func HeavyQuery(ctx context.Context) error {
+       return dbSem.DoWithCost(ctx, 10, func() error { return db.ExecHeavy(ctx) })
+   }
+   ```
+
+3. **批量下载限并发**——100 个 URL 但最多同时 8 个网络连接:
+   ```go
+   var dlSem = semaphore.New(semaphore.WithCapacity(8))
+   for _, u := range urls {
+       go func(url string) { dlSem.Do(ctx, func() error { return download(ctx, url) }) }(u)
+   }
+   ```
+
+4. **跨函数持有**——`Acquire` 在 Open,`Release` 在 Close:
+   ```go
+   func OpenStream(ctx context.Context) (*Stream, error) {
+       if err := streamSem.Acquire(ctx, 1); err != nil { return nil, err }
+       return &Stream{}, nil
+   }
+   func (s *Stream) Close() { streamSem.Release(1) }
+   ```
+
+- 与 `ratelimit`(限速率/每秒多少)互补:semaphore 限的是**同时占用**的容量;
+- 与 `circuitbreaker` 搭配:限并发 + 错误率过高时熔断;
+- 与 `timeout` 搭配:限并发 + 单次调用超时保护;
+- `MaxWait=0` 满即拒绝(默认);`MaxWait>0` 排队等待,超时仍拒;
+- `Do`/`DoWithCost` 自动 acquire+release;context 取消感知;并发安全。
+
+## 速查:pkg/throttle（批量聚合触发）
+
+攒满 N 条或到达 T 时间即批量 flush。日志/事件/DB 批量写入场景标配。
+
+```go
+th := throttle.New[Event](func(batch []Event) {
+    db.BulkInsert(batch)
+}, throttle.WithMaxBatch(200), throttle.WithInterval(time.Second))
+
+th.Start(ctx)
+defer th.Stop() // 停止并 flush 剩余
+
+th.Add(event)           // 满 200 自动 flush
+th.AddBatch(events)     // 批量添加
+th.Flush()              // 手动触发
+th.Len()                // 当前缓冲量
+```
+
+- `Add` 攒满立即 flush(调用方 goroutine 执行 flushFn);定时器到达也 flush;
+- `Stop` 保证剩余数据不丢;context 取消后 Stop 仍 flush;
+- 并发安全。
+
+## 速查:pkg/priority（优先级队列）
+
+泛型二叉堆,支持 Push/Pop/Peek/Update/Remove。两个变体:零开销非并发安全 + Mutex 并发安全。
+
+```go
+// 最小堆(调度:最早截止时间在堆顶)
+q := priority.New[Task](func(a, b Task) bool { return a.Deadline.Before(b.Deadline) })
+q.Push(task1)
+q.Push(task2)
+next := q.Peek()       // 查看不出队
+done := q.Pop()        // 出队
+q.Update(idx)          // 某元素优先级变了,重新堆化
+q.Remove(idx)          // 按索引删除
+
+// 并发安全版本
+sq := priority.NewSync[int](func(a, b int) bool { return a < b })
+sq.Push(3); sq.Push(1)
+v, ok := sq.Pop()      // (1, true)
+```
+
+- `Queue[T]`:非并发安全,零锁开销,适合单 goroutine / 调度循环内部使用;
+- `SyncQueue[T]`:内置 Mutex,Pop/Peek 返回 (T, bool) 安全处理空队列;
+- `PushPop`:一次操作完成 Push+Pop,比分开调用少一次堆调整。
+
+## 速查:pkg/timeout（超时执行 + panic 恢复）
+
+给任意函数加超时 + panic 自动恢复 + 错误分类(超时/panic/业务错误 三类 errors.Is 可判)。
+
+```go
+// 基本用法:超时 + panic 保护
+err := timeout.Do(ctx, 3*time.Second, func(ctx context.Context) error {
+    return callUntrusted(ctx)
+})
+if errors.Is(err, timeout.ErrTimeout) { /* 超时 */ }
+if errors.Is(err, timeout.ErrPanic)   { /* fn 内 panic */ }
+
+// 泛型版:带返回值
+val, err := timeout.DoValue(ctx, time.Second, func(ctx context.Context) (Result, error) {
+    return fetchData(ctx)
+})
+```
+
+- 比裸 `context.WithTimeout` 多:panic 恢复(不打崩调用方) + 错误分类;
+- fn 运行在独立 goroutine;超时后调用方立即返回(fn 内应检查 ctx 配合退出);
+- 无状态、并发安全。
+
+## 速查:pkg/pipeline（多阶段流水线）
+
+类型安全的 Stage 链:每阶段可配并发 worker + 有界 channel 背压 + 扇入扇出。
+
+```go
+src := pipeline.Source(ctx, urls)
+
+// Stage 1: 下载(4 并发)
+s1 := pipeline.Stage[string, []byte]{
+    Process: func(ctx context.Context, url string, emit func([]byte)) error {
+        data, err := download(ctx, url)
+        if err != nil { return err }
+        emit(data)
+        return nil
+    },
+    Workers: 4, BufSize: 10,
+}
+
+// Stage 2: 处理
+s2 := pipeline.Stage[[]byte, Result]{
+    Process: func(ctx context.Context, data []byte, emit func(Result)) error {
+        emit(process(data))
+        return nil
+    },
+    Workers: 2,
+}
+
+mid, _ := pipeline.Pipe(ctx, src, s1)
+out, _ := pipeline.Pipe(ctx, mid, s2)
+for result := range out { ... }
+
+// 工具函数
+pipeline.Merge(ctx, ch1, ch2, ch3) // 扇入:多 channel 合一
+pipeline.Split(ctx, input, 3)      // 扇出:轮询分发到 N 路
+pipeline.Run(ctx, src, stage)      // 单阶段快捷运行,收集结果
+```
+
+- 与 `stream`(广播/扇出)区分:pipeline 是顺序阶段链,数据流经多步处理;
+- 任一阶段返回 error 终止整个 pipeline;context 取消全链停止;
+- emit 可输出 0~N 条(过滤/展开);泛型保证阶段间类型安全。
+
+## 速查:pkg/circuitbreaker（熔断器）
+
+三态保护:Closed(正常)→ Open(快速失败)→ HalfOpen(探测)→ Closed/Open。
+滑动窗口统计错误率,超阈值自动熔断;冷却后放少量探测请求验证恢复。
+
+```go
+cb := circuitbreaker.New(
+    circuitbreaker.WithThreshold(0.5),    // 50% 错误率触发
+    circuitbreaker.WithWindow(10*time.Second),
+    circuitbreaker.WithCooldown(5*time.Second),
+    circuitbreaker.WithHalfOpenMax(3),
+    circuitbreaker.WithMinRequests(10),
+    circuitbreaker.WithOnStateChange(func(from, to circuitbreaker.State) {
+        log.Printf("breaker: %s -> %s", from, to)
+    }),
+)
+
+err := cb.Do(func() error {
+    return callDownstream()
+})
+if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+    // 降级逻辑
+}
+```
+
+- 与 `backoff`(退避)/`ratelimit`(限速)/`cooldown`(冷却)互补,组成弹性四件套;
+- `Do` 包一次调用:Closed 执行并统计;Open 立即 `ErrCircuitOpen`;HalfOpen 探测;
+- 并发安全(单锁)。详见 `pkg/circuitbreaker`。
+
 ## 速查:pkg/cooldown（冷却 / 操作限时)
 
 per-key 的"下次可用时刻",到点才能再触发。
@@ -1105,6 +1312,81 @@ bitmap.ConsecutiveFromEnd(days, uid)       // 从末尾数连续签到天数
 
 - 精确型,与 `pkg/utils/bloom`(概率型、有假阳性)区分:ID 稠密、需精确 Count/枚举时用 bitmap;
 - 底层 `[]uint64` 按需增长,非并发安全。签到/去重/权限位。详见 `examples/bitmap`。
+
+## 速查:pkg/domain/energy（体力 / 精力系统）
+
+惰性时间回复 + 消耗 + 充值 + 倒计时。不依赖 ticker,调用时 O(1) 补充。
+
+```go
+e := energy.New(
+    energy.WithCap(100),
+    energy.WithRegenInterval(5*time.Minute),
+    energy.WithRegenAmount(1),
+    energy.WithOverflow(false),
+)
+
+e.Spend(30)                      // 消耗 30,不足返回 ErrInsufficient
+e.Add(50)                        // 充值(overflow=false 截止上限)
+e.Current()                      // 当前值(惰性补充)
+e.TimeToFull()                   // 恢复到满的剩余时间
+e.TimeToAmount(80)               // 恢复到 80 的剩余时间
+cur, ts := e.Snapshot()          // 持久化快照
+e2 := energy.NewWithState(cur, ts, ...) // 从 DB 恢复
+```
+
+- 与 `wallet`(精确账本)区分:energy 是"时间自动回复 + 消耗"的特化资源;
+- 并发安全(单锁);`Snapshot`/`NewWithState` 支持持久化恢复。
+
+## 速查:pkg/domain/signin（每日签到）
+
+月 bitmap 存签到 + 连签天数 + 补签次数限制 + 奖励回调。
+
+```go
+r := signin.New(
+    signin.WithRetroMax(3),
+    signin.WithLocation(time.Local),
+    signin.WithRewardFunc(func(day, streak int) []signin.Reward {
+        return []signin.Reward{{Type: "coin", Amount: streak * 10}}
+    }),
+)
+
+rewards, _ := r.SignIn(time.Now())    // 今日签到(幂等)
+r.Streak()                            // 当前连签天数
+r.SignedDays(2026, 7)                 // 7 月已签天数
+r.MonthBitmap(2026, 7)                // 位图(bit0=1号)
+r.RetroSign(time.Now(), 2026, 7, 5)  // 补签 7 月 5 日
+r.RetroRemaining(time.Now())          // 本月剩余补签次数
+```
+
+- 与 `questlog`(目标进度+领取)区分:signin 是"日历打卡 + 连续天数";
+- 补签后自动重算连签;bitmap 零依赖内嵌(不依赖 `pkg/bitmap`);
+- 并发安全。
+
+## 速查:pkg/domain/mail（游戏内信箱）
+
+泛型附件 + 领取状态(未读→已读→已领) + 过期 + 批量群发 + Store 接口。
+
+```go
+store := mail.NewMemoryStore[Attachment]()  // 开发用;生产接 DB Store
+mb := mail.NewMailbox[Attachment](store,
+    mail.WithMaxPerUser(100),
+    mail.WithDefaultTTL(30*24*time.Hour),
+    mail.WithOnClaim(func(id, recipient string) { /* 发奖埋点 */ }),
+)
+
+mb.Send(&mail.Mail[Attachment]{ID: "m1", RecipientID: "p1", ...})
+mb.BatchSend(playerIDs, template, idGen)   // 全服群发
+mb.List("p1", mail.Filter{Limit: 20})      // 拉取(自动过滤过期,未读优先)
+mb.Read("m1")                              // 标已读
+att, _ := mb.Claim("m1")                   // 领取附件(仅一次)
+mb.Unread("p1")                            // 未读计数(红点用)
+mb.DeleteExpired()                         // 清理过期邮件
+```
+
+- 与 `notification`(瞬时推送/离线留存)区分:mail 有附件 + 领取状态机 + 过期;
+- 与 `inbox`(点对点文本消息)区分:mail 带泛型附件;
+- `Store[T]` 接口:Save/Get/Update/Delete/List/CountByStatus/DeleteExpired;
+- 并发安全(依赖 Store 实现)。
 
 ## 速查:pkg/questlog（任务 / 成就进度)
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -98,23 +99,34 @@ var (
 )
 
 type chatReq struct {
-	Model       string       `json:"model"`
-	Messages    []oaiMessage `json:"messages"`
-	MaxTokens   int          `json:"max_tokens,omitempty"`
-	Temperature float64      `json:"temperature,omitempty"`
-	Stop        []string     `json:"stop,omitempty"`
-	Stream      bool         `json:"stream,omitempty"`
-	Tools       []oaiTool    `json:"tools,omitempty"`
-	ToolChoice  any          `json:"tool_choice,omitempty"`
+	Model          string       `json:"model"`
+	Messages       []oaiMessage `json:"messages"`
+	MaxTokens      int          `json:"max_tokens,omitempty"`
+	Temperature    float64      `json:"temperature,omitempty"`
+	Stop           []string     `json:"stop,omitempty"`
+	Stream         bool         `json:"stream,omitempty"`
+	Tools          []oaiTool    `json:"tools,omitempty"`
+	ToolChoice     any          `json:"tool_choice,omitempty"`
+	ResponseFormat any          `json:"response_format,omitempty"`
 }
 
-// oaiMessage 是 OpenAI 的线上消息格式(与中立的 llm.Message 不同:工具调用用 tool_calls/
-// tool_call_id 表达)。纯文本消息只有 role+content,序列化结果与旧版逐字节一致。
+// oaiMessage 是 OpenAI 的线上消息格式。Content 可能是 string(纯文本)或 []oaiContentPart(多模态)。
 type oaiMessage struct {
 	Role       string        `json:"role"`
-	Content    string        `json:"content"`
+	Content    any           `json:"content"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+type oaiContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *oaiImageURL  `json:"image_url,omitempty"`
+}
+
+type oaiImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type oaiToolCall struct {
@@ -135,14 +147,19 @@ type oaiTool struct {
 	} `json:"function"`
 }
 
-// buildMessages 把中立 Request 翻译成 OpenAI 线上消息(含 system 前置、工具调用/结果映射)。
+// buildMessages 把中立 Request 翻译成 OpenAI 线上消息(含 system 前置、工具调用/结果映射、多模态)。
 func buildMessages(req llm.Request) []oaiMessage {
 	msgs := make([]oaiMessage, 0, len(req.Messages)+1)
 	if req.System != "" {
 		msgs = append(msgs, oaiMessage{Role: string(llm.System), Content: req.System})
 	}
 	for _, m := range req.Messages {
-		om := oaiMessage{Role: string(m.Role), Content: m.Content, ToolCallID: m.ToolCallID}
+		om := oaiMessage{Role: string(m.Role), ToolCallID: m.ToolCallID}
+		if len(m.Parts) > 0 {
+			om.Content = buildContentParts(m.Parts)
+		} else {
+			om.Content = m.Content
+		}
 		for _, tc := range m.ToolCalls {
 			oc := oaiToolCall{ID: tc.ID, Type: "function"}
 			oc.Function.Name = tc.Name
@@ -152,6 +169,26 @@ func buildMessages(req llm.Request) []oaiMessage {
 		msgs = append(msgs, om)
 	}
 	return msgs
+}
+
+func buildContentParts(parts []llm.Part) []oaiContentPart {
+	out := make([]oaiContentPart, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case llm.PartText:
+			out = append(out, oaiContentPart{Type: "text", Text: p.Text})
+		case llm.PartImage:
+			detail := p.Detail
+			if detail == "" {
+				detail = "auto"
+			}
+			out = append(out, oaiContentPart{
+				Type:     "image_url",
+				ImageURL: &oaiImageURL{URL: p.ImageURL, Detail: detail},
+			})
+		}
+	}
+	return out
 }
 
 func buildTools(defs []llm.ToolDef) []oaiTool {
@@ -213,12 +250,33 @@ func apiError(resp *http.Response) error {
 	return fmt.Errorf("openai: status %s: %s", resp.Status, bytes.TrimSpace(b))
 }
 
+func buildResponseFormat(rf *llm.ResponseFormat) any {
+	if rf == nil || rf.Type == "" || rf.Type == "text" {
+		return nil
+	}
+	if rf.Type == "json_object" {
+		return map[string]string{"type": "json_object"}
+	}
+	if rf.Type == "json_schema" && rf.JSONSchema != nil {
+		return map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   rf.JSONSchema.Name,
+				"schema": rf.JSONSchema.Schema,
+				"strict": rf.JSONSchema.Strict,
+			},
+		}
+	}
+	return map[string]string{"type": rf.Type}
+}
+
 // Generate 实现 llm.Client。
 func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	resp, err := c.post(ctx, "chat/completions", chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
 		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
+		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: request: %w", err)
@@ -258,13 +316,13 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 }
 
 // Stream 实现 llm.Client(SSE:data: {json} ... data: [DONE])。
+// 透传文本增量,并组装流式 tool_calls(按 index 拼接 arguments),在 Done 时带回完整 ToolCalls。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	// 注:v1 的流式只透传文本增量,不解析流式 tool_calls 分片(工具循环走 Generate,见 llm/agent)。
-	// tools 仍随请求发出,便于模型在最后一轮直接产出文本。
 	body := chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,
 		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
+		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 	}
 	resp, err := c.post(ctx, "chat/completions", body)
 	if err != nil {
@@ -280,6 +338,35 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		defer resp.Body.Close()
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		type acc struct {
+			id, name string
+			args     strings.Builder
+		}
+		byIdx := map[int]*acc{}
+		finish := func() {
+			if len(byIdx) == 0 {
+				out <- llm.Chunk{Done: true}
+				return
+			}
+			// 按 index 稳定排序
+			idxs := make([]int, 0, len(byIdx))
+			for i := range byIdx {
+				idxs = append(idxs, i)
+			}
+			sort.Ints(idxs)
+			tcs := make([]llm.ToolCall, 0, len(idxs))
+			for _, i := range idxs {
+				a := byIdx[i]
+				args := a.args.String()
+				if args == "" {
+					args = "{}"
+				}
+				tcs = append(tcs, llm.ToolCall{
+					ID: a.id, Name: a.name, Arguments: json.RawMessage(args),
+				})
+			}
+			out <- llm.Chunk{Done: true, ToolCalls: tcs}
+		}
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
 			data, ok := strings.CutPrefix(line, "data:")
@@ -288,30 +375,58 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			}
 			data = strings.TrimSpace(data)
 			if data == "[DONE]" {
-				out <- llm.Chunk{Done: true}
+				finish()
 				return
 			}
 			var ev struct {
 				Choices []struct {
 					Delta struct {
-						Content string `json:"content"`
+						Content   string `json:"content"`
+						ToolCalls []struct {
+							Index    int    `json:"index"`
+							ID       string `json:"id"`
+							Function struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							} `json:"function"`
+						} `json:"tool_calls"`
 					} `json:"delta"`
 				} `json:"choices"`
 			}
 			if json.Unmarshal([]byte(data), &ev) != nil {
 				continue
 			}
-			if len(ev.Choices) > 0 && ev.Choices[0].Delta.Content != "" {
+			if len(ev.Choices) == 0 {
+				continue
+			}
+			d := ev.Choices[0].Delta
+			if d.Content != "" {
 				select {
-				case out <- llm.Chunk{Delta: ev.Choices[0].Delta.Content}:
+				case out <- llm.Chunk{Delta: d.Content}:
 				case <-ctx.Done():
 					return
 				}
 			}
+			for _, tc := range d.ToolCalls {
+				a, ok := byIdx[tc.Index]
+				if !ok {
+					a = &acc{}
+					byIdx[tc.Index] = a
+				}
+				if tc.ID != "" {
+					a.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					a.name = tc.Function.Name
+				}
+				a.args.WriteString(tc.Function.Arguments)
+			}
 		}
 		if err := sc.Err(); err != nil {
 			out <- llm.Chunk{Err: fmt.Errorf("openai: stream: %w", err)}
+			return
 		}
+		finish()
 	}()
 	return out, nil
 }

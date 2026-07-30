@@ -33,11 +33,33 @@ const (
 // ToolCalls(模型要求调用哪些工具),随后一条 Role=Tool、ToolCallID 指向该调用的消息回传结果。
 // 各 provider 负责把本结构翻译成自家线格式(OpenAI tool_calls / Anthropic content blocks),
 // 故本结构的字段是 provider 无关的中立表示,不直接当作某家的请求体。
+//
+// 多模态:Parts 非空时表示复合内容(文本+图片混排),Content 仍可用作纯文本后备。
+// 纯文本消息保持 Content 即可,无需设 Parts。
 type Message struct {
 	Role       Role       `json:"role"`
 	Content    string     `json:"content"`
+	Parts      []Part     `json:"parts,omitempty"`        // 多模态内容块(文本/图片)
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // 仅 assistant:模型请求调用的工具
 	ToolCallID string     `json:"tool_call_id,omitempty"` // 仅 Role=Tool:对应 ToolCall.ID
+}
+
+// PartType 标识内容块类型。
+type PartType string
+
+const (
+	PartText  PartType = "text"
+	PartImage PartType = "image"
+)
+
+// Part 是消息中的一个内容块(多模态)。
+//   - text: Text 非空
+//   - image: ImageURL 非空(http URL 或 data: base64),可选 Detail
+type Part struct {
+	Type     PartType `json:"type"`
+	Text     string   `json:"text,omitempty"`
+	ImageURL string   `json:"image_url,omitempty"`
+	Detail   string   `json:"detail,omitempty"` // "auto"/"low"/"high"(OpenAI vision)
 }
 
 // ToolDef 声明一个可供模型调用的工具:名字、给模型看的描述、入参 JSON Schema。
@@ -57,6 +79,22 @@ type ToolCall struct {
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
+// ResponseFormat 控制模型输出格式。
+type ResponseFormat struct {
+	// Type: "text"(默认)/"json_object"/"json_schema"。
+	Type string `json:"type"`
+	// JSONSchema: 当 Type="json_schema" 时,给模型的 JSON Schema(OpenAI structured outputs)。
+	// Name 是 schema 名(必填),Schema 是 JSON Schema 对象。
+	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
+}
+
+// JSONSchema 描述 structured output 的 schema。
+type JSONSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict,omitempty"`
+}
+
 // Request 是一次生成请求。System 便于单独给系统提示(Anthropic 用顶层 system,
 // OpenAI provider 会转成一条 system 消息)。
 type Request struct {
@@ -72,6 +110,10 @@ type Request struct {
 	// ToolChoice 控制是否/如何调用工具:""或"auto"(模型自决)、"none"(禁用)、
 	// "required"(必须调用某个)、或直接给某个工具名(强制调用它)。provider 各自映射。
 	ToolChoice string
+
+	// ResponseFormat 控制输出格式(json_object / json_schema / text)。
+	// 零值或 Type="" 表示不限制(默认文本);provider 各自翻译,不支持则忽略。
+	ResponseFormat *ResponseFormat
 }
 
 // Usage 是 token 用量(用于计量/计费)。
@@ -92,11 +134,15 @@ type Response struct {
 
 // Chunk 是流式生成的一个增量片段。Delta 是本次新增文本;结束时 Done=true 且可能带最终 Usage;
 // 出错时 Err 非 nil(随后 channel 关闭)。
+//
+// ToolCalls:支持流式工具调用的 provider 在 Done 时带上组装好的完整调用列表
+// (增量分片过程中可不填);agent.RunStream 据此继续工具循环。
 type Chunk struct {
-	Delta string
-	Usage *Usage
-	Done  bool
-	Err   error
+	Delta     string
+	ToolCalls []ToolCall
+	Usage     *Usage
+	Done      bool
+	Err       error
 }
 
 // Client 是一个对话补全客户端(由各 provider 实现)。

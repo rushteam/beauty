@@ -70,7 +70,7 @@ type antMessage struct {
 	Content any    `json:"content"`
 }
 
-// antBlock 是 Anthropic 的 content block:text / tool_use(助手发起调用)/ tool_result(回传结果)。
+// antBlock 是 Anthropic 的 content block:text / image / tool_use / tool_result。
 type antBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`        // type=text
@@ -79,6 +79,14 @@ type antBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`       // type=tool_use
 	ToolUseID string          `json:"tool_use_id,omitempty"` // type=tool_result
 	Content   string          `json:"content,omitempty"`     // type=tool_result
+	Source    *antSource      `json:"source,omitempty"`      // type=image
+}
+
+type antSource struct {
+	Type      string `json:"type"`       // "base64" / "url"
+	MediaType string `json:"media_type"` // "image/png" etc
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 type antTool struct {
@@ -88,7 +96,7 @@ type antTool struct {
 }
 
 // buildMessages 把中立消息翻译成 Anthropic 消息:tool 结果并入一个 user 回合(多 tool_result 块),
-// 带 ToolCalls 的 assistant 回合转成 text + tool_use 块;纯文本仍用字符串 content(与旧版一致)。
+// 带 ToolCalls 的 assistant 回合转成 text + tool_use 块;多模态消息用 content block 数组。
 func buildMessages(msgs []llm.Message) []antMessage {
 	out := make([]antMessage, 0, len(msgs))
 	for i := 0; i < len(msgs); i++ {
@@ -96,7 +104,7 @@ func buildMessages(msgs []llm.Message) []antMessage {
 		switch {
 		case m.Role == llm.Tool:
 			blocks := []antBlock{{Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content}}
-			for i+1 < len(msgs) && msgs[i+1].Role == llm.Tool { // 合并连续工具结果为一个 user 回合
+			for i+1 < len(msgs) && msgs[i+1].Role == llm.Tool {
 				i++
 				blocks = append(blocks, antBlock{Type: "tool_result", ToolUseID: msgs[i].ToolCallID, Content: msgs[i].Content})
 			}
@@ -114,11 +122,43 @@ func buildMessages(msgs []llm.Message) []antMessage {
 				blocks = append(blocks, antBlock{Type: "tool_use", ID: tc.ID, Name: tc.Name, Input: input})
 			}
 			out = append(out, antMessage{Role: string(m.Role), Content: blocks})
+		case len(m.Parts) > 0:
+			out = append(out, antMessage{Role: string(m.Role), Content: buildParts(m.Parts)})
 		default:
 			out = append(out, antMessage{Role: string(m.Role), Content: m.Content})
 		}
 	}
 	return out
+}
+
+func buildParts(parts []llm.Part) []antBlock {
+	blocks := make([]antBlock, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case llm.PartText:
+			blocks = append(blocks, antBlock{Type: "text", Text: p.Text})
+		case llm.PartImage:
+			blk := antBlock{Type: "image"}
+			if strings.HasPrefix(p.ImageURL, "data:") {
+				mt, data := parseDataURI(p.ImageURL)
+				blk.Source = &antSource{Type: "base64", MediaType: mt, Data: data}
+			} else {
+				blk.Source = &antSource{Type: "url", URL: p.ImageURL}
+			}
+			blocks = append(blocks, blk)
+		}
+	}
+	return blocks
+}
+
+func parseDataURI(uri string) (mediaType, data string) {
+	after, _ := strings.CutPrefix(uri, "data:")
+	parts := strings.SplitN(after, ",", 2)
+	if len(parts) != 2 {
+		return "application/octet-stream", after
+	}
+	mt := strings.TrimSuffix(parts[0], ";base64")
+	return mt, parts[1]
 }
 
 func buildTools(defs []llm.ToolDef) []antTool {
@@ -230,7 +270,8 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	return r, nil
 }
 
-// Stream 实现 llm.Client(SSE:content_block_delta 增量、message_delta 带输出 token、message_stop)。
+// Stream 实现 llm.Client(SSE 事件流,支持文本增量与流式 tool_calls 组装)。
+// 事件:content_block_start / content_block_delta / content_block_stop / message_delta / message_stop。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
 	resp, err := c.post(ctx, c.build(req, true))
 	if err != nil {
@@ -246,41 +287,101 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		defer resp.Body.Close()
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		var usage llm.Usage
+
+		type toolAcc struct {
+			id, name string
+			args     strings.Builder
+		}
+		var (
+			usage    llm.Usage
+			tools    []*toolAcc
+			curBlock int
+			blockMap = map[int]*toolAcc{}
+		)
+
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
 			data, ok := strings.CutPrefix(line, "data:")
 			if !ok {
 				continue
 			}
+			data = strings.TrimSpace(data)
+
 			var ev struct {
-				Type  string `json:"type"`
-				Delta struct {
-					Text string `json:"text"`
+				Type         string `json:"type"`
+				Index        int    `json:"index"`
+				ContentBlock *struct {
+					Type  string `json:"type"`
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Text  string `json:"text"`
+					Input any    `json:"input"`
+				} `json:"content_block"`
+				Delta *struct {
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					PartialJSON string `json:"partial_json"`
 				} `json:"delta"`
 				Usage *struct {
 					InputTokens  int `json:"input_tokens"`
 					OutputTokens int `json:"output_tokens"`
 				} `json:"usage"`
 			}
-			if json.Unmarshal([]byte(strings.TrimSpace(data)), &ev) != nil {
+			if json.Unmarshal([]byte(data), &ev) != nil {
 				continue
 			}
+
 			switch ev.Type {
+			case "content_block_start":
+				curBlock = ev.Index
+				if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
+					acc := &toolAcc{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name}
+					tools = append(tools, acc)
+					blockMap[curBlock] = acc
+				}
+
 			case "content_block_delta":
-				if ev.Delta.Text != "" {
-					select {
-					case out <- llm.Chunk{Delta: ev.Delta.Text}:
-					case <-ctx.Done():
-						return
+				if ev.Delta == nil {
+					continue
+				}
+				switch ev.Delta.Type {
+				case "text_delta", "":
+					if ev.Delta.Text != "" {
+						select {
+						case out <- llm.Chunk{Delta: ev.Delta.Text}:
+						case <-ctx.Done():
+							return
+						}
+					}
+				case "input_json_delta":
+					if acc, ok := blockMap[ev.Index]; ok {
+						acc.args.WriteString(ev.Delta.PartialJSON)
 					}
 				}
+
 			case "message_delta":
 				if ev.Usage != nil {
 					usage.OutputTokens = ev.Usage.OutputTokens
 				}
+				if ev.Delta != nil && ev.Usage == nil {
+					// message_delta 可能含 stop_reason 等,不需特殊处理
+				}
+
+			case "message_start":
+				if ev.Usage != nil {
+					usage.InputTokens = ev.Usage.InputTokens
+				}
+
 			case "message_stop":
-				out <- llm.Chunk{Done: true, Usage: &usage}
+				var tcs []llm.ToolCall
+				for _, acc := range tools {
+					args := acc.args.String()
+					if args == "" {
+						args = "{}"
+					}
+					tcs = append(tcs, llm.ToolCall{ID: acc.id, Name: acc.name, Arguments: json.RawMessage(args)})
+				}
+				out <- llm.Chunk{Done: true, ToolCalls: tcs, Usage: &usage}
 				return
 			}
 		}

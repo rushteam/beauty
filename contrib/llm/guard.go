@@ -151,3 +151,112 @@ func MaxInputLen(n int) Check {
 		return nil
 	}
 }
+
+// ---- 输出护栏(Output Guard) ----
+
+// OutputCheck 检查模型回复(content 为模型输出文本)。返回非 nil 即视为拦截。
+type OutputCheck func(ctx context.Context, content string) error
+
+// GuardOutput 包一层 client:Generate/Stream 结束后检查模型输出,任一 OutputCheck 命中则
+// 返回错误(Generate 返 error;Stream 的终态 Chunk 会带 Err)。与 Guard(输入)对称使用。
+func GuardOutput(c Client, checks ...OutputCheck) Client {
+	return &outputGuard{c: c, checks: checks}
+}
+
+type outputGuard struct {
+	c      Client
+	checks []OutputCheck
+}
+
+func (g *outputGuard) runChecks(ctx context.Context, content string) error {
+	for _, chk := range g.checks {
+		if err := chk(ctx, content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *outputGuard) Generate(ctx context.Context, req Request) (*Response, error) {
+	resp, err := g.c.Generate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := g.runChecks(ctx, resp.Content); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (g *outputGuard) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
+	src, err := g.c.Stream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan Chunk)
+	go func() {
+		defer close(out)
+		var buf strings.Builder
+		for ch := range src {
+			if ch.Delta != "" {
+				buf.WriteString(ch.Delta)
+			}
+			if ch.Done {
+				if err := g.runChecks(ctx, buf.String()); err != nil {
+					out <- Chunk{Err: err}
+					return
+				}
+			}
+			out <- ch
+		}
+	}()
+	return out, nil
+}
+
+// Toxic 拦截模型输出中的敏感/有害内容(大小写不敏感子串匹配)。
+// 不传参用内置关键词;传入 patterns 整表替换。
+func Toxic(patterns ...string) OutputCheck {
+	pats := patterns
+	if len(pats) == 0 {
+		pats = defaultToxicPatterns
+	}
+	lower := make([]string, len(pats))
+	for i, p := range pats {
+		lower[i] = strings.ToLower(p)
+	}
+	return func(_ context.Context, content string) error {
+		text := strings.ToLower(content)
+		for i, p := range lower {
+			if strings.Contains(text, p) {
+				return &GuardError{Check: "toxic_output", Reason: "输出命中敏感词: " + pats[i]}
+			}
+		}
+		return nil
+	}
+}
+
+var defaultToxicPatterns = []string{
+	"I cannot help with that",
+	"I'm not able to assist",
+	"as an AI language model",
+}
+
+// MaxOutputLen 限制模型输出长度(rune),超出即拦截。用于防止意外超长回复(成本/滥用)。
+func MaxOutputLen(n int) OutputCheck {
+	return func(_ context.Context, content string) error {
+		if l := len([]rune(content)); l > n {
+			return &GuardError{Check: "max_output_len", Reason: fmt.Sprintf("输出 %d 字符超过上限 %d", l, n)}
+		}
+		return nil
+	}
+}
+
+// OutputRegexp 用正则匹配输出;命中即拦截。适合检查格式合规(如 JSON)或敏感模式。
+func OutputRegexp(name string, re *regexp.Regexp) OutputCheck {
+	return func(_ context.Context, content string) error {
+		if re.MatchString(content) {
+			return &GuardError{Check: name, Reason: "输出命中: " + re.String()}
+		}
+		return nil
+	}
+}

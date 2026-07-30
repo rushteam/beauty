@@ -49,9 +49,11 @@ cli := llm.Metered(
 ```
 
 - **`Fallback(clients...)`**:按序尝试,前者出错切下一个(跨 provider/模型高可用)。
-- **`Retry(c, n, delay)`**:重试建立阶段错误(流式已开始产出则不重试)。
+- **`Retry(c, n, delay)`**:指数退避 + 随机 Jitter 重试(delay × 2^i × [0.5,1.5)),防雷群;流式已开始产出不重试。
 - **`Metered(c, hook)`**:生成完成后回调用量与耗时——接哪(OTel/日志/账单)由你定,故本包不绑 OTel。
-- **`Guard(c, checks...)`**:调下游前跑输入护栏,任一命中即拦截返回 `*GuardError`(见下)。
+- **`Budget(c, maxTokens)`**:累计 token 预算;超限立即返回 `ErrBudgetExceeded`。`.Used()` / `.Remaining()` / `.Reset()` 观察与重置。
+- **`Guard(c, checks...)`**:调下游前跑**输入**护栏,任一命中即拦截返回 `*GuardError`(见下)。
+- **`GuardOutput(c, checks...)`**:模型回复后跑**输出**护栏;命中则 Generate 返错,Stream 推 Err chunk。
 
 ## 工具调用(function calling)
 
@@ -71,7 +73,8 @@ resp, _ := cli.Generate(ctx, llm.Request{
 for _, tc := range resp.ToolCalls { /* 执行 tc,把结果作为 Role:llm.Tool 消息回传 */ }
 ```
 
-> v1 的流式(`Stream`)只透传文本增量,不解析流式 tool_calls 分片;工具循环走 `Generate`(见下)。
+> 流式(`Stream`)支持文本增量推送与流式 tool_calls 解析(OpenAI / Anthropic 均已实现);
+> `RunStream` 配任一 provider 都能推 token + 继续工具循环。provider 不支持时自动回退 `Generate`。
 
 ## agent 循环(`llm/agent`)
 
@@ -95,20 +98,25 @@ resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o",
     Messages: []llm.Message{{Role: llm.User, Content: "北京天气?"}}})
 fmt.Println(resp.Content)
 
-// 事件流 + ctx 可取消(step / tool_start / tool_result / final / error)
+// 事件流:模型走 Stream 推 EventToken;工具轮结束后推 step / tool_* / final
 ctx, cancel := context.WithCancel(ctx)
 defer cancel()
 for ev := range r.RunStream(ctx, req) {
     switch ev.Type {
+    case agent.EventToken:
+        fmt.Print(ev.Result) // 增量文本
     case agent.EventToolResult:
         log.Println(ev.ToolCall.Name, ev.Result)
     case agent.EventFinal:
-        fmt.Println(ev.Response.Content)
+        fmt.Println("\n>", ev.Response.Content)
     case agent.EventError:
         return ev.Err
     }
 }
 ```
+
+同轮多个 tool_call **默认并行**;串行:`ParallelTools: agent.Bool(false)`。
+provider 若不支持流式 tool_calls,会自动回退 `Generate`。
 
 工具来源与本包解耦:`agent.Tool.Call` 是普通函数,把 [`contrib/mcp`](../mcp) 的远程工具
 (`session.CallTool`)适配成 `agent.Tool` 只需几行(见 [`contrib/mcpagent`](../mcpagent)),
@@ -154,7 +162,8 @@ r := &agent.Runner{
 ### 会话记忆(`llm/agent/session`)
 
 `session.Manager` 在 `Runner` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
-历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;也可自建 sqldb/redis。
+历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;
+生产 SQLite/Redis 见 [`contrib/llmsession`](../llmsession)。
 
 ```go
 store, _ := session.NewFileStore("./data/sessions")
@@ -164,18 +173,37 @@ resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
     Messages: []llm.Message{{Role: llm.User, Content: "接着上次说"}}})
 ```
 
-详见 [`llm/agent/session`](agent/session)。
+详见 [`llm/agent/session`](agent/session)。也可用 `mgr.RunStream` 转发事件并在 `EventFinal` 时落盘。
 
 ### 长期记忆工具(`llm/agent/memory`)
 
 跨会话的薄记忆:`memory_add` / `memory_search` / `memory_delete`,默认可挂到 `Runner.Tools`。
-内存实现用子串检索;需要语义检索时自行实现 `memory.Store`(接 `contrib/vector` + Embedder)。
+内存实现用子串检索;语义检索用 [`contrib/memoryvector`](../memoryvector)(Embedder + vector)。
 
 ```go
-import "github.com/rushteam/beauty/contrib/llm/agent/memory"
+import (
+    "github.com/rushteam/beauty/contrib/llm/agent/memory"
+    "github.com/rushteam/beauty/contrib/memoryvector"
+    "github.com/rushteam/beauty/contrib/vector"
+)
 
-mem := memory.NewMemoryStore()
+mem, _ := memoryvector.New(openai.New(key), vector.NewMemoryStore())
 r.Tools = append(r.Tools, memory.Tools(mem, "user-42")...)
+```
+
+### 中途插话 + Hooks
+
+```go
+steer := agent.NewSteer(8)
+r := &agent.Runner{
+    Client: cli, Tools: tools, Steer: steer,
+    Hooks: agent.Hooks{
+        BeforeModel: func(ctx context.Context, step int, req *llm.Request) error { return nil },
+        AfterTool:   func(ctx context.Context, step int, tc llm.ToolCall, result string) error { return nil },
+    },
+}
+steer.Enqueue("先别删文件,只列出来") // 下一轮 Generate 前注入为 user 消息
+for ev := range r.RunStream(ctx, req) { /* EventSteer 可见插话 */ }
 ```
 
 ## Agent Skills(`llm/agent/skills`)
@@ -196,7 +224,9 @@ resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o", System: sk.SystemPrompt(),
 脚本执行默认关闭(只读),`sk.EnableExec(30*time.Second)` 显式开启;文件访问带路径穿越防护。
 详见 [`llm/agent/skills`](agent/skills)。
 
-## 输入护栏(guardrails)
+## 护栏(guardrails)
+
+### 输入护栏
 
 `Guard` 与其它中间件同构,叠在任意 client 外;被 `Runner` 使用时,工具循环里**每个模型回合都会先过检查**。
 内置检查的匹配规则是 policy,可传参覆盖或自写 `Check`。仅检查用户可控文本(user/assistant),
@@ -209,6 +239,76 @@ safe := llm.Guard(cli,
     llm.MaxInputLen(4000),   // 输入长度上限
 )
 // 命中返回 *llm.GuardError{Check, Reason},下游不被调用
+```
+
+### 输出护栏
+
+`GuardOutput` 检查模型**回复**内容;Generate 返错,Stream 推 Err chunk。与 Guard(输入)对称。
+
+```go
+safe := llm.GuardOutput(cli,
+    llm.Toxic(),             // 内置有害/拒绝词表(可传自定义)
+    llm.MaxOutputLen(8000),  // 输出长度上限
+    llm.OutputRegexp("no_code", regexp.MustCompile(`(?i)rm\s+-rf`)), // 自定义正则
+)
+```
+
+## 多模态(Vision)
+
+`Message.Parts` 支持文本+图片混排(OpenAI vision / Anthropic multimodal),纯文本仍用 Content:
+
+```go
+resp, _ := cli.Generate(ctx, llm.Request{
+    Model: "gpt-4o",
+    Messages: []llm.Message{{Role: llm.User, Parts: []llm.Part{
+        {Type: llm.PartText, Text: "这张图片里有什么?"},
+        {Type: llm.PartImage, ImageURL: "https://example.com/cat.jpg", Detail: "high"},
+    }}},
+})
+```
+
+## Structured Output (JSON mode)
+
+`Request.ResponseFormat` 控制输出格式。OpenAI 支持 `json_object` 和 `json_schema`(structured outputs):
+
+```go
+resp, _ := cli.Generate(ctx, llm.Request{
+    Model: "gpt-4o",
+    Messages: []llm.Message{{Role: llm.User, Content: "列出3种水果"}},
+    ResponseFormat: &llm.ResponseFormat{
+        Type: "json_schema",
+        JSONSchema: &llm.JSONSchema{
+            Name: "fruits",
+            Schema: json.RawMessage(`{"type":"object","properties":{"fruits":{"type":"array","items":{"type":"string"}}},"required":["fruits"]}`),
+            Strict: true,
+        },
+    },
+})
+```
+
+## Token 预算
+
+`Budget` 限制累计 token 消耗;超限返回 `ErrBudgetExceeded`。适合测试/按用户限额:
+
+```go
+bc := llm.Budget(cli, 100000) // 10 万 token 上限
+r := &agent.Runner{Client: bc, ...}
+// bc.Used() / bc.Remaining() / bc.Reset()
+```
+
+## 响应缓存
+
+`Cache` 对相同请求缓存 Response,避免重复 API 调用(省钱/降延迟)。默认仅缓存 temperature=0 的确定性请求;
+Stream 场景:命中时回放为单 Chunk,未命中时正常流式并在 Done 后写缓存。
+
+```go
+store := llm.NewMemoryCacheStore(1024) // 最多 1024 条;或自实现 CacheStore 接 Redis
+cc := llm.Cache(cli, store,
+    llm.WithCacheTTL(30*time.Minute),
+    llm.WithCacheFilter(func(r llm.Request) bool { return true }), // 自定义条件
+)
+r := &agent.Runner{Client: cc, ...}
+fmt.Println(cc.Stats()) // {Hits: 12, Misses: 3}
 ```
 
 ## 多厂商适配
@@ -241,6 +341,9 @@ openai.New(key, openai.WithBaseURL(openai.BaseURLDeepSeek))  // DeepSeek
 ## 边界
 
 prompt 工程、模型选择、温度、成本换算表、选哪些工具/护栏规则、要不要人工审批都是 policy;
-多模态、流式工具调用、输出护栏可按需扩展。配 [`contrib/vector`](../vector) 的 `Embedder` 即可搭 RAG;
+配 [`contrib/vector`](../vector) 的 `Embedder` 即可搭 RAG;
 配 [`contrib/mcp`](../mcp) 把远程工具接进 `agent.Runner`。单测用 httptest 打桩(Generate/Stream/
 Embed/Fallback/Metered/工具往返/护栏)+ 假 Client 驱动 Runner,不需真实 API key。
+
+**Anthropic 流式 tool_calls**:Stream 现在完整解析 `content_block_start(tool_use)` /
+`input_json_delta` / `message_stop`,Done 时带回完整 `ToolCalls`。RunStream 配 Claude 也能推 token + 工具循环。

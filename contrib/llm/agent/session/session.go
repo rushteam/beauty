@@ -70,41 +70,89 @@ type Manager struct {
 	Summarizer *Summarizer // 为 nil 则不摘要(历史会一直增长)
 }
 
-// Run 以会话 id 跑一轮:req.Messages 只放**本轮新输入**(通常一条 user 消息);Manager 负责
-// 把历史与摘要拼进去,跑完把本轮 user 输入与最终 assistant 回复追加进会话并保存。
-func (m *Manager) Run(ctx context.Context, id string, r *agent.Runner, req llm.Request) (*llm.Response, error) {
+// prepare 加载会话并拼出完整 Request;返回会话、本轮新消息、拼好的请求。
+func (m *Manager) prepare(ctx context.Context, id string, req llm.Request) (*Session, []llm.Message, llm.Request, error) {
 	sess, err := m.Store.Load(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, req, err
 	}
 	if sess == nil {
 		sess = &Session{ID: id}
 	}
-
 	newMsgs := req.Messages
 	full := req
 	if sess.Summary != "" {
 		full.System = joinSystem(req.System, "以下是此前对话的摘要,作为背景:\n"+sess.Summary)
 	}
 	full.Messages = append(append([]llm.Message{}, sess.Messages...), newMsgs...)
+	return sess, newMsgs, full, nil
+}
 
+// persist 把本轮 user 输入与最终 assistant 回复写入会话并保存。
+func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Message, assistant string) error {
+	sess.Messages = append(sess.Messages, newMsgs...)
+	sess.Messages = append(sess.Messages, llm.Message{Role: llm.Assistant, Content: assistant})
+	if m.Summarizer != nil {
+		if err := m.Summarizer.compress(ctx, sess); err != nil {
+			return err
+		}
+	}
+	sess.UpdatedAt = time.Now()
+	return m.Store.Save(ctx, sess)
+}
+
+// Run 以会话 id 跑一轮:req.Messages 只放**本轮新输入**(通常一条 user 消息);Manager 负责
+// 把历史与摘要拼进去,跑完把本轮 user 输入与最终 assistant 回复追加进会话并保存。
+func (m *Manager) Run(ctx context.Context, id string, r *agent.Runner, req llm.Request) (*llm.Response, error) {
+	sess, newMsgs, full, err := m.prepare(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := r.Run(ctx, full)
 	if err != nil {
 		return resp, err
 	}
-
-	sess.Messages = append(sess.Messages, newMsgs...)
-	sess.Messages = append(sess.Messages, llm.Message{Role: llm.Assistant, Content: resp.Content})
-	if m.Summarizer != nil {
-		if err := m.Summarizer.compress(ctx, sess); err != nil {
-			return resp, err
-		}
-	}
-	sess.UpdatedAt = time.Now()
-	if err := m.Store.Save(ctx, sess); err != nil {
+	if err := m.persist(ctx, sess, newMsgs, resp.Content); err != nil {
 		return resp, err
 	}
 	return resp, nil
+}
+
+// RunStream 与 Run 相同的会话编排,但转发 Runner.RunStream 的事件。
+// 仅在收到 EventFinal 时持久化会话;EventError 不写库(本轮未完成)。
+// 返回的 channel 在结束后关闭;调用方应排空直至关闭。
+func (m *Manager) RunStream(ctx context.Context, id string, r *agent.Runner, req llm.Request) <-chan agent.Event {
+	ch := make(chan agent.Event, 32)
+	go func() {
+		defer close(ch)
+		emit := func(e agent.Event) { ch <- e }
+
+		sess, newMsgs, full, err := m.prepare(ctx, id, req)
+		if err != nil {
+			emit(agent.Event{Type: agent.EventError, Err: err})
+			return
+		}
+		var final *llm.Response
+		for ev := range r.RunStream(ctx, full) {
+			if ev.Type == agent.EventFinal {
+				final = ev.Response
+				continue
+			}
+			emit(ev)
+			if ev.Type == agent.EventError {
+				return
+			}
+		}
+		if final == nil {
+			return
+		}
+		if err := m.persist(ctx, sess, newMsgs, final.Content); err != nil {
+			emit(agent.Event{Type: agent.EventError, Response: final, Err: err})
+			return
+		}
+		emit(agent.Event{Type: agent.EventFinal, Response: final})
+	}()
+	return ch
 }
 
 func joinSystem(base, extra string) string {

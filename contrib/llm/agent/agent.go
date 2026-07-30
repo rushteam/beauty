@@ -8,8 +8,8 @@
 //   - 工具来源与本包解耦:Tool.Call 就是普通 Go 函数,把 contrib/mcp 的远程工具、本地函数、HTTP
 //     调用等适配成 Tool 只需几行(见 example),故本包不 import mcp,保持零外部依赖。
 //
-// 支持 Run(同步)与 RunStream(事件流,ctx 可取消);工具权限三态 Allow/Ask/Deny;
-// AgentAsTool / Chain 做薄多 agent 编排。
+// 支持 Run(同步 Generate)与 RunStream(Stream 推 EventToken + 步骤事件,ctx 可取消);
+// 同轮多 tool 默认可并行;工具权限三态;AgentAsTool / Chain;Steer;Hooks。
 package agent
 
 import (
@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
 )
@@ -68,16 +70,20 @@ type Decision struct {
 type EventType string
 
 const (
-	EventStep       EventType = "step"        // 模型返回一轮(可能含 tool_calls)
+	EventToken      EventType = "token"       // 模型文本增量(Result=delta)
+	EventStep       EventType = "step"        // 模型一轮完成(Response 含完整内容/tool_calls)
 	EventToolStart  EventType = "tool_start"  // 即将执行工具
 	EventToolResult EventType = "tool_result" // 工具执行完毕(含拒绝/错误文本)
+	EventSteer      EventType = "steer"       // 中途注入的用户消息(Result 为文本)
 	EventFinal      EventType = "final"       // 终态文本回复
 	EventError      EventType = "error"       // 循环失败(含 MaxSteps / 审批失败 / ctx 取消)
 )
 
 // Event 是 RunStream 推送的一条事件。字段按 Type 选用:
+//   - token: Result=增量文本
 //   - step/final: Response
 //   - tool_start / tool_result: ToolCall (+ Result 仅 result)
+//   - steer: Result 为注入的用户文本
 //   - error: Err (+ 可选 Response 为最后一次模型输出)
 type Event struct {
 	Type     EventType
@@ -88,36 +94,92 @@ type Event struct {
 	Err      error
 }
 
+// Hooks 是分层观测/拦截点。任一回调返回 error 会中止整个 Run。
+// 字段均可为 nil。并行工具时 Before/AfterTool 可能并发调用,实现需自备同步。
+type Hooks struct {
+	BeforeModel func(ctx context.Context, step int, req *llm.Request) error
+	AfterModel  func(ctx context.Context, step int, resp *llm.Response) error
+	BeforeTool  func(ctx context.Context, step int, tc llm.ToolCall) error
+	AfterTool   func(ctx context.Context, step int, tc llm.ToolCall, result string) error
+}
+
+// Steer 是中途插话信箱:外部 Enqueue 的文本会在「下一轮模型调用之前」注入为 user 消息
+// (通常发生在本轮工具全部跑完之后)。并发安全;信箱满时 Enqueue 非阻塞丢弃并返回 false。
+type Steer struct {
+	ch chan string
+}
+
+// NewSteer 创建插话信箱。buf<=0 时用 8。
+func NewSteer(buf int) *Steer {
+	if buf < 1 {
+		buf = 8
+	}
+	return &Steer{ch: make(chan string, buf)}
+}
+
+// Enqueue 投入一条用户插话。steer 为 nil 或 msg 为空则忽略;信箱满返回 false。
+func (s *Steer) Enqueue(msg string) bool {
+	if s == nil || msg == "" {
+		return false
+	}
+	select {
+	case s.ch <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Steer) drain() []string {
+	if s == nil {
+		return nil
+	}
+	var out []string
+	for {
+		select {
+		case m := <-s.ch:
+			out = append(out, m)
+		default:
+			return out
+		}
+	}
+}
+
 // Runner 驱动 agent 循环。Client 可以是任意 llm.Client(含 Fallback/Retry/Metered/Guard 叠加后的)。
 type Runner struct {
 	Client   llm.Client
 	Tools    []Tool
 	MaxSteps int // <=0 时用 DefaultMaxSteps
 
+	// ParallelTools 控制同轮多个 tool_call 是否并发执行。nil=默认并行(>1 时);
+	// 指向 false 则强制串行。并行时 Hooks.Before/AfterTool 与 Approve 可能并发,需自行同步。
+	ParallelTools *bool
+
 	// OnStep 在每次模型返回后回调(step 从 1 起),用于埋点/日志/观察工具调用。可为 nil。
-	// RunStream 场景更推荐消费 Event;OnStep 仍会触发以保持兼容。
 	OnStep func(step int, resp *llm.Response)
 
 	// Approve 是工具级人工审批门:执行 PermitAsk(或旧 Approval)工具前调用。
-	// 返回 Approved=false → 拒绝理由喂回模型继续;返回 error → 中止整个 Run。
-	// 为 nil 时,Ask 工具仍会执行(未启用审批)。实现可阻塞等待人工确认。
 	Approve func(ctx context.Context, tc llm.ToolCall) (Decision, error)
+
+	// Hooks 分层回调(Before/After × Model/Tool)。可为零值。
+	Hooks Hooks
+
+	// Steer 中途插话信箱。可为 nil(不启用)。
+	Steer *Steer
 }
 
-// Run 跑完整的工具循环并返回终态响应。ctx 取消会中止循环。
-// req.Messages 不会被就地修改(内部使用副本)。
+// Run 跑完整的工具循环并返回终态响应(内部走 Client.Generate)。ctx 取消会中止循环。
 func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	return r.run(ctx, req, nil)
 }
 
-// RunStream 异步跑循环,通过 channel 推送 Event。channel 在结束时关闭。
-// ctx 取消会尽快停止(当前 Generate/工具调用依赖其 ctx),并推送 EventError。
-// 调用方应排空 channel 直至关闭,以免泄漏 goroutine。
+// RunStream 异步跑循环:模型侧走 Client.Stream,推送 EventToken 增量,并推送步骤/工具事件。
+// provider 若不支持流式 tool_calls(Done 时无 ToolCalls 且内容为空),会回退到 Generate。
+// channel 在结束时关闭;调用方应排空直至关闭。
 func (r *Runner) RunStream(ctx context.Context, req llm.Request) <-chan Event {
-	ch := make(chan Event, 16)
+	ch := make(chan Event, 32)
 	go func() {
 		defer close(ch)
-		// 始终投递事件(不因 ctx 取消而丢弃终态 error);调用方应排空直至关闭。
 		emit := func(e Event) { ch <- e }
 		resp, err := r.run(ctx, req, emit)
 		if err != nil {
@@ -151,12 +213,32 @@ func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*l
 		if err := ctx.Err(); err != nil {
 			return last, err
 		}
+
+		for _, m := range r.Steer.drain() {
+			msgs = append(msgs, llm.Message{Role: llm.User, Content: m})
+			if emit != nil {
+				emit(Event{Type: EventSteer, Step: step, Result: m})
+			}
+		}
+
 		req.Messages = msgs
-		resp, err := r.Client.Generate(ctx, req)
+		if r.Hooks.BeforeModel != nil {
+			if err := r.Hooks.BeforeModel(ctx, step, &req); err != nil {
+				return last, err
+			}
+			msgs = req.Messages
+		}
+
+		resp, err := r.callModel(ctx, req, step, emit)
 		if err != nil {
 			return last, err
 		}
 		last = resp
+		if r.Hooks.AfterModel != nil {
+			if err := r.Hooks.AfterModel(ctx, step, resp); err != nil {
+				return last, err
+			}
+		}
 		if r.OnStep != nil {
 			r.OnStep(step, resp)
 		}
@@ -169,25 +251,130 @@ func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*l
 		}
 
 		msgs = append(msgs, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
-		for _, tc := range resp.ToolCalls {
-			if err := ctx.Err(); err != nil {
-				return last, err
-			}
-			tc := tc
-			if emit != nil {
-				emit(Event{Type: EventToolStart, Step: step, ToolCall: &tc})
-			}
-			result, fatal := r.dispatch(ctx, byName, tc)
-			if emit != nil {
-				emit(Event{Type: EventToolResult, Step: step, ToolCall: &tc, Result: result})
-			}
-			if fatal != nil {
-				return last, fatal
-			}
-			msgs = append(msgs, llm.Message{Role: llm.Tool, ToolCallID: tc.ID, Content: result})
+		toolMsgs, fatal := r.runTools(ctx, step, byName, resp.ToolCalls, emit)
+		if fatal != nil {
+			return last, fatal
 		}
+		msgs = append(msgs, toolMsgs...)
 	}
 	return last, ErrMaxSteps
+}
+
+// callModel:Run 用 Generate;RunStream 用 Stream 推 token,必要时回退 Generate。
+func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit func(Event)) (*llm.Response, error) {
+	if emit == nil {
+		return r.Client.Generate(ctx, req)
+	}
+	ch, err := r.Client.Stream(ctx, req)
+	if err != nil {
+		return r.Client.Generate(ctx, req)
+	}
+	var content strings.Builder
+	var toolCalls []llm.ToolCall
+	var usage llm.Usage
+	for c := range ch {
+		if c.Err != nil {
+			return nil, c.Err
+		}
+		if c.Delta != "" {
+			content.WriteString(c.Delta)
+			emit(Event{Type: EventToken, Step: step, Result: c.Delta})
+		}
+		if len(c.ToolCalls) > 0 {
+			toolCalls = c.ToolCalls
+		}
+		if c.Usage != nil {
+			usage = *c.Usage
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resp := &llm.Response{Content: content.String(), ToolCalls: toolCalls, Usage: usage, Model: req.Model}
+	// provider 未给出流式 tool_calls、又没有任何文本,而请求声明了工具 → 回退 Generate
+	if len(req.Tools) > 0 && len(toolCalls) == 0 && content.Len() == 0 {
+		return r.Client.Generate(ctx, req)
+	}
+	return resp, nil
+}
+
+type toolOutcome struct {
+	tc     llm.ToolCall
+	result string
+	fatal  error
+}
+
+func (r *Runner) parallelEnabled(n int) bool {
+	if n <= 1 {
+		return false
+	}
+	if r.ParallelTools != nil {
+		return *r.ParallelTools
+	}
+	return true
+}
+
+func (r *Runner) runTools(ctx context.Context, step int, byName map[string]Tool, tcs []llm.ToolCall, emit func(Event)) ([]llm.Message, error) {
+	if !r.parallelEnabled(len(tcs)) {
+		var msgs []llm.Message
+		for _, tc := range tcs {
+			if err := ctx.Err(); err != nil {
+				return msgs, err
+			}
+			out := r.execOne(ctx, step, byName, tc, emit)
+			if out.fatal != nil {
+				return msgs, out.fatal
+			}
+			msgs = append(msgs, llm.Message{Role: llm.Tool, ToolCallID: tc.ID, Content: out.result})
+		}
+		return msgs, nil
+	}
+
+	outs := make([]toolOutcome, len(tcs))
+	var wg sync.WaitGroup
+	for i, tc := range tcs {
+		wg.Add(1)
+		go func(i int, tc llm.ToolCall) {
+			defer wg.Done()
+			outs[i] = r.execOne(ctx, step, byName, tc, emit)
+		}(i, tc)
+	}
+	wg.Wait()
+
+	msgs := make([]llm.Message, 0, len(tcs))
+	for i, out := range outs {
+		if out.fatal != nil {
+			return msgs, out.fatal
+		}
+		msgs = append(msgs, llm.Message{Role: llm.Tool, ToolCallID: tcs[i].ID, Content: out.result})
+	}
+	return msgs, nil
+}
+
+func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, tc llm.ToolCall, emit func(Event)) toolOutcome {
+	if r.Hooks.BeforeTool != nil {
+		if err := r.Hooks.BeforeTool(ctx, step, tc); err != nil {
+			return toolOutcome{tc: tc, fatal: err}
+		}
+	}
+	if emit != nil {
+		tc := tc
+		emit(Event{Type: EventToolStart, Step: step, ToolCall: &tc})
+	}
+	result, fatal := r.dispatch(ctx, byName, tc)
+	if fatal != nil {
+		return toolOutcome{tc: tc, result: result, fatal: fatal}
+	}
+	if emit != nil {
+		tc := tc
+		emit(Event{Type: EventToolResult, Step: step, ToolCall: &tc, Result: result})
+	}
+	if r.Hooks.AfterTool != nil {
+		if err := r.Hooks.AfterTool(ctx, step, tc, result); err != nil {
+			return toolOutcome{tc: tc, result: result, fatal: err}
+		}
+	}
+	return toolOutcome{tc: tc, result: result}
 }
 
 func (t Tool) effectivePerm() Permission {
@@ -200,8 +387,6 @@ func (t Tool) effectivePerm() Permission {
 	return PermitAllow
 }
 
-// dispatch 执行一次工具调用,返回喂回模型的文本结果。未知工具、被拒绝、执行出错都转成文本回传,
-// 让模型有机会自行纠正,而不中断循环;仅审批门本身出错(fatal 非 nil)才中止 Run。
 func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.ToolCall) (result string, fatal error) {
 	t, ok := byName[tc.Name]
 	if !ok {
@@ -231,3 +416,6 @@ func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.To
 	}
 	return out, nil
 }
+
+// Bool 返回 *bool,便于设置 ParallelTools。
+func Bool(v bool) *bool { return &v }

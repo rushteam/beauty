@@ -42,6 +42,27 @@ const (
 // 回调),避免无谓地触发上层重载。资源被删除时只告警、不回调空值,保留 last-good,
 // 免得一次误删/重建就把运行中的配置清空。
 //
+// # RBAC 权限要求
+//
+// ConfigMap 配置中心需要 Pod ServiceAccount 对目标命名空间的 configmaps 拥有
+// get、list、watch 权限;Secret 配置中心需要对 secrets 拥有同样的权限。缺少任何
+// 一项都会导致 403 Forbidden,具体表现为 Get 返回错误或 Watch 启动失败。
+//
+// 最小 Role 示例(ConfigMap):
+//
+//	apiVersion: rbac.authorization.k8s.io/v1
+//	kind: Role
+//	metadata:
+//	  namespace: default
+//	  name: config-reader
+//	rules:
+//	- apiGroups: [""]
+//	  resources: ["configmaps"]
+//	  verbs: ["get", "list", "watch"]
+//
+// Secret 版本只需把 resources 换为 ["secrets"]。如果同时用了 ConfigMap 配置中心和
+// Lease 选主,可以合并到同一个 Role(见 docs/k8s-rbac.md 完整示例)。
+//
 // 零值不可用,用 NewConfigMapCenter / NewSecretCenter 构造。
 type ConfigCenter struct {
 	client    kubernetes.Interface

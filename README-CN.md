@@ -169,7 +169,7 @@ conn, err := grpcclient.DialContext(ctx, "nacos://127.0.0.1:8848/helloworld.rpc"
 |---|---|
 | 配置 / 热更新 | `pkg/conf`(nacos、etcd、consul、k8s configmap/secret) |
 | 服务发现 | `pkg/service/discover`,客户端 `pkg/client/{grpcclient,http}` |
-| 分布式锁 / 选主 | `pkg/dlock`(etcd、consul、redis、k8s) |
+| 分布式锁 / 选主 | `pkg/dlock`(etcd、consul、redis、k8s Lease、PG Advisory Lock);k8s RBAC 见 [`docs/k8s-rbac.md`](docs/k8s-rbac.md) |
 | TTL-KV 与原语 | `pkg/kvstore`(redis、etcd)→ counter / cooldown / idempotency |
 | 并发 | `pkg/syncx`(Map/ForEach、SingleFlight、Batcher、Debounce/Throttle、Future)、`pkg/xgo`、`pkg/safe`、`pkg/chanx`、`pkg/keyedmutex` |
 | 韧性 | `pkg/ratelimit`、`pkg/governance/{circuitbreaker,overloadctrl}`、`pkg/backoff` |
@@ -226,6 +226,7 @@ OpenTelemetry 贯穿框架:trace 与 metrics 走 `pkg/service/telemetry`,日志�
 ## 文档
 
 - [`docs/`](docs) —— 配置、中间件、服务发现、日志、实时组件等。
+- [`docs/k8s-rbac.md`](docs/k8s-rbac.md) —— k8s RBAC / ServiceAccount 配置指南(选主 + 配置中心)。
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) —— WASM 分层(运行时、agent、OPA、FaaS)。
 - [`examples/`](examples) —— 大部分功能的可运行示例。
 - [`CHANGELOG.md`](CHANGELOG.md) —— 重要变更。

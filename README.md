@@ -173,7 +173,7 @@ See [`docs/grpc-service-discovery.md`](docs/grpc-service-discovery.md),
 |---|---|
 | Config / hot reload | `pkg/conf` (nacos, etcd, consul, k8s configmap/secret) |
 | Service discovery | `pkg/service/discover`, clients `pkg/client/{grpcclient,http}` |
-| Distributed lock / leader | `pkg/dlock` (etcd, consul, redis, k8s) |
+| Distributed lock / leader | `pkg/dlock` (etcd, consul, redis, k8s Lease, PG Advisory Lock); k8s RBAC guide: [`docs/k8s-rbac.md`](docs/k8s-rbac.md) |
 | TTL-KV & primitives | `pkg/kvstore` (redis, etcd) → counter / cooldown / idempotency |
 | Concurrency | `pkg/syncx` (Map/ForEach, SingleFlight, Batcher, Debounce/Throttle, Future), `pkg/xgo`, `pkg/safe`, `pkg/chanx`, `pkg/keyedmutex` |
 | Resilience | `pkg/ratelimit`, `pkg/governance/{circuitbreaker,overloadctrl}`, `pkg/backoff` |
@@ -233,6 +233,7 @@ Configure an exporter once and the media/mq/client layers emit metrics automatic
 ## Documentation
 
 - [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more.
+- [`docs/k8s-rbac.md`](docs/k8s-rbac.md) — k8s RBAC / ServiceAccount setup guide (leader election + config center).
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) — WASM tiers (runtime, agent, OPA, FaaS).
 - [`examples/`](examples) — runnable demos for most features.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.

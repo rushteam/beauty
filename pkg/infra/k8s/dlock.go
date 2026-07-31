@@ -13,6 +13,42 @@
 //
 // 除选主外,本包还提供基于 ConfigMap / Secret 的配置中心(见 config_center.go),
 // 实现 pkg/conf.ConfigCenter,让纯 k8s 部署不必额外运维配置中心即可热更新配置。
+//
+// # RBAC 权限要求
+//
+// Elector 需要对 coordination.k8s.io/v1 Lease 资源拥有 get、create、update 权限。
+// Pod 的 ServiceAccount 必须绑定对应的 Role/ClusterRole,否则选主会因 403 Forbidden
+// 而失败——这是最常见的部署问题。
+//
+// 最小 Role 示例(假设选主 Lease 放在 default 命名空间):
+//
+//	apiVersion: rbac.authorization.k8s.io/v1
+//	kind: Role
+//	metadata:
+//	  namespace: default
+//	  name: leader-election
+//	rules:
+//	- apiGroups: ["coordination.k8s.io"]
+//	  resources: ["leases"]
+//	  verbs: ["get", "create", "update"]
+//
+// 绑定到 ServiceAccount:
+//
+//	apiVersion: rbac.authorization.k8s.io/v1
+//	kind: RoleBinding
+//	metadata:
+//	  namespace: default
+//	  name: leader-election
+//	subjects:
+//	- kind: ServiceAccount
+//	  name: my-app          # ← Pod spec 里的 serviceAccountName
+//	  namespace: default
+//	roleRef:
+//	  kind: Role
+//	  name: leader-election
+//	  apiGroup: rbac.authorization.k8s.io
+//
+// 完整 YAML 及 ConfigMap/Secret 配置中心所需权限见 docs/k8s-rbac.md。
 package k8s
 
 import (

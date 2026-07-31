@@ -1,6 +1,7 @@
 package grpcclient
 
 import (
+	mwcache "github.com/rushteam/beauty/pkg/middleware/cache"
 	mwcb "github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
 	"google.golang.org/grpc"
 )
@@ -17,4 +18,16 @@ import (
 // 需要注入其它一元拦截器时用 WithGRPCDialOptions(grpc.WithChainUnaryInterceptor(...))。
 func WithCircuitBreakerInterceptor(cb *mwcb.CircuitBreaker) DialOption {
 	return WithGRPCDialOptions(grpc.WithChainUnaryInterceptor(mwcb.UnaryClientInterceptor(cb)))
+}
+
+// WithCacheInterceptor 接入 gRPC 响应缓存(pkg/middleware/cache):
+// 相同方法 + 相同请求命中缓存时直接返回,跳过网络调用。
+// 拦截器注册在 chain 最外层:缓存命中不经过熔断/重试。
+//
+//	store := cache.NewMemoryStore(256)
+//	conn, _ := grpcclient.DialContext(ctx, target,
+//	    grpcclient.WithCacheInterceptor(store, cache.WithDefaultTTL(5*time.Minute)),
+//	)
+func WithCacheInterceptor(store mwcache.Store, opts ...mwcache.Option) DialOption {
+	return WithGRPCDialOptions(grpc.WithChainUnaryInterceptor(mwcache.UnaryClientInterceptor(store, opts...)))
 }

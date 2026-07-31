@@ -28,8 +28,9 @@ func NewHTTPClient(opts ...ClientOption) *http.Client {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	// 传输链(外→内):熔断 → 重试 → otel → base。熔断在最外:一次逻辑请求算一个样本,
-	// 熔断打开时直接短路、不进重试;otel 在最内:每次实际尝试各自成 span。
+	// 传输链(外→内):缓存 → 熔断 → 重试 → otel → base。
+	// 缓存在最外:命中时跳过熔断/重试(无网络开销);熔断在缓存之内:只统计实际下游请求;
+	// otel 在最内:每次实际尝试各自成 span。
 	var rt http.RoundTripper = otelhttp.NewTransport(http.DefaultTransport, cfg.otelOpts...)
 	if cfg.retry != nil {
 		retryable := cfg.retryable
@@ -41,15 +42,20 @@ func NewHTTPClient(opts ...ClientOption) *http.Client {
 	if cfg.breaker != nil {
 		rt = mwcb.HTTPClientMiddleware(cfg.breaker)(rt)
 	}
+	if cfg.cacheStore != nil {
+		rt = NewCacheTransport(rt, cfg.cacheStore, cfg.cacheOpts...)
+	}
 	return &http.Client{Timeout: cfg.timeout, Transport: rt}
 }
 
 type clientConfig struct {
-	timeout   time.Duration
-	otelOpts  []otelhttp.Option
-	retry     *backoff.Policy
-	retryable RetryableFunc
-	breaker   *mwcb.CircuitBreaker
+	timeout    time.Duration
+	otelOpts   []otelhttp.Option
+	retry      *backoff.Policy
+	retryable  RetryableFunc
+	breaker    *mwcb.CircuitBreaker
+	cacheStore HTTPCacheStore
+	cacheOpts  []CacheTransportOption
 }
 
 // ClientOption 配置 NewHTTPClient 的选项。
@@ -86,4 +92,13 @@ func WithRetryable(fn RetryableFunc) ClientOption {
 // 保护下游、快速失败。用 circuitbreaker.NewCircuitBreaker / GetCircuitBreaker 构造。
 func WithCircuitBreaker(cb *mwcb.CircuitBreaker) ClientOption {
 	return func(c *clientConfig) { c.breaker = cb }
+}
+
+// WithCache 开启 HTTP 响应缓存。缓存在传输链最外层:命中时跳过熔断/重试/OTel,
+// 零网络开销;未命中走完整链路后存入缓存。默认仅缓存 GET、遵守 Cache-Control。
+func WithCache(store HTTPCacheStore, opts ...CacheTransportOption) ClientOption {
+	return func(c *clientConfig) {
+		c.cacheStore = store
+		c.cacheOpts = opts
+	}
 }

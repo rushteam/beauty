@@ -9,6 +9,7 @@ package hedge
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -38,6 +39,11 @@ func Do[T any](ctx context.Context, delay time.Duration, maxHedge int, fn func(c
 		attempt := launched
 		launched++
 		go func() {
+			defer func() {
+				if rv := recover(); rv != nil {
+					results <- result{err: fmt.Errorf("hedge panic (attempt %d): %v", attempt, rv)}
+				}
+			}()
 			v, err := fn(ctx, attempt)
 			results <- result{v, err}
 		}()

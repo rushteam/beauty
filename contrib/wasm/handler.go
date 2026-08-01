@@ -3,6 +3,7 @@ package wasm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -162,6 +163,9 @@ func callHandler(ctx context.Context, inst *Instance, r *http.Request, body []by
 	res, err := inst.Call(ctx, cfg.handleFn, encodeU32(ptr), encodeU32(uint32(len(reqBytes))))
 	if err != nil {
 		return Response{}, err
+	}
+	if len(res) == 0 {
+		return Response{}, fmt.Errorf("wasm: %s returned no values", cfg.handleFn)
 	}
 	packed := res[0]
 	respBytes, err := inst.ReadBytes(uint32(packed>>32), uint32(packed))

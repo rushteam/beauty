@@ -90,11 +90,14 @@ func (b *Batcher[T]) run() {
 			timerOn = false
 			doFlush()
 		case <-b.quit:
-			// 排干 channel 里剩余的,连同 buf 一起 flush。
+			// 排干 channel 里剩余的,仍按 maxSize 切批 flush。
 			for {
 				select {
 				case item := <-b.in:
 					buf = append(buf, item)
+					if len(buf) >= b.maxSize {
+						doFlush()
+					}
 				default:
 					doFlush()
 					return

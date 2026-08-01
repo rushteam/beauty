@@ -439,17 +439,18 @@ func (p *wokerpool) CloseWithTimeout(timeout time.Duration) error {
 	close(p.closeCh)
 
 	if timeout > 0 {
-		// 带超时等待
 		done := make(chan struct{})
 		go func() {
 			p.wg.Wait()
 			close(done)
 		}()
 
+		timer := time.NewTimer(timeout)
 		select {
 		case <-done:
+			timer.Stop()
 			return nil
-		case <-time.After(timeout):
+		case <-timer.C:
 			return fmt.Errorf("worker pool close timeout after %v", timeout)
 		}
 	} else {

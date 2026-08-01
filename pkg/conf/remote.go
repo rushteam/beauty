@@ -65,7 +65,7 @@ func (r *remoteLoader) Unmarshal(dst any) error {
 }
 
 func (r *remoteLoader) Watch(ctx context.Context, fn func()) {
-	_, _ = r.cc.Watch(ctx, r.key, func(_, value string) {
+	if _, err := r.cc.Watch(ctx, r.key, func(_, value string) {
 		// 先校验再提交：坏内容（如配置中心被误推一份非法 YAML）不应覆盖
 		// 当前可用配置，否则后续 Unmarshal 全部失败且无法回滚到 last-good。
 		if err := r.validate(value); err != nil {
@@ -77,7 +77,9 @@ func (r *remoteLoader) Watch(ctx context.Context, fn func()) {
 		r.current = value
 		r.mu.Unlock()
 		fn()
-	})
+	}); err != nil {
+		slog.Error("conf: remote watch setup failed", "key", r.key, "err", err)
+	}
 }
 
 // inferFormat 从 key 的扩展名推断配置格式，兜底 yaml。

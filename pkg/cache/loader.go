@@ -67,6 +67,9 @@ func NewLRULoader[V any](capacity int, load func(ctx context.Context, key string
 }
 
 // Get 返回 key 对应的值:命中未过期缓存直接返回;否则经 singleflight 回源(同 key 并发合并)。
+//
+// 注意:singleflight 合并后,等待中的调用方共享同一次回源结果,其 ctx 取消不会中断
+// 已在执行的 load;这是 singleflight 的固有行为,调用方应自行处理超时/取消后的返回值。
 func (l *Loader[V]) Get(ctx context.Context, key string) (V, error) {
 	if it, ok := l.c.Get(key); ok && l.now().Before(it.exp) {
 		return it.val, it.err

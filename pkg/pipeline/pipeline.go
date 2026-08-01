@@ -165,6 +165,9 @@ func Merge[T any](ctx context.Context, channels ...<-chan T) <-chan T {
 
 // Split 扇出:将一个 channel 复制到 n 个输出 channel。每条数据只发到一个输出(轮询分发)。
 func Split[T any](ctx context.Context, input <-chan T, n int) []<-chan T {
+	if n <= 0 {
+		n = 1
+	}
 	outs := make([]chan T, n)
 	result := make([]<-chan T, n)
 	for i := range outs {

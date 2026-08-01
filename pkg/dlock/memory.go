@@ -3,6 +3,7 @@ package dlock
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // Memory 是 Locker + Elector 的纯内存实现:多个 goroutine 竞争同一个 key,
@@ -45,18 +46,20 @@ func (l *memLock) Unlock(context.Context) error {
 // Lock 实现 Locker。阻塞式获取,支持 ctx 取消(取消时不会拿到锁)。
 func (m *Memory) Lock(ctx context.Context, key string) (Lock, error) {
 	mu := m.mutexFor(key)
-	done := make(chan struct{})
-	go func() {
-		mu.Lock()
-		close(done)
-	}()
-	select {
-	case <-done:
+	if mu.TryLock() {
 		return &memLock{mu: mu}, nil
-	case <-ctx.Done():
-		// 注意:上面的 goroutine 仍可能在 ctx 取消后拿到锁并泄漏持有(内存实现的
-		// 已知局限,真实后端用租约自动释放)。调用方应尽快在别处重试或忽略。
-		return nil, ctx.Err()
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			if mu.TryLock() {
+				return &memLock{mu: mu}, nil
+			}
+		}
 	}
 }
 

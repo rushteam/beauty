@@ -121,8 +121,8 @@ func (r *Record) SignIn(now time.Time) ([]Reward, error) {
 	day := now.Day()
 	r.months[mk] |= 1 << (day - 1)
 
-	// 计算连签
-	if !r.lastDay.IsZero() && today.Sub(dayOnly(r.lastDay)) == 24*time.Hour {
+	// 计算连签(按日历日,避免 DST 导致 24h 比较失效)
+	if !r.lastDay.IsZero() && dayOnly(r.lastDay).AddDate(0, 0, 1).Equal(today) {
 		r.streak++
 	} else {
 		r.streak = 1

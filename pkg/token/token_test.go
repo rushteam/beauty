@@ -134,16 +134,16 @@ func TestToken_TamperedSignature(t *testing.T) {
 	m := newMgr(t)
 	defer m.Stop()
 	sess, _, _ := m.Issue("u1", "", nil, "")
-	// 篡改签名段最后一字符(若为 A 则改 B,否则改 A)。
-	sig := sess[strings.LastIndexByte(sess, '.')+1:]
-	b := []byte(sig)
-	last := b[len(b)-1]
-	if last == 'A' {
-		b[len(b)-1] = 'B'
+	sigStart := strings.LastIndexByte(sess, '.') + 1
+	sig := []byte(sess[sigStart:])
+	// 篡改签名段中间字符(避免最后一个字符只改 base64 padding 位而解码不变)。
+	idx := len(sig) / 2
+	if sig[idx] == 'X' {
+		sig[idx] = 'Y'
 	} else {
-		b[len(b)-1] = 'A'
+		sig[idx] = 'X'
 	}
-	tampered := sess[:len(sess)-len(sig)] + string(b)
+	tampered := sess[:sigStart] + string(sig)
 	if _, err := m.Verify(tampered); !errors.Is(err, token.ErrInvalidToken) {
 		t.Fatalf("want ErrInvalidToken, got %v", err)
 	}

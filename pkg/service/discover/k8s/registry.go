@@ -141,7 +141,9 @@ func (r *Registry) watchServices(ctx context.Context, serviceName string, notify
 			continue
 		}
 
-		r.consumeEvents(ctx, watcher, r.handleServiceEvent, notify)
+		r.consumeEvents(ctx, watcher, func(ctx context.Context, event watch.Event, notify discover.Notify) {
+			r.handleServiceEvent(ctx, event, serviceName, notify)
+		}, notify)
 
 		if ctx.Err() != nil {
 			return
@@ -176,7 +178,9 @@ func (r *Registry) watchEndpointSlices(ctx context.Context, serviceName string, 
 			continue
 		}
 
-		r.consumeEvents(ctx, watcher, r.handleEndpointSlicesEvent, notify)
+		r.consumeEvents(ctx, watcher, func(ctx context.Context, event watch.Event, notify discover.Notify) {
+			r.handleEndpointSlicesEvent(ctx, event, serviceName, notify)
+		}, notify)
 
 		if ctx.Err() != nil {
 			return
@@ -217,11 +221,10 @@ func sleepOrDone(ctx context.Context, d time.Duration) bool {
 }
 
 // handleServiceEvent 处理 Service 事件
-func (r *Registry) handleServiceEvent(ctx context.Context, event watch.Event, notify discover.Notify) {
+func (r *Registry) handleServiceEvent(ctx context.Context, event watch.Event, serviceName string, notify discover.Notify) {
 	switch event.Type {
 	case watch.Added, watch.Modified, watch.Deleted:
-		// 当 Service 发生变化时，重新获取所有服务实例
-		services, err := r.Find(ctx, "")
+		services, err := r.Find(ctx, serviceName)
 		if err != nil {
 			logger.Error("failed to find services after event", slog.Any("err", err))
 			return
@@ -231,10 +234,10 @@ func (r *Registry) handleServiceEvent(ctx context.Context, event watch.Event, no
 }
 
 // handleEndpointSlicesEvent 处理 EndpointSlice 事件
-func (r *Registry) handleEndpointSlicesEvent(ctx context.Context, event watch.Event, notify discover.Notify) {
+func (r *Registry) handleEndpointSlicesEvent(ctx context.Context, event watch.Event, serviceName string, notify discover.Notify) {
 	switch event.Type {
 	case watch.Added, watch.Modified, watch.Deleted:
-		services, err := r.Find(ctx, "")
+		services, err := r.Find(ctx, serviceName)
 		if err != nil {
 			logger.Error("failed to find services after endpoint slices event", slog.Any("err", err))
 			return

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"sync"
 	"time"
 
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -223,12 +224,16 @@ type Server struct {
 
 // Start ..
 func (s *Server) Start(ctx context.Context) error {
+	var readyOnce sync.Once
+	signalReady := func() { readyOnce.Do(func() { close(s.ready) }) }
+	defer signalReady()
+
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return err
 	}
 	s.addr = ln.Addr().String() //确保随机端口时候 s.addr 值的正确性
-	close(s.ready)
+	signalReady()
 
 	// 如果启用了自动服务发现
 	var waitRegistrations func()

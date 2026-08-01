@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/rushteam/beauty/pkg/middleware/auth"
 )
 
 // IPKeyExtractor IP 地址键提取器
@@ -91,10 +93,8 @@ func NewUserKeyExtractor(userIDKey string) *UserKeyExtractor {
 // Extract 从请求中提取用户ID作为键
 func (e *UserKeyExtractor) Extract(ctx context.Context, metadata map[string]any) (string, error) {
 	// 从上下文中获取用户信息
-	if user := ctx.Value("user"); user != nil {
-		if u, ok := user.(interface{ ID() string }); ok {
-			return fmt.Sprintf("user:%s", u.ID()), nil
-		}
+	if user, ok := auth.GetUserFromContext(ctx); ok {
+		return fmt.Sprintf("user:%s", user.ID()), nil
 	}
 
 	// 从元数据中获取用户ID

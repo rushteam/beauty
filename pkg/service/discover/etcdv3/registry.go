@@ -126,6 +126,9 @@ func (r *Registry) registerWithRetry(ctx context.Context, key, val string) (clie
 			if !errors.Is(err, context.Canceled) {
 				logger.Error("etcdRegistry.Register Put error", slog.Any("err", err))
 			}
+			if _, revokeErr := r.client.Revoke(context.Background(), leaseid); revokeErr != nil {
+				logger.Error("etcdRegistry.Register Revoke error", slog.Any("err", revokeErr))
+			}
 			time.Sleep(backoff)
 			if backoff < time.Second*3 {
 				backoff *= 2
@@ -279,18 +282,11 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 	// 缓冲为 1：只保留最新快照，旧的未消费时直接丢弃（调用方会收到最新状态）。
 	notifyCh := make(chan []discover.ServiceInfo, 1)
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case services, ok := <-notifyCh:
-				if !ok {
-					return
-				}
-				update(services)
-			}
+		for services := range notifyCh {
+			update(services)
 		}
 	}()
+	defer close(notifyCh)
 	notify := func(services []discover.ServiceInfo) {
 		select {
 		case notifyCh <- services:

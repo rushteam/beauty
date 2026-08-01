@@ -88,10 +88,35 @@ func (t *Tournament) currentExpiry(now time.Time) int64 {
 	if t.durationSec <= 0 {
 		return next.Unix() // 单次榜:expiry = 下一个重置点
 	}
-	// 周期性:向前回溯找到覆盖 now 的周期。
-	// 简化:expiry = next(下一重置点),当前周期 = [next-duration, next]。
-	// 若 now 在 startDelay 之前,expiry 仍是 next(首周期未开始则算下一周期)。
-	return next.Unix()
+	dur := time.Duration(t.durationSec) * time.Second
+	for {
+		start := next.Add(-dur)
+		if !start.After(now) {
+			return next.Unix()
+		}
+		prev := t.previousReset(start)
+		if prev.IsZero() || !prev.Before(next) {
+			return next.Unix()
+		}
+		next = prev
+	}
+}
+
+func (t *Tournament) previousReset(before time.Time) time.Time {
+	var last time.Time
+	probe := before.Add(-366 * 24 * time.Hour)
+	for {
+		n := t.schedule.Next(probe)
+		if n.After(before) {
+			return last
+		}
+		last = n
+		if !n.After(probe) {
+			probe = probe.Add(time.Second)
+		} else {
+			probe = n
+		}
+	}
 }
 
 // CurrentExpiry 返回当前周期的 expiry(unix 秒),作为 leaderboard 的时间窗 key。

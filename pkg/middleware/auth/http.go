@@ -26,12 +26,18 @@ func HTTPMiddleware(auth *AuthMiddleware) func(http.Handler) http.Handler {
 			// 执行认证
 			user, err := auth.Authenticate(r.Context(), metadata)
 			if err != nil {
+				if auth.onAuthFailure != nil {
+					auth.onAuthFailure(r.Context(), err)
+				}
 				handleAuthError(w, err)
 				return
 			}
 
 			// 执行授权（如果配置了授权器）
 			if err := auth.Authorize(r.Context(), user, r.URL.Path, r.Method); err != nil {
+				if auth.onAuthFailure != nil {
+					auth.onAuthFailure(r.Context(), err)
+				}
 				handleAuthError(w, err)
 				return
 			}
@@ -56,7 +62,7 @@ func buildHTTPMetadata(r *http.Request) map[string]any {
 	md := make(map[string]any, 7)
 
 	md["headers"] = r.Header     // http.Header 即 map[string][]string，直接引用
-	md["query"] = r.URL.RawQuery // 原始 query string，避免 ParseQuery 的 map 分配
+	md["query"] = map[string][]string(r.URL.Query())
 	md["method"] = r.Method
 	md["path"] = r.URL.Path
 	md["remote_addr"] = r.RemoteAddr
@@ -106,6 +112,9 @@ func RequireAuth(auth *AuthMiddleware) func(http.Handler) http.Handler {
 
 			user, err := auth.Authenticate(r.Context(), metadata)
 			if err != nil {
+				if auth.onAuthFailure != nil {
+					auth.onAuthFailure(r.Context(), err)
+				}
 				handleAuthError(w, err)
 				return
 			}

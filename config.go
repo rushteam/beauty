@@ -39,12 +39,12 @@ func (c *configComponent[T]) Init() context.CancelFunc {
 }
 
 func (c *configComponent[T]) reload() {
-	var cfg T
-	if err := c.loader.Unmarshal(&cfg); err != nil {
+	cfg := new(T)
+	if err := c.loader.Unmarshal(cfg); err != nil {
 		logger.Error("config: unmarshal failed", "error", err)
 		return
 	}
 	if c.onChange != nil {
-		c.onChange(&cfg)
+		c.onChange(cfg)
 	}
 }

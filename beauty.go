@@ -104,6 +104,7 @@ type ServiceKind interface {
 // App ..
 type App struct {
 	ready      atomic.Int32
+	hooksMu    sync.Mutex
 	hooks      map[HookEvent][]HookFunc
 	services   []Service
 	registry   []discover.Registry
@@ -112,14 +113,17 @@ type App struct {
 
 // Hook add a hook func to stage
 func (app *App) Hook(stage HookEvent, fn HookFunc) {
+	app.hooksMu.Lock()
+	defer app.hooksMu.Unlock()
 	app.hooks[stage] = append(app.hooks[stage], fn)
 }
 
 func (app *App) runHooks(stage HookEvent) {
-	if hooks, ok := app.hooks[stage]; ok {
-		for _, h := range hooks {
-			h(app)
-		}
+	app.hooksMu.Lock()
+	hooks := app.hooks[stage]
+	app.hooksMu.Unlock()
+	for _, h := range hooks {
+		h(app)
 	}
 }
 
@@ -136,7 +140,7 @@ func New(opts ...Option) *App {
 
 // Start ..
 func (s *App) Start(ctx context.Context) error {
-	if s.ready.Load() == 1 {
+	if !s.ready.CompareAndSwap(0, 1) {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -151,10 +155,12 @@ func (s *App) Start(ctx context.Context) error {
 	for _, srv := range s.services {
 		s.startService(ctx, &svcWg, srv, cancel)
 	}
-	s.ready.Swap(1)
 
 	// 等待 ctx 取消（signal、外部 cancel 或任意服务退出）
 	<-ctx.Done()
+
+	// shutdown 路径：标记不再就绪
+	s.ready.Swap(0)
 
 	// 等待所有服务的 Start() 返回，确保 in-flight 请求处理完毕
 	svcWg.Wait()

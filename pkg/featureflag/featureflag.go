@@ -4,6 +4,7 @@
 package featureflag
 
 import (
+	"fmt"
 	"hash/fnv"
 	"sync"
 )
@@ -123,10 +124,10 @@ func (e *Engine) Variant(key, id string) (string, bool) {
 
 func matchRule(when map[string]any, attrs Attributes) bool {
 	if len(when) == 0 {
-		return false // 空条件不视为命中，避免误强制
+		return false
 	}
 	for k, want := range when {
-		if attrs[k] != want {
+		if fmt.Sprint(attrs[k]) != fmt.Sprint(want) {
 			return false
 		}
 	}

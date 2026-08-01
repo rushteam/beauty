@@ -53,10 +53,11 @@ type Throttle[T any] struct {
 	cfg     config
 	flushFn FlushFunc[T]
 
-	mu     sync.Mutex
-	buf    []T
-	cancel context.CancelFunc
-	done   chan struct{}
+	mu      sync.Mutex
+	flushMu sync.Mutex // 串行化所有 flushFn 调用
+	buf     []T
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // New 创建 Throttle。flushFn 在触发时被调用(可能来自 Add 的 goroutine 或定时器 goroutine)。
@@ -104,12 +105,13 @@ func (t *Throttle[T]) Stop() {
 	cancel()
 	<-done
 
-	// flush remaining
 	t.mu.Lock()
 	remaining := t.swapBuf()
 	t.mu.Unlock()
 	if len(remaining) > 0 {
+		t.flushMu.Lock()
 		t.flushFn(remaining)
+		t.flushMu.Unlock()
 	}
 }
 
@@ -120,7 +122,9 @@ func (t *Throttle[T]) Add(item T) {
 	if len(t.buf) >= t.cfg.maxBatch {
 		batch := t.swapBuf()
 		t.mu.Unlock()
+		t.flushMu.Lock()
 		t.flushFn(batch)
+		t.flushMu.Unlock()
 		return
 	}
 	t.mu.Unlock()
@@ -146,7 +150,9 @@ func (t *Throttle[T]) Flush() {
 	batch := t.swapBuf()
 	t.mu.Unlock()
 	if len(batch) > 0 {
+		t.flushMu.Lock()
 		t.flushFn(batch)
+		t.flushMu.Unlock()
 	}
 }
 
@@ -164,7 +170,9 @@ func (t *Throttle[T]) loop(ctx context.Context) {
 			batch := t.swapBuf()
 			t.mu.Unlock()
 			if len(batch) > 0 {
+				t.flushMu.Lock()
 				t.flushFn(batch)
+				t.flushMu.Unlock()
 			}
 		}
 	}

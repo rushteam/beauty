@@ -115,12 +115,13 @@ func parseBlockingQuery(r *http.Request) (msn uint64, part int, ok bool) {
 	return m, part, true
 }
 
-// waitForPart 阻塞直到分片序号 msn 的第 part 个 part 就绪(或 msn 已完成/流结束/超时)。
-func (s *Stream) waitForPart(msn uint64, part int) {
+// waitForPart 阻塞直到分片序号 msn 的第 part 个 part 就绪(或 msn 已完成/流结束/超时/客户端断开)。
+func (s *Stream) waitForPart(r *http.Request, msn uint64, part int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	timedOut := false
+	clientGone := false
 	timer := time.AfterFunc(blockingReloadTimeout, func() {
 		s.mu.Lock()
 		timedOut = true
@@ -129,7 +130,20 @@ func (s *Stream) waitForPart(msn uint64, part int) {
 	})
 	defer timer.Stop()
 
-	for !s.finished && !timedOut && !s.partReadyLocked(msn, part) {
+	waitDone := make(chan struct{})
+	go func() {
+		select {
+		case <-r.Context().Done():
+			s.mu.Lock()
+			clientGone = true
+			s.cond.Broadcast()
+			s.mu.Unlock()
+		case <-waitDone:
+		}
+	}()
+	defer close(waitDone)
+
+	for !s.finished && !timedOut && !clientGone && !s.partReadyLocked(msn, part) {
 		s.cond.Wait()
 	}
 }

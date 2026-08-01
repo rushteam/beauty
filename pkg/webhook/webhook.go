@@ -77,13 +77,14 @@ type DeliveryRecord struct {
 // Store 持久化投递状态与幂等去重。实现方对接 Redis/DB/内存。
 // 并发安全由实现方保证。
 type Store interface {
-	// MarkDelivered 标记 (endpoint, eventID) 已成功投递。
-	// 返回 true 表示本次标记生效(之前未投递过),false 表示已投递过(应跳过)。
+	// MarkDelivered 标记 (endpoint, eventID) 为"投递中/已投递"。
+	// 返回 true 表示本次标记生效(之前未标记过),false 表示已标记过(应跳过)。
 	MarkDelivered(endpointURL, eventID string) bool
+	// UnmarkDelivered 撤销 MarkDelivered 的标记(投递失败时调用,允许后续重试)。
+	UnmarkDelivered(endpointURL, eventID string)
 	// RecordFailed 记录一次最终失败的投递(用于状态追踪)。
 	RecordFailed(rec DeliveryRecord)
-	// RecordDelivered 记录一次成功的投递(用于状态追踪,与 MarkDelivered 区别:
-	// MarkDelivered 负责去重判断,RecordDelivered 负责状态留痕)。
+	// RecordDelivered 记录一次成功的投递(用于状态追踪)。
 	RecordDelivered(rec DeliveryRecord)
 }
 
@@ -175,12 +176,16 @@ func (n *Notifier) Notify(ctx context.Context, ev Event) {
 			continue
 		}
 		ep := ep
-		// 幂等去重:已投递过则跳过。
+		// 幂等去重:已投递过或正在投递则跳过。
 		if n.store != nil && ev.EventID != "" && !n.store.MarkDelivered(ep.URL, ev.EventID) {
 			continue
 		}
 		safe.Go(func() {
 			if err := n.deliver(ctx, ep, ev); err != nil {
+				// 投递失败:撤销标记以允许后续重试
+				if n.store != nil && ev.EventID != "" {
+					n.store.UnmarkDelivered(ep.URL, ev.EventID)
+				}
 				if n.store != nil {
 					n.store.RecordFailed(DeliveryRecord{
 						EventID: ev.EventID, EndpointURL: ep.URL,
@@ -346,6 +351,12 @@ func (s *MemStore) MarkDelivered(endpointURL, eventID string) bool {
 	}
 	s.delivered[k] = struct{}{}
 	return true
+}
+
+func (s *MemStore) UnmarkDelivered(endpointURL, eventID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.delivered, s.key(endpointURL, eventID))
 }
 
 func (s *MemStore) RecordDelivered(rec DeliveryRecord) {

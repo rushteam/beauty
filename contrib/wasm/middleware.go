@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -233,6 +234,9 @@ func exchange(ctx context.Context, inst *Instance, r *http.Request, body []byte,
 	res, err := inst.Call(ctx, cfg.handleFn, api.EncodeU32(ptr), api.EncodeU32(uint32(len(reqBytes))))
 	if err != nil {
 		return Decision{}, err
+	}
+	if len(res) == 0 {
+		return Decision{}, fmt.Errorf("wasm: %s returned no values", cfg.handleFn)
 	}
 	packed := res[0]
 	respBytes, err := inst.ReadBytes(uint32(packed>>32), uint32(packed))

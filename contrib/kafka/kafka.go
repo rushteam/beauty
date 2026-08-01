@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -77,6 +78,7 @@ type Subscriber struct {
 	minBytes   int
 	maxBytes   int
 	startFirst bool // 无提交位点时从最早开始(默认从最新)
+	wg         sync.WaitGroup
 }
 
 var _ mq.Subscriber = (*Subscriber)(nil)
@@ -125,7 +127,9 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h mq.Handler, 
 		MaxBytes:    s.maxBytes,
 		StartOffset: startOffset,
 	})
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		defer r.Close()
 		for {
 			m, err := r.FetchMessage(ctx)
@@ -148,6 +152,16 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h mq.Handler, 
 		}
 	}()
 	return nil
+}
+
+// Wait 阻塞直到所有 Subscribe 启动的消费 goroutine 退出(通常需先取消 Subscribe 的 ctx)。
+func (s *Subscriber) Wait() {
+	s.wg.Wait()
+}
+
+// Close 等待所有消费 goroutine 退出。
+func (s *Subscriber) Close() {
+	s.Wait()
 }
 
 // ===== 消息映射(纯函数,可单测)=====

@@ -10,6 +10,9 @@ import (
 
 // ToGRPC 将 *Status 转换为 gRPC status error，供 gRPC handler 直接返回。
 func ToGRPC(s *Status) error {
+	if s == nil {
+		return nil
+	}
 	return grpcstatus.Error(codes.Code(s.code.GRPCCode()), s.message)
 }
 

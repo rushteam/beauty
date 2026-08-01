@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/pion/interceptor"
 	pion "github.com/pion/webrtc/v4"
@@ -68,7 +69,16 @@ func WithMediaEngine(me *pion.MediaEngine) APIOption {
 // Answer 执行 WHIP/WHEP 服务端(answerer)一侧的协商:把远端 offer 应用到 pc、生成
 // answer、等待 ICE 收集完成(WHIP/WHEP 只有一次 SDP 交换、不 trickle,故须等齐候选),
 // 返回 answer 的 SDP。协商前应先在 pc 上注册 OnTrack(WHIP)或 AddTrack(WHEP)。
-func Answer(pc *pion.PeerConnection, offer string) (string, error) {
+func Answer(ctx context.Context, pc *pion.PeerConnection, offer string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
 	if err := pc.SetRemoteDescription(pion.SessionDescription{
 		Type: pion.SDPTypeOffer,
 		SDP:  offer,
@@ -84,7 +94,11 @@ func Answer(pc *pion.PeerConnection, offer string) (string, error) {
 	if err := pc.SetLocalDescription(answer); err != nil {
 		return "", fmt.Errorf("webrtc: set local answer: %w", err)
 	}
-	<-gatherComplete
+	select {
+	case <-gatherComplete:
+	case <-ctx.Done():
+		return "", fmt.Errorf("webrtc: ice gathering: %w", ctx.Err())
+	}
 	return pc.LocalDescription().SDP, nil
 }
 

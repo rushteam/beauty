@@ -156,14 +156,16 @@ func (r *Registry) Wait() {
 	drain := r.drain
 	r.mu.Unlock()
 
-	done := make(chan struct{})
-	go func() { r.wg.Wait(); close(done) }()
+	wgDone := make(chan struct{})
+	go func() { r.wg.Wait(); close(wgDone) }()
 	if drain <= 0 {
-		<-done
+		<-wgDone
 	} else {
+		timer := time.NewTimer(drain)
 		select {
-		case <-done:
-		case <-time.After(drain):
+		case <-wgDone:
+			timer.Stop()
+		case <-timer.C:
 		}
 	}
 	close(r.done)

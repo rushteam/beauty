@@ -89,8 +89,10 @@ func (m *Manager) prepare(ctx context.Context, id string, req llm.Request) (*Ses
 }
 
 // persist 把本轮 user 输入与最终 assistant 回复写入会话并保存。
-func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Message, assistant string) error {
+// intermediates 包含 agent 循环中的中间消息(assistant tool_calls + tool results)。
+func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Message, intermediates []llm.Message, assistant string) error {
 	sess.Messages = append(sess.Messages, newMsgs...)
+	sess.Messages = append(sess.Messages, intermediates...)
 	sess.Messages = append(sess.Messages, llm.Message{Role: llm.Assistant, Content: assistant})
 	if m.Summarizer != nil {
 		if err := m.Summarizer.compress(ctx, sess); err != nil {
@@ -108,11 +110,22 @@ func (m *Manager) Run(ctx context.Context, id string, r *agent.Runner, req llm.R
 	if err != nil {
 		return nil, err
 	}
+	var intermediates []llm.Message
+	origOnStep := r.OnStep
+	r.OnStep = func(step int, resp *llm.Response) {
+		if len(resp.ToolCalls) > 0 {
+			intermediates = append(intermediates, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
+		}
+		if origOnStep != nil {
+			origOnStep(step, resp)
+		}
+	}
 	resp, err := r.Run(ctx, full)
+	r.OnStep = origOnStep
 	if err != nil {
 		return resp, err
 	}
-	if err := m.persist(ctx, sess, newMsgs, resp.Content); err != nil {
+	if err := m.persist(ctx, sess, newMsgs, intermediates, resp.Content); err != nil {
 		return resp, err
 	}
 	return resp, nil
@@ -133,10 +146,17 @@ func (m *Manager) RunStream(ctx context.Context, id string, r *agent.Runner, req
 			return
 		}
 		var final *llm.Response
+		var intermediates []llm.Message
 		for ev := range r.RunStream(ctx, full) {
 			if ev.Type == agent.EventFinal {
 				final = ev.Response
 				continue
+			}
+			if ev.Type == agent.EventStep && ev.Response != nil && len(ev.Response.ToolCalls) > 0 {
+				intermediates = append(intermediates, llm.Message{Role: llm.Assistant, Content: ev.Response.Content, ToolCalls: ev.Response.ToolCalls})
+			}
+			if ev.Type == agent.EventToolResult && ev.ToolCall != nil {
+				intermediates = append(intermediates, llm.Message{Role: llm.Tool, ToolCallID: ev.ToolCall.ID, Content: ev.Result})
 			}
 			emit(ev)
 			if ev.Type == agent.EventError {
@@ -146,7 +166,7 @@ func (m *Manager) RunStream(ctx context.Context, id string, r *agent.Runner, req
 		if final == nil {
 			return
 		}
-		if err := m.persist(ctx, sess, newMsgs, final.Content); err != nil {
+		if err := m.persist(ctx, sess, newMsgs, intermediates, final.Content); err != nil {
 			emit(agent.Event{Type: agent.EventError, Response: final, Err: err})
 			return
 		}

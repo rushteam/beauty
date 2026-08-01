@@ -161,8 +161,10 @@ func (s *Session) Send(typ MessageType, data []byte) bool {
 	if s.stopped.Load() {
 		return false
 	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
 	select {
-	case s.outgoingCh <- &Envelope{Type: typ, Data: data}:
+	case s.outgoingCh <- &Envelope{Type: typ, Data: cp}:
 		return true
 	default:
 		s.shutdown("send queue full")

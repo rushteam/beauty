@@ -112,6 +112,12 @@ func OpenWith(primary gorm.Dialector, replicas []gorm.Dialector, cfg Config, opt
 	if err != nil {
 		return nil, err
 	}
+	closeOnErr := true
+	defer func() {
+		if closeOnErr {
+			closeGormDB(db)
+		}
+	}()
 
 	if len(replicas) > 0 {
 		rc := dbresolver.Config{
@@ -136,7 +142,14 @@ func OpenWith(primary gorm.Dialector, replicas []gorm.Dialector, cfg Config, opt
 	if err := applyPool(db, cfg); err != nil {
 		return nil, err
 	}
+	closeOnErr = false
 	return &DB{DB: db}, nil
+}
+
+func closeGormDB(db *gorm.DB) {
+	if sqlDB, err := db.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
 }
 
 func applyPool(db *gorm.DB, cfg Config) error {

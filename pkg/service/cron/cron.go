@@ -101,7 +101,7 @@ func (s *Cron) register(ctx context.Context) {
 	for _, v := range s.handlers {
 		func(v cronHandler) {
 			logger.Info("register cron", slog.String("name", v.Name), slog.String("expr", v.Spec))
-			s.Cron.AddFunc(v.Spec, func() {
+			if _, err := s.Cron.AddFunc(v.Spec, func() {
 				defer func() {
 					if r := recover(); r != nil {
 						if s.recoverHandler != nil {
@@ -115,7 +115,9 @@ func (s *Cron) register(ctx context.Context) {
 					logger.Error("cron handler failed", slog.Any("err", err))
 				}
 				logger.Debug("cron handler success", slog.String("date", time.Now().Format("20060102")))
-			})
+			}); err != nil {
+				logger.Error("register cron failed", slog.String("name", v.Name), slog.String("expr", v.Spec), slog.Any("err", err))
+			}
 		}(v)
 	}
 }

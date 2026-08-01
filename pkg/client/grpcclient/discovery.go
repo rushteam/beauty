@@ -491,15 +491,17 @@ func (c *ServiceDiscoveryClient) selectService(ctx context.Context, services []d
 	// 3. 负载均衡选 + 熔断检查
 	switch c.strategyVal {
 	case RoundRobin:
-		return pickWithBreaker(ctx, c.breaker, maxAttempts, func() (discover.ServiceInfo, bool) {
+		c.mu.RLock()
+		result := pickWithBreaker(ctx, c.breaker, maxAttempts, func() (discover.ServiceInfo, bool) {
 			n, ok := c.rr.Next()
 			if !ok {
 				return discover.ServiceInfo{}, false
 			}
 			return n.service, true
 		}, candidates)
+		c.mu.RUnlock()
+		return result
 	case Random:
-		// 从候选里挑 Available 的
 		for _, idx := range rand.Perm(len(candidates)) {
 			s := candidates[idx]
 			if c.breaker.Available(&s) {
@@ -508,13 +510,16 @@ func (c *ServiceDiscoveryClient) selectService(ctx context.Context, services []d
 		}
 		return nil
 	case WeightedRoundRobin:
-		return pickWithBreaker(ctx, c.breaker, maxAttempts, func() (discover.ServiceInfo, bool) {
+		c.mu.RLock()
+		result := pickWithBreaker(ctx, c.breaker, maxAttempts, func() (discover.ServiceInfo, bool) {
 			n, ok := c.wrr.Next()
 			if !ok {
 				return discover.ServiceInfo{}, false
 			}
 			return n.service, true
 		}, candidates)
+		c.mu.RUnlock()
+		return result
 	case LeastConnections:
 		return c.leastConnections(candidates)
 	default:
@@ -717,7 +722,9 @@ func (c *ServiceDiscoveryClient) applyServiceUpdate(services []discover.ServiceI
 			slog.Info("draining connection to removed service",
 				"service", c.serviceName, "addr", conn.Target(),
 				"drain_timeout", c.drainTimeout)
+			c.bgWg.Add(1)
 			go func() {
+				defer c.bgWg.Done()
 				time.Sleep(c.drainTimeout)
 				conn.Close()
 			}()
@@ -760,8 +767,9 @@ func (c *ServiceDiscoveryClient) GetServiceInfo() []discover.ServiceInfo {
 	return c.services
 }
 
-// Close 关闭所有连接
+// Close 停止后台 goroutine 并关闭所有连接
 func (c *ServiceDiscoveryClient) Close() error {
+	c.Stop()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var lastErr error

@@ -162,6 +162,9 @@ func (r *RankCache) Insert(leaderboardID string, expiry int64, order SortOrder, 
 	if idx, exists := e.byOwner[rec.OwnerID]; exists {
 		e.items.items[idx] = it
 		heap.Fix(e.items, idx)
+		for i, x := range e.items.items {
+			e.byOwner[x.ownerID] = i
+		}
 	} else {
 		heap.Push(e.items, it)
 		// 重建索引(heap Push 后位置需刷新)。

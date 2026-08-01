@@ -20,6 +20,7 @@ package idempotency
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -188,9 +189,15 @@ func (s *Store[T]) Do(key string, fn func() (T, error)) (result T, err error, sh
 			delete(s.items, key)
 		default:
 			// 执行中:等待首次执行完成(锁外等待,避免阻塞其他 key)。
+			// 同时监听 stopCh 避免 Store 停止后 goroutine 永久泄漏。
 			s.mu.Unlock()
-			<-e.done
-			return e.result, e.err, true
+			select {
+			case <-e.done:
+				return e.result, e.err, true
+			case <-s.stopCh:
+				var zero T
+				return zero, fmt.Errorf("idempotency: store stopped while waiting"), false
+			}
 		}
 	}
 	// 首次执行:占位并释放锁,让并发同 key 走 "执行中" 分支等待。

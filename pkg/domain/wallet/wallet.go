@@ -97,8 +97,8 @@ func (w *Wallet) Apply(ownerID string, changeset WalletMap, metadata string, now
 	newBal := make(WalletMap, len(changeset))
 	affected := make(WalletMap, len(changeset))
 	for cur, delta := range changeset {
-		newVal := acc.Balance[cur] + delta
-		if newVal < 0 {
+		newVal, ok := addBalance(acc.Balance[cur], delta)
+		if !ok || newVal < 0 {
 			return nil, nil, fmt.Errorf("%w: %s want %d, have %d", ErrInsufficientBalance, cur, delta, acc.Balance[cur])
 		}
 		newBal[cur] = newVal
@@ -141,8 +141,9 @@ func (w *Wallet) ApplyTx(txID, ownerID string, changeset WalletMap, metadata str
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// 已成功过:重放首次结果。
-	if prev, ok := w.txIndex[txID]; ok {
+	// 已成功过:重放首次结果(按 txID+ownerID 去重,避免不同 owner 复用同一 txID)。
+	txKey := txID + "\x00" + ownerID
+	if prev, ok := w.txIndex[txKey]; ok {
 		l := w.ledgerByIDLocked(ownerID, prev.ledgerID)
 		return copyMap(prev.affected), l, true, nil
 	}
@@ -156,8 +157,8 @@ func (w *Wallet) ApplyTx(txID, ownerID string, changeset WalletMap, metadata str
 	newBal := make(WalletMap, len(changeset))
 	aff := make(WalletMap, len(changeset))
 	for cur, delta := range changeset {
-		newVal := acc.Balance[cur] + delta
-		if newVal < 0 {
+		newVal, ok := addBalance(acc.Balance[cur], delta)
+		if !ok || newVal < 0 {
 			// 失败不记录 txID,允许重试。
 			return nil, nil, false, fmt.Errorf("%w: %s want %d, have %d", ErrInsufficientBalance, cur, delta, acc.Balance[cur])
 		}
@@ -173,7 +174,7 @@ func (w *Wallet) ApplyTx(txID, ownerID string, changeset WalletMap, metadata str
 		CreateTime: now,
 	}
 	acc.ledgers = append(acc.ledgers, l)
-	w.txIndex[txID] = txResult{affected: copyMap(aff), ledgerID: l.ID}
+	w.txIndex[txKey] = txResult{affected: copyMap(aff), ledgerID: l.ID}
 	return aff, l, false, nil
 }
 
@@ -251,4 +252,12 @@ func copyMap(m WalletMap) WalletMap {
 	out := make(WalletMap, len(m))
 	maps.Copy(out, m)
 	return out
+}
+
+func addBalance(balance, delta int64) (int64, bool) {
+	sum := balance + delta
+	if (delta > 0 && sum < balance) || (delta < 0 && sum > balance) {
+		return 0, false
+	}
+	return sum, true
 }

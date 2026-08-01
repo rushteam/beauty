@@ -279,6 +279,14 @@ func (p *Policy) Eval(ctx context.Context, input json.RawMessage) (json.RawMessa
 	result, err := p.eval(cctx, inst, input)
 	if err != nil {
 		inst.rt.Close(context.Background())
+		if fresh, e := newOPAInstance(p.wasmBytes); e == nil {
+			p.putInstance(fresh)
+		} else {
+			select {
+			case <-p.sem:
+			default:
+			}
+		}
 		return nil, err
 	}
 	p.putInstance(inst)

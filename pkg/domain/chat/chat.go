@@ -176,7 +176,6 @@ func (s *Store) Delete(channelID string, id int64) bool {
 			s.byChannel[channelID] = append(list[:i], list[i+1:]...)
 			if len(s.byChannel[channelID]) == 0 {
 				delete(s.byChannel, channelID)
-				delete(s.bySeq, channelID)
 			}
 			return true
 		}

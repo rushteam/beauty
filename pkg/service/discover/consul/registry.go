@@ -8,6 +8,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/consul/api"
@@ -96,8 +97,9 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		}
 	}()
 
+	var stopOnce sync.Once
 	return func() {
-		close(stopCh)
+		stopOnce.Do(func() { close(stopCh) })
 		if err := r.client.Agent().ServiceDeregister(info.ID()); err != nil {
 			logger.Error("consul deregister failed",
 				slog.Any("err", err),
@@ -133,36 +135,32 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 		update(services)
 	}
 
-	go func() {
-		var lastIndex uint64
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-			entries, meta, err := r.client.Health().ServiceMultipleTags(
-				serviceName, nil, true,
-				(&api.QueryOptions{
-					WaitIndex: lastIndex,
-					WaitTime:  30 * time.Second,
-				}).WithContext(ctx),
-			)
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				logger.Warn("consul watch error",
-					slog.String("service", serviceName), slog.Any("err", err))
-				time.Sleep(time.Second)
-				continue
-			}
-			if meta.LastIndex > lastIndex {
-				lastIndex = meta.LastIndex
-				update(buildServiceInfos(entries))
-			}
+	var lastIndex uint64
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-	}()
-
-	return nil
+		entries, meta, err := r.client.Health().ServiceMultipleTags(
+			serviceName, nil, true,
+			(&api.QueryOptions{
+				WaitIndex: lastIndex,
+				WaitTime:  30 * time.Second,
+			}).WithContext(ctx),
+		)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			logger.Warn("consul watch error",
+				slog.String("service", serviceName), slog.Any("err", err))
+			time.Sleep(time.Second)
+			continue
+		}
+		if meta.LastIndex > lastIndex {
+			lastIndex = meta.LastIndex
+			update(buildServiceInfos(entries))
+		}
+	}
 }
 
 func buildServiceInfos(entries []*api.ServiceEntry) []discover.ServiceInfo {

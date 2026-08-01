@@ -3,6 +3,7 @@ package ratelimit_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -177,21 +178,23 @@ func TestClientIP_RemoteAddr(t *testing.T) {
 }
 
 func TestTokenBucket_Concurrent(t *testing.T) {
-	tb := ratelimit.NewTokenBucket(100, 1000)
+	tb := ratelimit.NewTokenBucket(100, 1) // rate=1/s, 测试窗口内 refill 可忽略
 	defer tb.Stop()
+	var wg sync.WaitGroup
 	var allowed atomic.Int64
+	wg.Add(200)
 	for range 200 {
 		go func() {
+			defer wg.Done()
 			if ok, _ := tb.Allow("k"); ok {
 				allowed.Add(1)
 			}
 		}()
 	}
-	time.Sleep(50 * time.Millisecond)
+	wg.Wait()
 	got := allowed.Load()
-	// 200 并发请求,桶只有100,补的来不及。放行数应 <= 100 + 一点补充。
-	if got > 120 {
-		t.Fatalf("concurrent allowed %d, should be <= ~100+refill", got)
+	if got > 101 {
+		t.Fatalf("concurrent allowed %d, should be <= ~100+1 refill", got)
 	}
 }
 

@@ -58,7 +58,16 @@ func NewUser(id, name string, roles []string) *DefaultUser {
 func (u *DefaultUser) ID() string               { return u.id }
 func (u *DefaultUser) Name() string             { return u.name }
 func (u *DefaultUser) Roles() []string          { return u.roles }
-func (u *DefaultUser) Metadata() map[string]any { return u.metadata }
+func (u *DefaultUser) Metadata() map[string]any {
+	if u.metadata == nil {
+		return nil
+	}
+	out := make(map[string]any, len(u.metadata))
+	for k, v := range u.metadata {
+		out[k] = v
+	}
+	return out
+}
 
 func (u *DefaultUser) HasRole(role string) bool {
 	return slices.Contains(u.roles, role)
@@ -216,37 +225,27 @@ func (am *AuthMiddleware) recordRequest() {
 }
 
 // recordSuccess 记录成功
-func (am *AuthMiddleware) recordSuccess(ctx context.Context, user User) {
+func (am *AuthMiddleware) recordSuccess(_ context.Context, _ User) {
 	if !am.enableMetrics {
 		return
 	}
 
 	am.mutex.Lock()
+	defer am.mutex.Unlock()
 	am.stats.SuccessRequests++
 	am.stats.LastAuthTime = time.Now()
-	cb := am.onAuthSuccess
-	am.mutex.Unlock()
-
-	if cb != nil {
-		cb(ctx, user)
-	}
 }
 
 // recordFailure 记录失败
-func (am *AuthMiddleware) recordFailure(ctx context.Context, err error) {
+func (am *AuthMiddleware) recordFailure(_ context.Context, _ error) {
 	if !am.enableMetrics {
 		return
 	}
 
 	am.mutex.Lock()
+	defer am.mutex.Unlock()
 	am.stats.FailureRequests++
 	am.stats.LastFailureTime = time.Now()
-	cb := am.onAuthFailure
-	am.mutex.Unlock()
-
-	if cb != nil {
-		cb(ctx, err)
-	}
 }
 
 // recordSkipped 记录跳过

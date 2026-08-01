@@ -1,10 +1,13 @@
 package cors
 
 import (
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/rushteam/beauty/pkg/service/logger"
 )
 
 type Config struct {
@@ -61,17 +64,19 @@ func (c *Config) hasWildcard() bool {
 }
 
 func (c *Config) Middleware() func(http.Handler) http.Handler {
+	allowCredentials := c.AllowCredentials
+	if c.hasWildcard() && c.AllowCredentials {
+		logger.Warn("cors: AllowCredentials is incompatible with wildcard AllowOrigins, disabling credentials",
+			slog.Bool("allow_credentials", c.AllowCredentials))
+		allowCredentials = false
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 
 			if origin != "" {
-				// 决定回显的 Allow-Origin。注意：带 credentials 时浏览器禁止 "*"，
-				// 必须回显具体 origin，否则响应被浏览器丢弃且等于把凭证暴露给任意源。
 				allowOrigin := ""
 				switch {
-				case c.hasWildcard() && c.AllowCredentials:
-					allowOrigin = origin // 通配符 + 凭证：回显具体 origin
 				case c.hasWildcard():
 					allowOrigin = "*"
 				case c.isOriginAllowed(origin):
@@ -83,8 +88,7 @@ func (c *Config) Middleware() func(http.Handler) http.Handler {
 					if allowOrigin != "*" {
 						w.Header().Add("Vary", "Origin")
 					}
-					// 仅在回显具体 origin（非 "*"）时才发 credentials 头
-					if c.AllowCredentials && allowOrigin != "*" {
+					if allowCredentials && allowOrigin != "*" {
 						w.Header().Set("Access-Control-Allow-Credentials", "true")
 					}
 					if len(c.ExposeHeaders) > 0 {

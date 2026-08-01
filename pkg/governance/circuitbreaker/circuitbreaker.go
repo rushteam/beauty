@@ -63,6 +63,7 @@ type nodeState struct {
 	consecutiveSuccesses uint32
 	openedAt             time.Time // 进入 Open 的时刻
 	halfOpenInflight     bool      // 半开态是否已放行探测请求
+	halfOpenProbeAt      time.Time // 探测放行时刻(用于超时回收)
 }
 
 // config 熔断器配置(不导出,通过 Option 设置)。
@@ -70,6 +71,7 @@ type config struct {
 	failureThreshold uint32        // 连续失败多少次熔断(Closed→Open)
 	successThreshold uint32        // 半开态连续成功多少次恢复(HalfOpen→Closed)
 	timeout          time.Duration // Open 冷却时间,超时进 HalfOpen
+	probeTimeout     time.Duration // 半开态探测超时,Report 未回调时回收 inflight
 	onStateChange    func(nodeAddr string, from, to State)
 }
 
@@ -84,6 +86,9 @@ func WithSuccessThreshold(n uint32) Option { return func(c *config) { c.successT
 
 // WithTimeout 设置 Open 冷却时间(默认 30s)。
 func WithTimeout(d time.Duration) Option { return func(c *config) { c.timeout = d } }
+
+// WithProbeTimeout 设置半开态探测超时(默认 30s)。Report 未回调时自动回收 inflight 槽位。
+func WithProbeTimeout(d time.Duration) Option { return func(c *config) { c.probeTimeout = d } }
 
 // WithOnStateChange 设置节点状态变更回调(日志/metric 用)。回调在锁内执行,须轻量。
 func WithOnStateChange(fn func(nodeAddr string, from, to State)) Option {
@@ -103,6 +108,7 @@ func NewNodeBreaker(opts ...Option) *NodeBreaker {
 		failureThreshold: 5,
 		successThreshold: 1,
 		timeout:          30 * time.Second,
+		probeTimeout:     30 * time.Second,
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -146,16 +152,20 @@ func (b *NodeBreaker) Available(node *discover.ServiceInfo) bool {
 		if time.Since(ns.openedAt) >= b.cfg.timeout {
 			b.setState(ns, node.Addr, StateHalfOpen)
 			ns.halfOpenInflight = true
+			ns.halfOpenProbeAt = time.Now()
 			return true
 		}
 		return false
 	case StateHalfOpen:
-		// 半开态只放行 1 个探测请求,其余拒绝
-		if !ns.halfOpenInflight {
-			ns.halfOpenInflight = true
-			return true
+		if ns.halfOpenInflight {
+			if time.Since(ns.halfOpenProbeAt) < b.cfg.probeTimeout {
+				return false
+			}
+			ns.halfOpenInflight = false
 		}
-		return false
+		ns.halfOpenInflight = true
+		ns.halfOpenProbeAt = time.Now()
+		return true
 	default:
 		return true
 	}

@@ -19,6 +19,7 @@ package versus
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
 	"sync"
 	"time"
@@ -220,7 +221,14 @@ func (m *Match) finish() {
 	m.mu.Unlock()
 
 	if onEnd != nil {
-		onEnd(res)
+		func() {
+			defer func() {
+				if rv := recover(); rv != nil {
+					slog.Error("versus: OnEnd panic", "error", rv)
+				}
+			}()
+			onEnd(res)
+		}()
 	}
 	m.bus.Publish(Event{Type: EventEnded, Snapshot: snap})
 }

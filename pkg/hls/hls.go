@@ -239,7 +239,7 @@ func (s *Stream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// LL-HLS 阻塞式刷新:?_HLS_msn=N&_HLS_part=K 时,挂起到该 part 就绪再返回。
 		if s.llPartTarget > 0 {
 			if msn, part, ok := parseBlockingQuery(r); ok {
-				s.waitForPart(msn, part)
+				s.waitForPart(r, msn, part)
 			}
 		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")

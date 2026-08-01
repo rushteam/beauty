@@ -93,7 +93,8 @@ func (cc *CacheClient) Generate(ctx context.Context, req Request) (*Response, er
 	key := cc.cfg.keyFn(req)
 	if resp, ok := cc.s.Get(ctx, key); ok {
 		atomic.AddInt64(&cc.hits, 1)
-		return resp, nil
+		cp := *resp
+		return &cp, nil
 	}
 	atomic.AddInt64(&cc.miss, 1)
 	resp, err := cc.c.Generate(ctx, req)
@@ -111,11 +112,12 @@ func (cc *CacheClient) Stream(ctx context.Context, req Request) (<-chan Chunk, e
 	key := cc.cfg.keyFn(req)
 	if resp, ok := cc.s.Get(ctx, key); ok {
 		atomic.AddInt64(&cc.hits, 1)
+		cp := *resp
 		ch := make(chan Chunk, 2)
-		if resp.Content != "" {
-			ch <- Chunk{Delta: resp.Content}
+		if cp.Content != "" {
+			ch <- Chunk{Delta: cp.Content}
 		}
-		ch <- Chunk{Done: true, ToolCalls: resp.ToolCalls, Usage: &resp.Usage}
+		ch <- Chunk{Done: true, ToolCalls: cp.ToolCalls, Usage: &cp.Usage}
 		close(ch)
 		return ch, nil
 	}

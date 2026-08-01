@@ -106,7 +106,8 @@ func NewTimeoutController(config Config) *TimeoutController {
 	}
 }
 
-// Execute 执行带超时控制的函数
+// Execute 执行带超时控制的函数。fn 接收的 ctx 在超时时会被取消,
+// fn 应监听 ctx.Done() 以便及时退出;否则 goroutine 会持续运行直到 fn 返回。
 func (tc *TimeoutController) Execute(ctx context.Context, fn func(ctx context.Context) error) error {
 	start := time.Now()
 
@@ -157,13 +158,23 @@ func (tc *TimeoutController) Execute(ctx context.Context, fn func(ctx context.Co
 
 // ExecuteWithResult 执行带超时控制和返回值的函数
 func (tc *TimeoutController) ExecuteWithResult(ctx context.Context, fn func(ctx context.Context) (any, error)) (any, error) {
-	var result any
-	err := tc.Execute(ctx, func(ctx context.Context) error {
-		var err error
-		result, err = fn(ctx)
+	type outcome struct {
+		val any
+		err error
+	}
+	ch := make(chan outcome, 1)
+	execErr := tc.Execute(ctx, func(ctx context.Context) error {
+		v, err := fn(ctx)
+		ch <- outcome{v, err}
 		return err
 	})
-	return result, err
+	// fn 正常完成(含返回 error)时 ch 已有值;超时/panic 时 ch 为空。
+	select {
+	case o := <-ch:
+		return o.val, o.err
+	default:
+		return nil, execErr
+	}
 }
 
 // recordRequest 记录请求统计信息

@@ -234,6 +234,7 @@ Configure an exporter once and the media/mq/client layers emit metrics automatic
 
 - [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more.
 - [`docs/k8s-rbac.md`](docs/k8s-rbac.md) — k8s RBAC / ServiceAccount setup guide (leader election + config center).
+- [`docs/cross-service-interop.md`](docs/cross-service-interop.md) — cross-service interop: how non-Beauty services discover and call Beauty gRPC services.
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) — WASM tiers (runtime, agent, OPA, FaaS).
 - [`examples/`](examples) — runnable demos for most features.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.

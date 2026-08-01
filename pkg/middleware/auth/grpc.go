@@ -27,11 +27,17 @@ func UnaryServerInterceptor(auth *AuthMiddleware) grpc.UnaryServerInterceptor {
 		// 执行认证
 		user, err := auth.Authenticate(ctx, metadata)
 		if err != nil {
+			if auth.onAuthFailure != nil {
+				auth.onAuthFailure(ctx, err)
+			}
 			return nil, wrapAuthError(err)
 		}
 
 		// 执行授权（如果配置了授权器）
 		if err := auth.Authorize(ctx, user, info.FullMethod, "call"); err != nil {
+			if auth.onAuthFailure != nil {
+				auth.onAuthFailure(ctx, err)
+			}
 			return nil, wrapAuthError(err)
 		}
 
@@ -81,11 +87,17 @@ func StreamServerInterceptor(auth *AuthMiddleware) grpc.StreamServerInterceptor 
 		// 执行认证
 		user, err := auth.Authenticate(ss.Context(), metadata)
 		if err != nil {
+			if auth.onAuthFailure != nil {
+				auth.onAuthFailure(ss.Context(), err)
+			}
 			return wrapAuthError(err)
 		}
 
 		// 执行授权（如果配置了授权器）
 		if err := auth.Authorize(ss.Context(), user, info.FullMethod, "stream"); err != nil {
+			if auth.onAuthFailure != nil {
+				auth.onAuthFailure(ss.Context(), err)
+			}
 			return wrapAuthError(err)
 		}
 

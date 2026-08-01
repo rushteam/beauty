@@ -10,6 +10,7 @@ import (
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -180,7 +181,14 @@ func Dial(target string, opts ...DialOption) (*grpc.ClientConn, error) {
 }
 
 // dialDirect 直连模式
-func dialDirect(_ context.Context, addr string, cfg *dialConfig) (*grpc.ClientConn, error) {
+func dialDirect(ctx context.Context, addr string, cfg *dialConfig) (*grpc.ClientConn, error) {
+	dialCtx := ctx
+	if cfg.timeout > 0 {
+		var cancel context.CancelFunc
+		dialCtx, cancel = context.WithTimeout(ctx, cfg.timeout)
+		defer cancel()
+	}
+
 	var dOpts []directOption
 	dOpts = append(dOpts, withDirectAddr(addr))
 	if len(cfg.grpcOpts) > 0 {
@@ -194,7 +202,27 @@ func dialDirect(_ context.Context, addr string, cfg *dialConfig) (*grpc.ClientCo
 	if err != nil {
 		return nil, err
 	}
+	if err := waitDirectConnReady(dialCtx, c.ClientConn); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
 	return c.ClientConn, nil
+}
+
+func waitDirectConnReady(ctx context.Context, conn *grpc.ClientConn) error {
+	conn.Connect()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		state := conn.GetState()
+		if state == connectivity.Ready {
+			return nil
+		}
+		if !conn.WaitForStateChange(ctx, state) {
+			return ctx.Err()
+		}
+	}
 }
 
 // dialWithDiscovery 服务发现模式

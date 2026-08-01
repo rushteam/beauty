@@ -14,10 +14,12 @@ import (
 type InProc struct {
 	defaultBuffer int
 
-	mu     sync.Mutex
-	subs   map[string][]*subscription // topic → 订阅
-	rr     map[string]int             // (topic|group) → 轮询计数
-	closed bool
+	mu        sync.Mutex
+	subs      map[string][]*subscription // topic → 订阅
+	rr        map[string]int             // (topic|group) → 轮询计数
+	closed    bool
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 type subscription struct {
@@ -45,6 +47,7 @@ func NewInProc(opts ...InProcOption) *InProc {
 		defaultBuffer: 64,
 		subs:          make(map[string][]*subscription),
 		rr:            make(map[string]int),
+		done:          make(chan struct{}),
 	}
 	for _, o := range opts {
 		o(b)
@@ -75,8 +78,11 @@ func (b *InProc) Subscribe(ctx context.Context, topic string, h Handler, opts ..
 	b.mu.Unlock()
 
 	go b.deliver(ctx, sub) // 投递 goroutine
-	go func() {            // ctx 取消 → 解除订阅
-		<-ctx.Done()
+	go func() {            // ctx 取消或 bus 关闭 → 解除订阅
+		select {
+		case <-ctx.Done():
+		case <-b.done:
+		}
 		b.unsubscribe(sub)
 	}()
 	return nil
@@ -86,6 +92,8 @@ func (b *InProc) deliver(ctx context.Context, sub *subscription) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-b.done:
 			return
 		case msg := <-sub.ch:
 			if err := sub.h(ctx, msg); err != nil && ctx.Err() == nil {
@@ -149,8 +157,13 @@ func (b *InProc) Publish(ctx context.Context, msg Message) error {
 // Close 关闭 broker:拒绝后续发布/订阅。已存在的订阅由各自 ctx 解除。幂等。
 func (b *InProc) Close() error {
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil
+	}
 	b.closed = true
 	b.subs = make(map[string][]*subscription)
 	b.mu.Unlock()
+	b.closeOnce.Do(func() { close(b.done) })
 	return nil
 }

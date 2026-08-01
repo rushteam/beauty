@@ -122,6 +122,9 @@ func (e *Executor) module(ctx context.Context, path string) (*cachedMod, error) 
 	if cm, ok := e.byPath[path]; ok && cm.mtime.Equal(st.ModTime()) {
 		return cm, nil
 	}
+	if old, ok := e.byPath[path]; ok {
+		old.pool.Close(ctx)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("wasmagent: 读 %s: %w", path, err)

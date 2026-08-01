@@ -282,8 +282,10 @@ func NewMemoryStore[T any]() *MemoryStore[T] {
 func (s *MemoryStore[T]) Save(m *Mail[T]) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.mails[m.ID]; !exists {
+		s.order = append(s.order, m.ID)
+	}
 	s.mails[m.ID] = m
-	s.order = append(s.order, m.ID)
 	return nil
 }
 

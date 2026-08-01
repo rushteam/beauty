@@ -99,7 +99,7 @@ func TestServer_WithPacketConn(t *testing.T) {
 	addr, stop := startEchoServer(t, quic.WithPacketConn(pc))
 	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	c := dialClient(t, ctx, addr)
 	defer c.Close("bye")

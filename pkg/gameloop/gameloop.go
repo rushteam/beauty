@@ -18,6 +18,9 @@ package gameloop
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -148,11 +151,25 @@ func (r *Room[In, Out]) Start(ctx context.Context) error {
 			return nil
 		case <-t.C:
 			f := r.frame.Add(1)
-			for _, out := range r.handler.OnTick(f, r.drain()) {
+			outs, err := r.safeTick(f)
+			if err != nil {
+				slog.Error("gameloop: OnTick panic", "room", r.name, "frame", f, "error", err)
+				continue
+			}
+			for _, out := range outs {
 				r.bc.Publish(out)
 			}
 		}
 	}
+}
+
+func (r *Room[In, Out]) safeTick(frame uint64) (outs []Out, err error) {
+	defer func() {
+		if rv := recover(); rv != nil {
+			err = fmt.Errorf("%v\n%s", rv, debug.Stack())
+		}
+	}()
+	return r.handler.OnTick(frame, r.drain()), nil
 }
 
 // Ready 在 tick 循环启动后关闭——满足 beauty.ReadyNotifier。

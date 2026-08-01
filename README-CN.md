@@ -227,6 +227,7 @@ OpenTelemetry 贯穿框架:trace 与 metrics 走 `pkg/service/telemetry`,日志�
 
 - [`docs/`](docs) —— 配置、中间件、服务发现、日志、实时组件等。
 - [`docs/k8s-rbac.md`](docs/k8s-rbac.md) —— k8s RBAC / ServiceAccount 配置指南(选主 + 配置中心)。
+- [`docs/cross-service-interop.md`](docs/cross-service-interop.md) —— 跨服务互通：非 Beauty 服务如何发现并调用 Beauty gRPC 服务。
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) —— WASM 分层(运行时、agent、OPA、FaaS)。
 - [`examples/`](examples) —— 大部分功能的可运行示例。
 - [`CHANGELOG.md`](CHANGELOG.md) —— 重要变更。

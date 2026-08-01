@@ -34,9 +34,12 @@ func (l *fileLoader) Unmarshal(dst any) error {
 }
 
 func (l *fileLoader) Watch(ctx context.Context, fn func()) {
-	l.Viper.OnConfigChange(func(fsnotify.Event) { fn() })
+	l.Viper.OnConfigChange(func(e fsnotify.Event) {
+		if ctx.Err() == nil {
+			fn()
+		}
+	})
 	l.Viper.WatchConfig()
-	go func() { <-ctx.Done() }()
 }
 
 // New 根据 rawURL 构造 Loader。

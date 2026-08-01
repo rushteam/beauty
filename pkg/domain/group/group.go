@@ -150,7 +150,9 @@ func (s *Store) Approve(groupID, approver, userID string) error {
 	if err != nil || role != RolePending {
 		return ErrNotPending
 	}
-	// 移除 pending 边,加 member 边。
+	if gs.isFullLocked() {
+		return ErrFull
+	}
 	gs.graph.RemoveEdge(groupID, userID)
 	return gs.graph.AddEdge(relationship.Edge{
 		Source: groupID, Destination: userID, State: RoleMember, Position: time.Now().UnixNano(),

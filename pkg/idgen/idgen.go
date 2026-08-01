@@ -110,22 +110,29 @@ func (g *Generator) Next() (int64, error) {
 
 	ts := g.now()
 	if ts < g.lastTime {
-		// 时钟回拨:尝试在容忍范围内自旋等待时钟追上 lastTime。
 		backward := time.Duration(g.lastTime-ts) * time.Millisecond
 		if backward > g.cfg.maxBackwardWait {
 			return 0, fmt.Errorf("%w: %v behind", ErrClockBackwards, backward)
 		}
+		deadline := time.Now().Add(g.cfg.maxBackwardWait + 10*time.Millisecond)
 		for ts < g.lastTime {
+			if time.Now().After(deadline) {
+				return 0, fmt.Errorf("%w: clock still behind after spin", ErrClockBackwards)
+			}
+			time.Sleep(100 * time.Microsecond)
 			ts = g.now()
 		}
 	}
 
 	if ts == g.lastTime {
-		// 同一毫秒:序列号递增。
 		g.sequence = (g.sequence + 1) & maxSequence
 		if g.sequence == 0 {
-			// 序列号用尽,自旋等到下一毫秒。
+			deadline := time.Now().Add(5 * time.Millisecond)
 			for ts <= g.lastTime {
+				if time.Now().After(deadline) {
+					return 0, fmt.Errorf("%w: clock stalled waiting for next ms", ErrClockBackwards)
+				}
+				time.Sleep(100 * time.Microsecond)
 				ts = g.now()
 			}
 		}

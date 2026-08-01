@@ -68,13 +68,14 @@ func WithOnPanic(fn func(key string, err error)) Option {
 // Queue 延迟任务队列。按 key 维护待触发任务,到点单次触发。
 // 零值不可用,用 New 构造。并发安全。
 type Queue struct {
-	cfg    config
-	mu     sync.Mutex
-	h      taskHeap
-	byKey  map[string]*task // key → 当前有效任务(用于取消/改期)
-	wakeCh chan struct{}    // 唤醒驱动 goroutine 重算等待
-	stopCh chan struct{}
-	stop   sync.Once
+	cfg     config
+	mu      sync.Mutex
+	h       taskHeap
+	byKey   map[string]*task // key → 当前有效任务(用于取消/改期)
+	wakeCh  chan struct{}    // 唤醒驱动 goroutine 重算等待
+	stopCh  chan struct{}
+	stop    sync.Once
+	stopped bool
 }
 
 // New 创建延迟队列并启动驱动 goroutine。
@@ -95,7 +96,7 @@ func New(opts ...Option) *Queue {
 }
 
 // Schedule 注册 key 在 delay 后触发 fn。同 key 已存在则改期为新的 delay(覆盖旧任务)。
-// delay<=0 视为立即触发(下一个驱动循环)。fn 为 nil 时忽略。
+// delay<=0 视为立即触发(下一个驱动循环)。fn 为 nil 时忽略。Stop 后调用返回 false。
 // 返回是否覆盖了已存在的同 key 任务。
 func (q *Queue) Schedule(key string, delay time.Duration, fn func()) (replaced bool) {
 	if fn == nil {
@@ -103,8 +104,12 @@ func (q *Queue) Schedule(key string, delay time.Duration, fn func()) (replaced b
 	}
 	fireAt := time.Now().Add(delay).UnixNano()
 	q.mu.Lock()
+	if q.stopped {
+		q.mu.Unlock()
+		return false
+	}
 	if old, ok := q.byKey[key]; ok {
-		old.dead = true // 惰性删除旧任务
+		old.dead = true
 		replaced = true
 	}
 	t := &task{key: key, fireAt: fireAt, fn: fn}
@@ -139,7 +144,12 @@ func (q *Queue) Len() int {
 
 // Stop 停止驱动 goroutine。幂等。未触发的任务被丢弃。
 func (q *Queue) Stop() {
-	q.stop.Do(func() { close(q.stopCh) })
+	q.stop.Do(func() {
+		q.mu.Lock()
+		q.stopped = true
+		q.mu.Unlock()
+		close(q.stopCh)
+	})
 }
 
 // wake 非阻塞地唤醒驱动 goroutine 重算等待时长。

@@ -47,11 +47,12 @@ type OnChange func(snap Snapshot)
 
 // Party 一个派对实例。
 type Party struct {
-	mu       sync.Mutex
-	id       string
-	leader   Member
-	members  map[string]*Member // key = UserID
-	requests []JoinRequest
+	mu        sync.Mutex
+	id        string
+	leader    Member
+	members   map[string]*Member // key = UserID
+	joinOrder []string           // 加入顺序(不含已移除成员)
+	requests  []JoinRequest
 	open     bool
 	maxSize  int
 	reserved int // 已预留座位数
@@ -89,10 +90,11 @@ func New(id string, leader Member, onChange OnChange, opts ...Option) *Party {
 		o(cfg)
 	}
 	p := &Party{
-		id:       id,
-		leader:   leader,
-		members:  map[string]*Member{leader.UserID: &leader},
-		open:     cfg.open,
+		id:        id,
+		leader:    leader,
+		members:   map[string]*Member{leader.UserID: &leader},
+		joinOrder: []string{leader.UserID},
+		open:      cfg.open,
 		maxSize:  cfg.maxSize,
 		onChange: onChange,
 	}
@@ -116,6 +118,7 @@ func (p *Party) RequestJoin(m Member) error {
 			return err
 		}
 		p.members[m.UserID] = &m
+		p.joinOrder = append(p.joinOrder, m.UserID)
 		p.notifyLocked()
 		return nil
 	}
@@ -158,6 +161,7 @@ func (p *Party) Accept(leaderID, userID string) error {
 		p.reserved--
 	}
 	p.members[r.Member.UserID] = &r.Member
+	p.joinOrder = append(p.joinOrder, r.Member.UserID)
 	p.notifyLocked()
 	return nil
 }
@@ -175,11 +179,14 @@ func (p *Party) Remove(leaderID, userID string) error {
 		return errors.New("party: no such member")
 	}
 	delete(p.members, userID)
+	p.removeJoinOrderLocked(userID)
 	// 队长离开:自动转让给最早加入的剩余成员;无剩余则标记停止。
 	if userID == p.leader.UserID {
-		for _, next := range p.members {
-			p.leader = *next
-			break
+		for _, uid := range p.joinOrder {
+			if next, ok := p.members[uid]; ok {
+				p.leader = *next
+				break
+			}
 		}
 		if len(p.members) == 0 {
 			p.stopped = true
@@ -243,6 +250,15 @@ func (p *Party) Count() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.members)
+}
+
+func (p *Party) removeJoinOrderLocked(userID string) {
+	for i, uid := range p.joinOrder {
+		if uid == userID {
+			p.joinOrder = append(p.joinOrder[:i], p.joinOrder[i+1:]...)
+			return
+		}
+	}
 }
 
 func (p *Party) canAddLocked() error {

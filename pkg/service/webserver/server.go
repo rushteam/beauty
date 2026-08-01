@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
@@ -148,12 +149,16 @@ type Server struct {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	var readyOnce sync.Once
+	signalReady := func() { readyOnce.Do(func() { close(s.ready) }) }
+	defer signalReady()
+
 	ln, err := net.Listen("tcp", s.Server.Addr)
 	if err != nil {
 		return err
 	}
 	s.Server.Addr = ln.Addr().String()
-	close(s.ready)
+	signalReady()
 	go func() {
 		logger.Info("web server serve", slog.String("addr", s.Server.Addr))
 		var serveErr error

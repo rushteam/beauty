@@ -2,6 +2,7 @@ package compress
 
 import (
 	"compress/gzip"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -90,7 +91,9 @@ func (g *gzipResponseWriter) flush(compress bool) {
 		g.ResponseWriter.Header().Del("Content-Length")
 		g.ResponseWriter.Header().Add("Vary", "Accept-Encoding")
 		g.ResponseWriter.WriteHeader(g.statusCode)
-		g.gz.Write(g.buf)
+		if _, err := g.gz.Write(g.buf); err != nil {
+			slog.Warn("compress: gzip write failed", "err", err)
+		}
 	} else {
 		g.ResponseWriter.WriteHeader(g.statusCode)
 		g.ResponseWriter.Write(g.buf)
@@ -126,8 +129,9 @@ func (g *gzipResponseWriter) Flush() {
 		g.flush(isCompressible(ct))
 	}
 	if g.compressed {
-		// 把 gzip 内部缓冲推到底层，否则压缩数据可能滞留
-		_ = g.gz.Flush()
+		if err := g.gz.Flush(); err != nil {
+			slog.Warn("compress: gzip flush failed", "err", err)
+		}
 	}
 	if f, ok := g.ResponseWriter.(http.Flusher); ok {
 		f.Flush()

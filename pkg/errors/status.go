@@ -31,10 +31,15 @@ func Newf(code Code, format string, args ...any) *Status {
 	return New(code, fmt.Sprintf(format, args...))
 }
 
-// WithDetail 追加一个结构化详情，返回自身（链式调用）。
+// WithDetail 追加一个结构化详情，返回新 Status（不修改原实例）。
 func (s *Status) WithDetail(d Detail) *Status {
-	s.details = append(s.details, d)
-	return s
+	if s == nil {
+		return nil
+	}
+	details := make([]Detail, len(s.details), len(s.details)+1)
+	copy(details, s.details)
+	details = append(details, d)
+	return &Status{code: s.code, message: s.message, details: details, cause: s.cause}
 }
 
 // WithCause 记录原始错误（只用于服务端日志，不会序列化给客户端）。

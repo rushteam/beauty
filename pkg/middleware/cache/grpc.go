@@ -309,7 +309,9 @@ func (m *MemoryStore) Get(key string) ([]byte, bool) {
 		m.mu.Unlock()
 		return nil, false
 	}
-	return e.data, true
+	out := make([]byte, len(e.data))
+	copy(out, e.data)
+	return out, true
 }
 
 func (m *MemoryStore) Set(key string, data []byte, ttl time.Duration) {
@@ -317,12 +319,14 @@ func (m *MemoryStore) Set(key string, data []byte, ttl time.Duration) {
 	if ttl > 0 {
 		exp = time.Now().Add(ttl)
 	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.entries[key]; !exists && len(m.entries) >= m.maxSize {
 		m.evictOne()
 	}
-	m.entries[key] = &storeEntry{data: data, expiresAt: exp}
+	m.entries[key] = &storeEntry{data: cp, expiresAt: exp}
 }
 
 func (m *MemoryStore) Delete(key string) {

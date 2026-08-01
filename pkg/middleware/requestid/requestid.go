@@ -17,7 +17,8 @@ var reqIDKey = ctxkey.New[string]()
 
 // FromContext extracts the request ID from ctx.
 func FromContext(ctx context.Context) string {
-	return ctxkey.MustGet(ctx, reqIDKey)
+	id, _ := ctxkey.Get(ctx, reqIDKey)
+	return id
 }
 
 // NewContext returns a copy of ctx with the given request ID attached.

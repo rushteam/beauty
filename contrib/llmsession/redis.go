@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -42,11 +43,38 @@ func NewRedis(rdb redis.UniversalClient, opts ...RedisOption) (*RedisStore, erro
 	return s, nil
 }
 
-func (s *RedisStore) key(id string) string { return s.prefix + id }
+func (s *RedisStore) key(id string) (string, error) {
+	safe, err := sanitizeSessionID(id)
+	if err != nil {
+		return "", err
+	}
+	return s.prefix + safe, nil
+}
+
+func sanitizeSessionID(id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("llmsession: empty session id")
+	}
+	for _, r := range id {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-'
+		if !ok {
+			return "", fmt.Errorf("llmsession: invalid session id %q", id)
+		}
+	}
+	if strings.Contains(id, "..") {
+		return "", fmt.Errorf("llmsession: invalid session id %q", id)
+	}
+	return id, nil
+}
 
 // Load 实现 session.Store。
 func (s *RedisStore) Load(ctx context.Context, id string) (*session.Session, error) {
-	b, err := s.rdb.Get(ctx, s.key(id)).Bytes()
+	key, err := s.key(id)
+	if err != nil {
+		return nil, err
+	}
+	b, err := s.rdb.Get(ctx, key).Bytes()
 	if err == redis.Nil {
 		return nil, nil
 	}
@@ -66,6 +94,10 @@ func (s *RedisStore) Save(ctx context.Context, sess *session.Session) error {
 	if sess == nil || sess.ID == "" {
 		return fmt.Errorf("llmsession: invalid session")
 	}
+	key, err := s.key(sess.ID)
+	if err != nil {
+		return err
+	}
 	cp := *sess
 	if cp.UpdatedAt.IsZero() {
 		cp.UpdatedAt = time.Now().UTC()
@@ -74,7 +106,7 @@ func (s *RedisStore) Save(ctx context.Context, sess *session.Session) error {
 	if err != nil {
 		return err
 	}
-	return s.rdb.Set(ctx, s.key(sess.ID), b, s.ttl).Err()
+	return s.rdb.Set(ctx, key, b, s.ttl).Err()
 }
 
 var _ session.Store = (*RedisStore)(nil)

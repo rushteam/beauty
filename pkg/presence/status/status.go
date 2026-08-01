@@ -17,6 +17,7 @@
 package status
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/rushteam/beauty/pkg/presence"
@@ -75,9 +76,9 @@ type Dispatcher struct {
 	notify  Notifier
 	encode  Encoder
 
-	// 用户 → 当前所在流集合(用于判断 online/offline 转换)。
+	// 用户 → 流 → 引用计数(同一用户多会话在同一流时计数>1)。
 	mu     sync.Mutex
-	online map[string]map[presence.Stream]struct{}
+	online map[string]map[presence.Stream]int
 }
 
 // Option 配置 Dispatcher。
@@ -120,7 +121,7 @@ func New(opts ...Option) *Dispatcher {
 		finders: cfg.finders,
 		notify:  cfg.notify,
 		encode:  cfg.encode,
-		online:  make(map[string]map[presence.Stream]struct{}),
+		online:  make(map[string]map[presence.Stream]int),
 	}
 }
 
@@ -154,14 +155,13 @@ func (d *Dispatcher) handleJoin(userID string, stream presence.Stream) {
 	d.mu.Lock()
 	streams := d.online[userID]
 	if streams == nil {
-		streams = make(map[presence.Stream]struct{})
+		streams = make(map[presence.Stream]int)
 		d.online[userID] = streams
 	}
 	wasEmpty := len(streams) == 0
-	streams[stream] = struct{}{}
+	streams[stream]++
 	d.mu.Unlock()
 	if wasEmpty {
-		// 从无到有:转 online。
 		d.notifyWatchers(userID, StateOnline, d.userStreams(userID))
 	}
 }
@@ -173,14 +173,16 @@ func (d *Dispatcher) handleLeave(userID string, stream presence.Stream) {
 		d.mu.Unlock()
 		return
 	}
-	delete(streams, stream)
+	streams[stream]--
+	if streams[stream] <= 0 {
+		delete(streams, stream)
+	}
 	if len(streams) > 0 {
 		d.mu.Unlock()
 		return
 	}
 	delete(d.online, userID)
 	d.mu.Unlock()
-	// 从有到无:转 offline。
 	d.notifyWatchers(userID, StateOffline, nil)
 }
 
@@ -238,26 +240,43 @@ type WatcherResolver interface {
 }
 
 // resolver 注入式 userID→sessionID 解析(可选)。
-var resolver WatcherResolver
+var (
+	resolverMu sync.RWMutex
+	resolver   WatcherResolver
+)
 
 // SetResolver 设置全局 userID→sessionID 解析器(用于多端登录场景)。
 // 简单场景(userID 即 sessionID)无需设置。
-func SetResolver(r WatcherResolver) { resolver = r }
+func SetResolver(r WatcherResolver) {
+	resolverMu.Lock()
+	resolver = r
+	resolverMu.Unlock()
+}
 
 func (d *Dispatcher) resolveSessions(userIDs []string) []string {
-	if resolver == nil {
+	resolverMu.RLock()
+	r := resolver
+	resolverMu.RUnlock()
+	if r == nil {
 		// 简单场景:userID 即 sessionID。
 		return userIDs
 	}
 	var out []string
 	for _, uid := range userIDs {
-		out = append(out, resolver.Sessions(uid)...)
+		out = append(out, r.Sessions(uid)...)
 	}
 	return out
 }
 
-// defaultEncode 默认 JSON 编码(避免引入 encoding/json 让业务可选)。
-// 这里用最简 JSON 字符串,业务通常用 WithEncoder 注入自己的编码。
+// defaultEncode 默认 JSON 编码。
 func defaultEncode(n Notification) []byte {
-	return []byte(`{"user":"` + n.UserID + `","state":"` + n.State.String() + `"}`)
+	type payload struct {
+		User  string `json:"user"`
+		State string `json:"state"`
+	}
+	b, err := json.Marshal(payload{User: n.UserID, State: n.State.String()})
+	if err != nil {
+		return []byte(`{"user":"","state":"unknown"}`)
+	}
+	return b
 }

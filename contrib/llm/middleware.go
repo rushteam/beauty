@@ -192,8 +192,23 @@ func (b *BudgetClient) Remaining() int64 {
 // Reset 重置已消耗计数为 0。
 func (b *BudgetClient) Reset() { atomic.StoreInt64(&b.used, 0) }
 
-func (b *BudgetClient) add(u Usage) {
-	atomic.AddInt64(&b.used, int64(u.InputTokens+u.OutputTokens))
+func (b *BudgetClient) add(u Usage) error {
+	tokens := int64(u.InputTokens + u.OutputTokens)
+	if tokens <= 0 {
+		return nil
+	}
+	for {
+		used := atomic.LoadInt64(&b.used)
+		if used >= b.max {
+			return ErrBudgetExceeded
+		}
+		if used+tokens > b.max {
+			return ErrBudgetExceeded
+		}
+		if atomic.CompareAndSwapInt64(&b.used, used, used+tokens) {
+			return nil
+		}
+	}
 }
 
 func (b *BudgetClient) check() error {
@@ -209,7 +224,9 @@ func (b *BudgetClient) Generate(ctx context.Context, req Request) (*Response, er
 	}
 	resp, err := b.c.Generate(ctx, req)
 	if err == nil {
-		b.add(resp.Usage)
+		if addErr := b.add(resp.Usage); addErr != nil {
+			return resp, addErr
+		}
 	}
 	return resp, err
 }
@@ -227,7 +244,10 @@ func (b *BudgetClient) Stream(ctx context.Context, req Request) (<-chan Chunk, e
 		defer close(out)
 		for ch := range src {
 			if ch.Usage != nil {
-				b.add(*ch.Usage)
+				if err := b.add(*ch.Usage); err != nil {
+					out <- Chunk{Err: err}
+					return
+				}
 			}
 			out <- ch
 		}

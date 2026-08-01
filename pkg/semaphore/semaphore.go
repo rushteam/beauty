@@ -160,45 +160,33 @@ func (s *Semaphore) Capacity() int64 {
 }
 
 func (s *Semaphore) acquireWait(ctx context.Context, cost int64) error {
-	done := make(chan struct{})
-	var result error
+	deadline := time.Now().Add(s.cfg.maxWait)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
 
-	go func() {
+	for {
 		s.mu.Lock()
-		defer s.mu.Unlock()
-		for s.used+cost > s.cfg.capacity {
-			s.cond.Wait()
-			select {
-			case <-done:
-				return
-			default:
+		if s.used+cost <= s.cfg.capacity {
+			s.used += cost
+			s.mu.Unlock()
+			s.inFlight.Add(cost)
+			return nil
+		}
+		s.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			if s.cfg.onReject != nil {
+				s.cfg.onReject()
+			}
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				if s.cfg.onReject != nil {
+					s.cfg.onReject()
+				}
+				return ErrFull
 			}
 		}
-		s.used += cost
-		s.inFlight.Add(cost)
-		close(done)
-	}()
-
-	var timer <-chan time.Time
-	if s.cfg.maxWait > 0 {
-		t := time.NewTimer(s.cfg.maxWait)
-		defer t.Stop()
-		timer = t.C
 	}
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		result = ctx.Err()
-	case <-timer:
-		result = ErrFull
-	}
-
-	// 取消等待者:广播唤醒 goroutine 使其退出
-	s.cond.Broadcast()
-	if s.cfg.onReject != nil {
-		s.cfg.onReject()
-	}
-	return result
 }

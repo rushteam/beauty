@@ -396,18 +396,19 @@ func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.To
 	case PermitDeny:
 		return fmt.Sprintf("工具 %q 被策略拒绝(deny),不可调用", tc.Name), nil
 	case PermitAsk:
-		if r.Approve != nil {
-			dec, err := r.Approve(ctx, tc)
-			if err != nil {
-				return "", fmt.Errorf("agent: approval for %q: %w", tc.Name, err)
+		if r.Approve == nil {
+			return fmt.Sprintf("工具 %q 需要人工审批但未配置 Approve 回调,拒绝执行", tc.Name), nil
+		}
+		dec, err := r.Approve(ctx, tc)
+		if err != nil {
+			return "", fmt.Errorf("agent: approval for %q: %w", tc.Name, err)
+		}
+		if !dec.Approved {
+			msg := fmt.Sprintf("工具 %q 的调用被拒绝", tc.Name)
+			if dec.Reason != "" {
+				msg += ": " + dec.Reason
 			}
-			if !dec.Approved {
-				msg := fmt.Sprintf("工具 %q 的调用被拒绝", tc.Name)
-				if dec.Reason != "" {
-					msg += ": " + dec.Reason
-				}
-				return msg, nil
-			}
+			return msg, nil
 		}
 	}
 	out, err := t.Call(ctx, tc.Arguments)

@@ -28,6 +28,7 @@ type ErrorHandler func(taskName string, err error, panicStack []byte)
 // Scheduler 管理工作池。
 type Scheduler struct {
 	queue     chan *Task
+	queueMu  sync.RWMutex // Submit 持读锁, Stop close(queue) 持写锁
 	workers   int
 	onError   ErrorHandler
 	wg        sync.WaitGroup
@@ -37,6 +38,7 @@ type Scheduler struct {
 	stopped   atomic.Bool
 	stopCh    chan struct{}
 	done      chan struct{}
+	startOnce sync.Once
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
@@ -93,24 +95,27 @@ func New(opts ...Option) *Scheduler {
 
 // Start 启动 worker 池。幂等。ctx 取消时优雅停止(排空队列后退出)。
 func (s *Scheduler) Start(ctx context.Context) {
-	s.ctx, s.cancel = context.WithCancel(ctx)
-	for i := 0; i < s.workers; i++ {
-		s.wg.Add(1)
-		go s.worker()
-	}
-	// ctx 取消联动 Stop。
-	go func() {
-		select {
-		case <-ctx.Done():
-			s.Stop()
-		case <-s.stopCh:
+	s.startOnce.Do(func() {
+		s.ctx, s.cancel = context.WithCancel(ctx)
+		for i := 0; i < s.workers; i++ {
+			s.wg.Add(1)
+			go s.worker()
 		}
-	}()
+		go func() {
+			select {
+			case <-ctx.Done():
+				s.Stop()
+			case <-s.stopCh:
+			}
+		}()
+	})
 }
 
 // Submit 投递一个任务。若已停止返回 false;队列满时阻塞(保证不丢任务)。
 // 在 Pause 期间仍可 Submit(任务入队,Resume 后消费)。
 func (s *Scheduler) Submit(t *Task) bool {
+	s.queueMu.RLock()
+	defer s.queueMu.RUnlock()
 	if s.stopped.Load() {
 		return false
 	}
@@ -124,6 +129,8 @@ func (s *Scheduler) Submit(t *Task) bool {
 
 // TrySubmit 非阻塞投递。队列满立即返回 false。
 func (s *Scheduler) TrySubmit(t *Task) bool {
+	s.queueMu.RLock()
+	defer s.queueMu.RUnlock()
 	if s.stopped.Load() {
 		return false
 	}
@@ -157,12 +164,12 @@ func (s *Scheduler) Stop() {
 	if !s.stopped.CompareAndSwap(false, true) {
 		return
 	}
-	// 唤醒暂停中的 worker,让它们能看到 stop 信号。
 	s.Resume()
 	close(s.stopCh)
-	// 关闭 queue 让 worker 在消费完后退出。仅当无并发 Submit 时安全;
-	// 这里 stopCh 已关闭,Submit 会先返回 false,故无新写入。
+	// 等待所有 Submit 退出 select(释放 RLock), 再安全关闭 queue。
+	s.queueMu.Lock()
 	close(s.queue)
+	s.queueMu.Unlock()
 	s.wg.Wait()
 	if s.cancel != nil {
 		s.cancel()
@@ -187,20 +194,13 @@ func (s *Scheduler) worker() {
 				s.pauseCond.Wait()
 			}
 			s.pauseMu.Unlock()
-			if s.stopped.Load() {
-				return
-			}
 		}
 
-		select {
-		case t, ok := <-s.queue:
-			if !ok {
-				return // 队列已关闭且排空
-			}
-			s.exec(t)
-		case <-s.stopCh:
-			return
+		t, ok := <-s.queue
+		if !ok {
+			return // 队列已关闭且排空
 		}
+		s.exec(t)
 	}
 }
 

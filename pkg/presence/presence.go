@@ -65,6 +65,8 @@ type Tracker struct {
 	bySession map[string]map[ID]*Presence
 	count     atomic.Int64
 
+	startOnce sync.Once
+
 	// 事件总线。
 	eventsCh chan *Event
 	listener Listener
@@ -93,20 +95,23 @@ func New(listener Listener, eventQueueSize int) *Tracker {
 	}
 	if listener != nil {
 		go t.dispatch()
+	} else {
+		close(t.done)
 	}
 	return t
 }
 
 // Start 启动事件分发(若构造时给了 listener 则已在运行)。幂等。
 func (t *Tracker) Start(ctx context.Context) {
-	// dispatch 在 New 时已启动,这里只做 ctx 联动。
-	go func() {
-		select {
-		case <-ctx.Done():
-			t.Stop()
-		case <-t.stopCh:
-		}
-	}()
+	t.startOnce.Do(func() {
+		go func() {
+			select {
+			case <-ctx.Done():
+				t.Stop()
+			case <-t.stopCh:
+			}
+		}()
+	})
 }
 
 // Stop 停止事件分发。幂等。停止后 Track/Untrack 仍可用(索引维护),只是不再回调。

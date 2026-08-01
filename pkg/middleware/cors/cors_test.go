@@ -19,18 +19,18 @@ func serve(c *Config, origin string) http.Header {
 	return rec.Header()
 }
 
-// 通配符 + credentials：必须回显具体 origin，绝不能发 "*"。
-func TestCORS_WildcardWithCredentials_ReflectsOrigin(t *testing.T) {
+// 通配符 + credentials：不安全的组合，应禁用 credentials 并回退为 "*"。
+func TestCORS_WildcardWithCredentials_DisablesCredentials(t *testing.T) {
 	c := Default()
 	c.AllowCredentials = true // AllowOrigins 默认 ["*"]
 
 	got := serve(c, "https://app.example.com")
 
-	if ao := got.Get("Access-Control-Allow-Origin"); ao != "https://app.example.com" {
-		t.Fatalf("want reflected origin, got %q", ao)
+	if ao := got.Get("Access-Control-Allow-Origin"); ao != "*" {
+		t.Fatalf("want *, got %q", ao)
 	}
-	if got.Get("Access-Control-Allow-Credentials") != "true" {
-		t.Fatal("credentials header must be set when reflecting a concrete origin")
+	if got.Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatal("credentials header must NOT be set with wildcard origins")
 	}
 }
 

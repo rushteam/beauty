@@ -39,11 +39,10 @@ type Registry struct {
 
 func (r *Registry) client(key string) (naming_client.INamingClient, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if c, ok := r.clients[key]; ok {
-		r.mu.Unlock()
 		return c, nil
 	}
-	r.mu.Unlock()
 	client, err := nacos.NewNamingClient(&nacos.Config{
 		Addr:      r.c.Addr,
 		Namespace: r.c.Namespace,
@@ -55,13 +54,7 @@ func (r *Registry) client(key string) (naming_client.INamingClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nacos naming client error: %w", err)
 	}
-	r.mu.Lock()
-	if c, ok := r.clients[key]; ok {
-		r.mu.Unlock()
-		return c, nil
-	}
 	r.clients[key] = client
-	r.mu.Unlock()
 	return client, nil
 }
 
@@ -201,12 +194,12 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 			logger.Warn("service weight<=0", slog.Any("v", v))
 			continue
 		}
+		if v.Metadata == nil {
+			v.Metadata = make(map[string]string)
+		}
 		if v.Metadata["kind"] != "grpc" {
 			logger.Warn("service metadata.kind != grpc", slog.Any("v", v))
 			continue
-		}
-		if v.Metadata == nil {
-			v.Metadata = make(map[string]string)
 		}
 
 		ss = append(ss, discover.ServiceInfo{

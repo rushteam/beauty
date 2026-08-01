@@ -43,8 +43,7 @@ func (a *RoleBasedAuthorizer) Authorize(ctx context.Context, user User, resource
 	key := resource + ":" + action
 	requiredRoles, exists := a.permissions[key]
 	if !exists {
-		// 没有配置权限规则，默认允许
-		return nil
+		return ErrForbidden
 	}
 
 	// 检查用户是否拥有任一所需角色
@@ -189,7 +188,7 @@ func NewCallbackAuthorizer(authorizeFunc func(ctx context.Context, user User, re
 // Authorize 执行授权回调
 func (a *CallbackAuthorizer) Authorize(ctx context.Context, user User, resource, action string) error {
 	if a.AuthorizeFunc == nil {
-		return nil // 没有授权函数，默认允许
+		return ErrForbidden
 	}
 	return a.AuthorizeFunc(ctx, user, resource, action)
 }

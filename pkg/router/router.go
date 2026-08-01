@@ -152,7 +152,7 @@ func (r *Router) SendToStream(stream presence.Stream, m Message, includeHidden b
 
 // QueueDeferred 把一条消息加入攒批队列,稍后由 FlushDeferred 一次性投递。
 // 适合一帧内产生多条消息时减少重复 Lookup/系统调用。
-// targets 为目标 session IDs;为空时投递给全员(需 Flush 时遍历,慎用)。
+// targets 为目标 session IDs;为空时消息不会投递(需广播请用 SendToAll)。
 func (r *Router) QueueDeferred(targets []string, m Message) {
 	r.deferMu.Lock()
 	r.deferred = append(r.deferred, deferredItem{targets: targets, msg: m})

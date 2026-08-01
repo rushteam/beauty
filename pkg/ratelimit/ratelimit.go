@@ -101,19 +101,21 @@ func (tb *TokenBucket) Allow(key string) (bool, time.Duration) {
 	if tb.burst <= 0 || tb.rate <= 0 {
 		return true, 0
 	}
-	now := time.Now()
 	tb.mu.Lock()
 	b, ok := tb.bkts[key]
 	if !ok {
-		b = &bucket{tokens: tb.burst, last: now}
+		b = &bucket{tokens: tb.burst, last: time.Now()}
 		tb.bkts[key] = b
 	}
 	tb.mu.Unlock()
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// 按经过时间补令牌。
+	now := time.Now()
 	elapsed := now.Sub(b.last).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
 	b.tokens += elapsed * tb.rate
 	if b.tokens > tb.burst {
 		b.tokens = tb.burst

@@ -27,6 +27,21 @@ func Async[T any](fn func() (T, error)) *Future[T] {
 	return f
 }
 
+// AsyncCtx 在新 goroutine 里执行 fn 并传入 ctx;ctx 取消时 fn 可主动退出,避免后台泄漏。
+func AsyncCtx[T any](ctx context.Context, fn func(ctx context.Context) (T, error)) *Future[T] {
+	f := &Future[T]{done: make(chan struct{})}
+	go func() {
+		defer close(f.done)
+		defer func() {
+			if r := recover(); r != nil {
+				f.err = fmt.Errorf("syncx: async panic: %v", r)
+			}
+		}()
+		f.val, f.err = fn(ctx)
+	}()
+	return f
+}
+
 // Await 等待结果,或在 ctx 取消时返回 ctx 错误(此时后台计算仍会继续到自然结束)。
 func (f *Future[T]) Await(ctx context.Context) (T, error) {
 	select {

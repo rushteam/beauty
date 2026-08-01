@@ -21,6 +21,15 @@ type detailJSON struct {
 // WriteHTTP 将 *Status 序列化为 JSON 写入 http.ResponseWriter。
 // Content-Type 固定为 application/json。
 func WriteHTTP(w http.ResponseWriter, s *Status) {
+	if s == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(httpResponse{
+			Code:    int(CodeInternal),
+			Message: "internal server error",
+		})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(s.code.HTTPStatus())
 	resp := httpResponse{

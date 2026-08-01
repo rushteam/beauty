@@ -20,6 +20,8 @@ import (
 	"time"
 )
 
+var ticketSeq atomic.Uint64
+
 // Presence 表示一个待匹配的参与者。
 type Presence struct {
 	UserID    string
@@ -56,16 +58,18 @@ type Handler func(ctx context.Context, m Match) error
 
 // Matchmaker 管理候选池并周期性尝试匹配。
 type Matchmaker struct {
-	mu       sync.RWMutex
-	tickets  map[string]*Ticket                 // ticket ID -> ticket
-	buckets  map[string]map[string]*bucketEntry // pool -> bucket key -> entry
-	handler  Handler
-	cfg      config
-	tickRate time.Duration
-	stopped  atomic.Bool
-	stopCh   chan struct{}
-	done     chan struct{}
-	count    atomic.Int64
+	mu        sync.RWMutex
+	tickets   map[string]*Ticket                 // ticket ID -> ticket
+	buckets   map[string]map[string]*bucketEntry // pool -> bucket key -> entry
+	handler   Handler
+	cfg       config
+	tickRate  time.Duration
+	stopped   atomic.Bool
+	startOnce sync.Once
+	stopCh    chan struct{}
+	done      chan struct{}
+	count     atomic.Int64
+	handlerSem chan struct{} // 限制 handler 并发数
 
 	// numeric 索引:pool -> attr -> 按值排序的 ticket 列表(用于范围/近邻查询)。
 	numIndex map[string]map[string][]*Ticket
@@ -109,22 +113,29 @@ func New(h Handler, opts ...Option) *Matchmaker {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	poolCap := cfg.poolCount
+	if poolCap <= 0 {
+		poolCap = 4
+	}
 	m := &Matchmaker{
-		tickets:  make(map[string]*Ticket),
-		buckets:  make(map[string]map[string]*bucketEntry),
-		handler:  h,
-		cfg:      cfg,
-		tickRate: cfg.tickInterval,
-		stopCh:   make(chan struct{}),
-		done:     make(chan struct{}),
-		numIndex: make(map[string]map[string][]*Ticket),
+		tickets:    make(map[string]*Ticket),
+		buckets:    make(map[string]map[string]*bucketEntry),
+		handler:    h,
+		cfg:        cfg,
+		tickRate:   cfg.tickInterval,
+		stopCh:     make(chan struct{}),
+		done:       make(chan struct{}),
+		numIndex:   make(map[string]map[string][]*Ticket),
+		handlerSem: make(chan struct{}, poolCap),
 	}
 	return m
 }
 
 // Start 启动匹配循环。幂等。ctx 取消时停止。
 func (m *Matchmaker) Start(ctx context.Context) {
-	go m.loop(ctx)
+	m.startOnce.Do(func() {
+		go m.loop(ctx)
+	})
 }
 
 // Stop 停止匹配循环。幂等。
@@ -147,7 +158,7 @@ func (m *Matchmaker) Add(t Ticket, pool, bucketKey string) (string, error) {
 		return "", fmt.Errorf("matchmaker: invalid count range [%d, %d]", t.MinCount, t.MaxCount)
 	}
 	if t.ID == "" {
-		t.ID = fmt.Sprintf("%x", time.Now().UnixNano())
+		t.ID = fmt.Sprintf("%x-%x", time.Now().UnixNano(), ticketSeq.Add(1))
 	}
 	t.CreateTime = time.Now().UnixNano()
 
@@ -317,14 +328,16 @@ func (m *Matchmaker) tryMatch(ctx context.Context, pool string, ts []*Ticket) {
 			}
 			matched := make([]*Ticket, len(team))
 			copy(matched, team)
-			// 异步回调 handler,失败则回滚。
-			go func(match Match) {
-				if err := m.handler(ctx, match); err == nil {
-					for _, t := range match.Tickets {
-						m.Remove(t.ID)
-					}
-				}
-			}(Match{Tickets: matched, Pool: pool})
+			// 先同步移除票据，防止下次 tick 重复匹配
+			for _, t := range matched {
+				m.Remove(t.ID)
+			}
+			match := Match{Tickets: matched, Pool: pool}
+			go func() {
+				m.handlerSem <- struct{}{}
+				defer func() { <-m.handlerSem }()
+				m.handler(ctx, match)
+			}()
 		}
 	}
 }

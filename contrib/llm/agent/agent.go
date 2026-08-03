@@ -11,11 +11,17 @@
 // 支持 Run(同步 Generate)与 RunStream(Stream 推 EventToken + 步骤事件,ctx 可取消);
 // 同轮多 tool 默认可并行;工具权限三态;Steer;Hooks。
 //
-// 统一编排:Runner / Chain / Team / BestOfN / VerifyLoop 都实现同一 Agent(+ 可选 StreamAgent)
-// 契约,可互相嵌套——AgentAsTool 把任意 Agent 包成工具、Chain 按序跑、Team 靠 HANDOFF 文本标记
-// 做带 loop-safety 护栏的多 agent 移交、BestOfN/VerifyLoop 在任意 Agent 上加采样/校验策略。
-// Planner 接缝(ReActPlanner)可在循环前注入规划指令、逐轮后处理响应。RunStream 的 Event 带
-// AgentName/TriggerType/TriggerID,支持多 agent 场景下的父子归因(见 WithTrigger)。
+// 统一编排:Runner / Chain / Team / Parallel / BestOfN / VerifyLoop 都实现同一 Agent(+ 可选
+// StreamAgent)契约,可互相嵌套——AgentAsTool 把任意 Agent 包成工具、Chain 按序跑、Team 靠
+// HANDOFF 文本标记做带 loop-safety 护栏的多 agent 移交、Parallel 把不同 Agent 并发扇出后经可插拔
+// Combiner 合并、BestOfN/VerifyLoop 在任意 Agent 上加采样/校验策略。Planner 接缝(ReActPlanner)
+// 可在循环前注入规划指令、逐轮后处理响应。RunStream 的 Event 带 AgentName/TriggerType/TriggerID,
+// 支持多 agent 场景下的父子归因(见 WithTrigger)。
+//
+// 鲁棒性开关(均 opt-in、纯确定性):RepairToolArgs 在工具参数 json.Valid 失败时用 RepairJSON
+// 尽力修复(修好且重校验通过才采纳);Compactor 在每轮调用前对发出的历史 tool 结果做 token 截断
+// 投影,防止长跑上下文膨胀(不动规范历史、不调模型);MergeConsecutive/MergeMessagesHook 合并相邻
+// 同角色消息(某些 provider 要求角色交替)。
 package agent
 
 import (
@@ -238,6 +244,15 @@ type Runner struct {
 
 	// Steer 中途插话信箱。可为 nil(不启用)。
 	Steer *Steer
+
+	// RepairToolArgs 开启工具参数 JSON 容错:当模型给出的 tool_call 参数 json.Valid 失败时,
+	// 先用 RepairJSON 尽力修复(尾逗号/单引号/裸 key/代码围栏等),修好且重校验通过才交给
+	// Tool.Call。默认关闭。
+	RepairToolArgs bool
+
+	// Compactor 可选:每轮模型调用前对将发出的消息做确定性压缩(截断过大的历史 tool 结果),
+	// 防止长跑上下文膨胀。只作用于发给模型的投影,内部规范历史保持完整。nil=不启用。
+	Compactor *Compactor
 }
 
 var _ StreamAgent = (*Runner)(nil)
@@ -328,6 +343,11 @@ func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*l
 				return last, err
 			}
 			msgs = req.Messages
+		}
+
+		// 运行内压缩:只作用于本次调用的投影,规范历史 msgs 保持完整(下轮基于完整历史重新投影)。
+		if r.Compactor != nil {
+			req.Messages = r.Compactor.Project(req.Messages)
 		}
 
 		resp, err := r.callModel(ctx, req, step, emit)
@@ -515,7 +535,13 @@ func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.To
 			return msg, nil
 		}
 	}
-	out, err := t.Call(ctx, tc.Arguments)
+	args := tc.Arguments
+	if r.RepairToolArgs && len(args) > 0 && !json.Valid(args) {
+		if fixed, ok := RepairJSON(args); ok {
+			args = fixed
+		}
+	}
+	out, err := t.Call(ctx, args)
 	if err != nil {
 		return "error: " + err.Error(), nil
 	}

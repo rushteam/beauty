@@ -146,7 +146,7 @@ resp, _ = chain.Run(ctx, req)
 
 ### 统一 Agent 接口 + 规划 / 团队 / 策略包装
 
-`Runner` / `Chain` / `Team` / `BestOfN` / `VerifyLoop` 都实现同一个 **`Agent`** 契约,可互相嵌套
+`Runner` / `Chain` / `Team` / `Parallel` / `BestOfN` / `VerifyLoop` 都实现同一个 **`Agent`** 契约,可互相嵌套
 (`AgentAsTool`、`Chain` 步骤、`Team` 成员都收 `Agent`,不再局限于 `*Runner`):
 
 ```go
@@ -154,7 +154,7 @@ type Agent interface {
     Run(ctx context.Context, req llm.Request) (*llm.Response, error)
     Info() Info                     // Name/Description/暴露的工具声明
 }
-type StreamAgent interface {         // Runner / Chain / Team 实现,可推事件
+type StreamAgent interface {         // Runner / Chain / Team / Parallel 实现,可推事件
     Agent
     RunStream(ctx context.Context, req llm.Request) <-chan Event
 }
@@ -197,11 +197,47 @@ loop := &agent.VerifyLoop{Agent: best, MaxRounds: 3,   // 包装器可任意嵌�
 resp, _ := loop.Run(ctx, req)
 ```
 
+**`Parallel`(并发扇出 + 合并)**:把**不同的** Agent 并发跑同一 Request,再用可插拔 `Combiner` 合并
+——补齐了组合家族里「并发」这一维度(`Chain` 串行、`Team` 路由、`BestOfN` 同 Agent 跑 N 次、
+`Parallel` 不同 Agent 并发)。`Combine` 为 nil 用 `ConcatCombiner`(按序拼接);任一分支失败不影响其余,
+全失败才报错。它实现 `StreamAgent`(透传各分支中间事件、仅产出一条合并后的终态),可再被 `Chain` 嵌套
+(如「并发调研 → 单 agent 汇总」= `Chain{Parallel, summarizer}`)。
+
+```go
+p := &agent.Parallel{Agents: []agent.Agent{legal, finance, tech}} // 默认拼接
+// 或注入自定义合并:投票 / 取最优 / 再交给一个模型综合
+p.Combine = func(ctx context.Context, req llm.Request, cands []*llm.Response) (*llm.Response, error) { ... }
+resp, _ := p.Run(ctx, req)
+```
+
 **事件父子归因**:`RunStream` 的每条 `Event` 都带 `AgentName`(`Runner.Name`)与 `TriggerType`/`TriggerID`
 (`TriggerUser`/`TriggerToolCall`/`TriggerTransfer`),多 agent 场景下可归因「由谁 / 因何触发」。
 编排点(`AgentAsTool` / `Team`)在调子 agent 前用 `WithTrigger(ctx, tt, id)` 标注来源。
 
 > 可运行示例见 [`agent/example_test.go`](agent/example_test.go)(`go test -run Example ./agent/`,离线 stub、无需 key)。
+
+### 鲁棒性开关(工具参数容错 / 上下文压缩 / 消息合并)
+
+三个 opt-in、纯确定性(不额外调模型)的开关,按需打开:
+
+- **`RepairToolArgs`**:模型给出的 tool_call 参数常"几乎合法"(尾逗号、单引号、裸 key、被 ```围栏包住、
+  JS/Py 常量、注释)。开启后,当参数 `json.Valid` 失败时先用 `agent.RepairJSON` 尽力修复,**修好且重新
+  校验通过才**交给 `Tool.Call`,否则原样透传——绝不会把更坏的输入喂给工具。
+- **`Compactor`**:工具密集的长跑里历史 tool 结果会撑爆上下文。`Runner.Compactor` 在每轮调用前对**发出的
+  投影**做 token 估算 + 截断最旧的大 tool 结果(末尾 `KeepRecent` 条完整保留),规范历史保持完整、每轮重新
+  投影。与 session 的跨轮滚动摘要互补(那个要调模型,这个不调)。
+- **`MergeConsecutive` / `MergeMessagesHook`**:合并相邻同角色(system/user/assistant)消息(`Tool` 永不合并),
+  用于某些要求角色严格交替的 provider,或注入 system/Steer/nudge 后规整请求。可直接当 `BeforeModel` Hook 挂。
+
+```go
+r := &agent.Runner{
+    Client:         cli,
+    Tools:          tools,
+    RepairToolArgs: true,                                   // 容忍坏 JSON 参数
+    Compactor:      &agent.Compactor{MaxTokens: 6000},      // 长跑压缩历史 tool 结果
+    Hooks:          agent.Hooks{BeforeModel: agent.MergeMessagesHook("")}, // 规整消息
+}
+```
 
 ### 人工审批(human-in-the-loop)
 

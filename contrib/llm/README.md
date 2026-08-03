@@ -126,8 +126,9 @@ provider 若不支持流式 tool_calls,会自动回退 `Generate`。
 
 - **Permission**:`PermitAllow`(默认) / `PermitAsk`(经 `Approve`) / `PermitDeny`(策略拒绝)。
   旧字段 `Approval: true` 仍等价于 Ask。
-- **AgentAsTool**:把子 `Runner` 包成工具,父 agent 可委托子任务。
-- **Chain**:按序跑多个 Runner(上一步终态文本作为下一步输入)。
+- **AgentAsTool**:把子 `Agent`(任意实现,不限 `*Runner`)包成工具,父 agent 可委托子任务。
+- **Chain**:按序跑多个 agent(上一步终态文本作为下一步输入)。
+- 更完整的编排(统一 `Agent` 接口 / Planner / Team 移交 / BestOfN / VerifyLoop)见下一节。
 
 ```go
 sub := &agent.Runner{Client: cli, Tools: researchTools}
@@ -142,6 +143,65 @@ chain := &agent.Chain{Steps: []agent.ChainStep{
 }}
 resp, _ = chain.Run(ctx, req)
 ```
+
+### 统一 Agent 接口 + 规划 / 团队 / 策略包装
+
+`Runner` / `Chain` / `Team` / `BestOfN` / `VerifyLoop` 都实现同一个 **`Agent`** 契约,可互相嵌套
+(`AgentAsTool`、`Chain` 步骤、`Team` 成员都收 `Agent`,不再局限于 `*Runner`):
+
+```go
+type Agent interface {
+    Run(ctx context.Context, req llm.Request) (*llm.Response, error)
+    Info() Info                     // Name/Description/暴露的工具声明
+}
+type StreamAgent interface {         // Runner / Chain / Team 实现,可推事件
+    Agent
+    RunStream(ctx context.Context, req llm.Request) <-chan Event
+}
+```
+
+**Planner 接缝 + ReActPlanner**:给 `Runner.Planner` 赋值即在首轮前注入规划指令、并对每轮响应做后处理。
+`ReActPlanner` 让模型按 `/*PLANNING*/`→`/*REASONING*/`/`/*ACTION*/` 组织输出、以 `FINAL ANSWER:` 收尾,
+并把终态文本收敛为干净答复(纯字符串处理,零配置可用,标记可覆盖)。
+
+```go
+r := &agent.Runner{Client: cli, Planner: &agent.ReActPlanner{}}
+// 模型输出 ".../*PLANNING*/...\nFINAL ANSWER: 42" → resp.Content 收敛为 "42"
+```
+
+**Team(多 agent 移交)**:成员在终态文本里写 `HANDOFF: <成员名> <输入>` 即把控制权交给同伴;无标记即终态。
+每次移交都过 **loop-safety 护栏**——`MaxHandoffs`(默认 16)上限 + 滑动窗口重复检测(窗口内不同目标数 <
+`MinUnique` 判为 A↔B 打转),避免无限委托。`Team` 实现 `StreamAgent`,`RunStream` 会转发各成员事件
+(带 `TriggerTransfer` 归因)、全程仅产出一条终态 `EventFinal`;它也可再被 `Chain` / `AgentAsTool` 嵌套。
+
+```go
+team := &agent.Team{
+    Members: map[string]agent.Agent{"researcher": r1, "writer": r2},
+    Entry:   "researcher",
+    Config:  agent.HandoffConfig{MaxHandoffs: 8}, // 0 用默认
+}
+resp, _ := team.Run(ctx, req) // researcher 可 "HANDOFF: writer ..." 移交给 writer
+```
+
+**策略包装器**(在任意 `Agent` 之上再包一层运行策略,判定/校验逻辑是 policy,由你注入):
+
+- **`BestOfN`**:并行跑 N 次,用 `Selector` 选最佳(默认 `LongestSelector`;可换成让另一个模型打分)。
+- **`VerifyLoop`**:Ralph 式「跑→校验→带反馈重跑」,直到 `Verifier` 通过或到 `MaxRounds`(默认 3)。
+
+```go
+best := &agent.BestOfN{Agent: r, N: 3}                 // Select 为 nil → 选最长
+loop := &agent.VerifyLoop{Agent: best, MaxRounds: 3,   // 包装器可任意嵌套
+    Verify: func(ctx context.Context, resp *llm.Response) (ok bool, feedback string, err error) {
+        return check(resp.Content) // 跑断言 / bash / 再问模型……都行
+    }}
+resp, _ := loop.Run(ctx, req)
+```
+
+**事件父子归因**:`RunStream` 的每条 `Event` 都带 `AgentName`(`Runner.Name`)与 `TriggerType`/`TriggerID`
+(`TriggerUser`/`TriggerToolCall`/`TriggerTransfer`),多 agent 场景下可归因「由谁 / 因何触发」。
+编排点(`AgentAsTool` / `Team`)在调子 agent 前用 `WithTrigger(ctx, tt, id)` 标注来源。
+
+> 可运行示例见 [`agent/example_test.go`](agent/example_test.go)(`go test -run Example ./agent/`,离线 stub、无需 key)。
 
 ### 人工审批(human-in-the-loop)
 
@@ -161,9 +221,10 @@ r := &agent.Runner{
 
 ### 会话记忆(`llm/agent/session`)
 
-`session.Manager` 在 `Runner` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
-历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;
-生产 SQLite/Redis 见 [`contrib/llmsession`](../llmsession)。
+`session.Manager` 在任意 `Agent` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
+历史与摘要自动拼进请求。`Run` 收 `Agent`、`RunStream` 收 `StreamAgent`,故 `Runner` 之外的
+`Chain` / `Team` / `BestOfN` / `VerifyLoop` 组合体也能套上会话记忆。内置 `MemoryStore` 与
+**`FileStore`(JSON 落盘)**;生产 SQLite/Redis 见 [`contrib/llmsession`](../llmsession)。
 
 ```go
 store, _ := session.NewFileStore("./data/sessions")
@@ -329,14 +390,70 @@ openai.New(key, openai.WithBaseURL(openai.BaseURLDeepSeek))  // DeepSeek
 | OpenAI / 智谱 / Kimi / MiniMax / 通义千问 / DeepSeek / 兼容网关 | `openai.New(key, WithBaseURL(...))`(见上,已带常量) |
 | **Azure OpenAI** | `openai.NewAzure(endpoint, deployment, apiVersion, key)`(api-key 头 + deployment 路径 + api-version) |
 | **Anthropic** | `anthropic.New(key)`(原生 Messages API) |
-| **AWS Bedrock** | 需独立适配(SigV4 签名 + 按模型报文),不在本模块——可另起 `llm/bedrock` |
+| **AWS Bedrock** | `bedrock.New(region)`(自实现 SigV4 + event-stream;一包多家族:Claude / Titan / Llama / Mistral) |
 
 - **`llm/openai`**:`chat/completions` + `embeddings`;`WithBaseURL` 对接兼容厂商,`NewAzure`/`WithAzure`/
   `WithAPIKeyHeader` 覆盖 Azure 及自定义认证。实现 `llm.Client` + `llm.Embedder`。
 - **`llm/anthropic`**:`/v1/messages`(`x-api-key` + `anthropic-version`)。实现 `llm.Client`。
+- **`llm/bedrock`**:AWS Bedrock Runtime(`/model/{id}/invoke` 与 `/invoke-with-response-stream`)。
+  一个 `Client` 按 model id 前缀选家族 codec,覆盖 Anthropic Claude(tools + 多模态 + 流式全能力)、
+  Amazon Titan(文本 + embedding)、Meta Llama、Mistral。实现 `llm.Client`;选中支持向量的家族时亦
+  实现 `llm.Embedder`。SigV4 签名与 event-stream 帧解码均自实现(纯 stdlib,不引 AWS SDK)。
 
 > 认证是否兼容:上述"OpenAI 兼容"厂商都用 `Authorization: Bearer <key>`,故 `openai` provider 直接可用;
-> Azure 用 `api-key` 头 + 独特 URL,故单独 `NewAzure`;Bedrock 用 AWS SigV4,机制完全不同,需专门实现。
+> Azure 用 `api-key` 头 + 独特 URL,故单独 `NewAzure`;Bedrock 用 AWS SigV4 + event-stream 二进制流,
+> 机制完全不同,由 `llm/bedrock` 自实现签名与帧解码(见下)。
+
+## AWS Bedrock(`llm/bedrock`)
+
+一个 `bedrock.New(region)` 客户端即可跨四个模型家族——按 `Request.Model` 的 id 前缀自动选 codec,
+无需换 provider。认证走 AWS SigV4,流式走 AWS event-stream 二进制帧,均自实现(纯 stdlib)。
+
+```go
+import "github.com/rushteam/beauty/contrib/llm/bedrock"
+
+// 凭据默认取自 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN(临时凭据)
+cli := bedrock.New("us-east-1")
+// 或显式覆盖:bedrock.New("us-east-1", bedrock.WithStaticCredentials(ak, sk, token))
+
+resp, _ := cli.Generate(ctx, llm.Request{
+    Model:    "anthropic.claude-3-5-sonnet-20241022-v2:0", // model id 即 Bedrock 模型/推理 profile id
+    System:   "You are concise.",
+    Messages: []llm.Message{{Role: llm.User, Content: "hello"}},
+})
+```
+
+各家族 model id 示例(跨区推理 profile 前缀 `us.` / `eu.` / `apac.` 等会自动识别):
+
+| 家族 | model id 示例 | 能力 |
+|---|---|---|
+| Anthropic Claude | `anthropic.claude-3-5-sonnet-20241022-v2:0` | tools + 多模态 + 流式 tool_calls |
+| Amazon Titan | `amazon.titan-text-express-v1` / `amazon.titan-embed-text-v2:0` | 文本生成 / embedding |
+| Meta Llama | `meta.llama3-1-70b-instruct-v1:0` | 文本(官方 chat 模板) |
+| Mistral | `mistral.mistral-large-2402-v1:0` | 文本(`[INST]` 模板) |
+
+> 非 Claude 家族为纯文本:忽略 `Tools`,多轮消息按各家族官方 chat 模板拼成单 prompt,`Parts` 退化取文本。
+
+**embedding**(Titan Embeddings,`WithEmbedModel` 可换):
+
+```go
+cli := bedrock.New("us-east-1") // 默认 embed 模型 amazon.titan-embed-text-v2:0
+vecs, _ := cli.Embed(ctx, []string{"检索文本 A", "检索文本 B"}) // 实现 llm.Embedder,可配 contrib/vector
+```
+
+**与中间件/多 provider 组合**(都基于 `llm.Client`,天然兼容):
+
+```go
+// 主用 Bedrock Claude,挂了自动切原生 Anthropic,再切 OpenAI
+cli := llm.Fallback(
+    llm.Retry(bedrock.New("us-east-1"), 3, 200*time.Millisecond),
+    anthropic.New(anthropicKey),
+    openai.New(openaiKey),
+)
+```
+
+其它选项:`WithHTTPClient`(自定义超时/代理)、`WithBaseURL`(VPC endpoint / 测试打桩)、
+`WithCodec`(接入注册表外的自定义家族)。单测用 `httptest` + `WithBaseURL` 打桩,无需真实 AWS 凭据。
 
 ## 边界
 

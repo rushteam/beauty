@@ -72,6 +72,27 @@ func TestManager_PersistsAndInjectsHistory(t *testing.T) {
 	}
 }
 
+// Manager 现在接受任意 agent.Agent:非 *Runner 的组合体(这里 VerifyLoop 包 Runner)也能套会话记忆,
+// 走 runAgent 的非 Runner 分支,历史依旧正确拼接与持久化。
+func TestManager_AcceptsNonRunnerAgent(t *testing.T) {
+	ctx := context.Background()
+	fc := &replyClient{reply: "答复A"}
+	a := &agent.VerifyLoop{Agent: &agent.Runner{Client: fc}} // 实现 Agent,但不是 *Runner
+	m := &session.Manager{Store: session.NewMemoryStore()}
+
+	if _, err := m.Run(ctx, "s1", a, user("第一句")); err != nil {
+		t.Fatalf("run1: %v", err)
+	}
+	fc.reply = "答复B"
+	if _, err := m.Run(ctx, "s1", a, user("第二句")); err != nil {
+		t.Fatalf("run2: %v", err)
+	}
+	msgs := fc.last.Messages
+	if len(msgs) != 3 || msgs[0].Content != "第一句" || msgs[1].Content != "答复A" || msgs[2].Content != "第二句" {
+		t.Fatalf("非 Runner Agent 的历史拼接不对: %+v", msgs)
+	}
+}
+
 func TestManager_RunStream_Persists(t *testing.T) {
 	ctx := context.Background()
 	fc := &replyClient{reply: "流式回复"}

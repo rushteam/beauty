@@ -151,6 +151,134 @@ func (tm *Team) Run(ctx context.Context, req llm.Request) (*llm.Response, error)
 	}
 }
 
+var _ StreamAgent = (*Team)(nil)
+
+// RunStream 是 Run 的流式版:实现 StreamAgent。成员实现 StreamAgent 时透传其中间事件
+// (token/step/tool/steer,已由成员自行打好 AgentName 与 Trigger),否则同步跑该成员;
+// 移交/护栏/终态处补发相应事件。整个团队运行只在最后对外产出一条终态 EventFinal——中间成员
+// 的 final 仅内部消费以解析 HANDOFF,不重复推送。护栏报错或目标非法时推 EventError 并结束。
+func (tm *Team) RunStream(ctx context.Context, req llm.Request) <-chan Event {
+	ch := make(chan Event, 32)
+	go func() {
+		defer close(ch)
+		if len(tm.Members) == 0 {
+			ch <- Event{Type: EventError, Err: fmt.Errorf("agent: team has no members")}
+			return
+		}
+		current := tm.Entry
+		if current == "" {
+			ch <- Event{Type: EventError, Err: fmt.Errorf("agent: team entry is empty")}
+			return
+		}
+		tracker := &handoffTracker{cfg: tm.Config}
+		prompt := tm.handoffPrompt()
+
+		input := req
+		first := true
+		for {
+			if err := ctx.Err(); err != nil {
+				ch <- Event{Type: EventError, Err: err}
+				return
+			}
+			member, ok := tm.Members[current]
+			if !ok {
+				ch <- Event{Type: EventError, Err: fmt.Errorf("agent: team: unknown member %q", current)}
+				return
+			}
+
+			stepReq := input
+			if prompt != "" {
+				if stepReq.System != "" {
+					stepReq.System += "\n\n"
+				}
+				stepReq.System += prompt
+			}
+			runCtx := ctx
+			if !first {
+				runCtx = WithTrigger(ctx, TriggerTransfer, current)
+			}
+
+			finalEv, rerr := tm.streamMember(runCtx, member, current, stepReq, ch)
+			if rerr != nil {
+				finalEv.Type, finalEv.Err = EventError, rerr
+				ch <- finalEv
+				return
+			}
+			resp := finalEv.Response
+
+			target, handoffInput, isHandoff := parseHandoff(respContent(resp))
+			if !isHandoff {
+				ch <- finalEv // 终态:透传该成员的 final
+				return
+			}
+			if _, exists := tm.Members[target]; !exists {
+				finalEv.Type = EventError
+				finalEv.Err = fmt.Errorf("agent: team: member %q tried to hand off to unknown member %q", current, target)
+				ch <- finalEv
+				return
+			}
+			if err := tracker.record(target); err != nil {
+				finalEv.Type, finalEv.Err = EventError, err
+				ch <- finalEv
+				return
+			}
+			if handoffInput == "" {
+				handoffInput = firstUserContent(input)
+			}
+			current = target
+			input = llm.Request{Model: req.Model, Messages: []llm.Message{{Role: llm.User, Content: handoffInput}}}
+			first = false
+		}
+	}()
+	return ch
+}
+
+// streamMember 跑单个成员:成员实现 StreamAgent 时透传其中间事件(final/error 由本方法捕获、
+// 不外发,交调用方决策),否则同步跑并合成一条已打好归因的 final 事件。返回捕获/合成的事件与成员错误。
+func (tm *Team) streamMember(ctx context.Context, member Agent, name string, req llm.Request, ch chan<- Event) (Event, error) {
+	if sa, ok := member.(StreamAgent); ok {
+		var fev Event
+		var rerr error
+		for ev := range sa.RunStream(ctx, req) {
+			switch ev.Type {
+			case EventFinal:
+				fev = ev
+			case EventError:
+				fev, rerr = ev, ev.Err
+			default:
+				ch <- ev
+			}
+		}
+		return fev, rerr
+	}
+	// 非流式成员:同步跑,合成 final(补 AgentName 与来自 ctx 的 Trigger)。
+	resp, err := member.Run(ctx, req)
+	tt, tid := triggerFrom(ctx)
+	return Event{
+		Type:        EventFinal,
+		Response:    resp,
+		AgentName:   memberDisplayName(member, name),
+		TriggerType: tt,
+		TriggerID:   tid,
+	}, err
+}
+
+// memberDisplayName 返回成员用于事件归因的名字:优先其 Info().Name,空则回退到 Team 内的成员键。
+func memberDisplayName(m Agent, key string) string {
+	if n := m.Info().Name; n != "" {
+		return n
+	}
+	return key
+}
+
+// respContent 安全取响应文本(nil 响应返回空串)。
+func respContent(r *llm.Response) string {
+	if r == nil {
+		return ""
+	}
+	return r.Content
+}
+
 // Info 实现 Agent:汇总各成员暴露的工具声明。
 func (tm *Team) Info() Info {
 	var tools []llm.ToolDef

@@ -105,23 +105,17 @@ func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Mess
 
 // Run 以会话 id 跑一轮:req.Messages 只放**本轮新输入**(通常一条 user 消息);Manager 负责
 // 把历史与摘要拼进去,跑完把本轮 user 输入与最终 assistant 回复追加进会话并保存。
-func (m *Manager) Run(ctx context.Context, id string, r *agent.Runner, req llm.Request) (*llm.Response, error) {
+//
+// a 可为任意 agent.Agent——除 *Runner 外,Chain / Team / BestOfN / VerifyLoop 等组合体也能套上
+// 会话记忆。若 a 是 *agent.Runner,会借 OnStep 额外持久化工具调用中间消息;其它 Agent 只持久化
+// 本轮 user 输入与最终 assistant 回复。
+func (m *Manager) Run(ctx context.Context, id string, a agent.Agent, req llm.Request) (*llm.Response, error) {
 	sess, newMsgs, full, err := m.prepare(ctx, id, req)
 	if err != nil {
 		return nil, err
 	}
 	var intermediates []llm.Message
-	origOnStep := r.OnStep
-	r.OnStep = func(step int, resp *llm.Response) {
-		if len(resp.ToolCalls) > 0 {
-			intermediates = append(intermediates, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
-		}
-		if origOnStep != nil {
-			origOnStep(step, resp)
-		}
-	}
-	resp, err := r.Run(ctx, full)
-	r.OnStep = origOnStep
+	resp, err := m.runAgent(ctx, a, full, &intermediates)
 	if err != nil {
 		return resp, err
 	}
@@ -131,10 +125,32 @@ func (m *Manager) Run(ctx context.Context, id string, r *agent.Runner, req llm.R
 	return resp, nil
 }
 
-// RunStream 与 Run 相同的会话编排,但转发 Runner.RunStream 的事件。
+// runAgent 跑底层 agent;若是 *Runner 则临时挂 OnStep 捕获工具调用中间消息(供持久化)。
+func (m *Manager) runAgent(ctx context.Context, a agent.Agent, full llm.Request, intermediates *[]llm.Message) (*llm.Response, error) {
+	r, ok := a.(*agent.Runner)
+	if !ok {
+		return a.Run(ctx, full)
+	}
+	origOnStep := r.OnStep
+	r.OnStep = func(step int, resp *llm.Response) {
+		if len(resp.ToolCalls) > 0 {
+			*intermediates = append(*intermediates, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
+		}
+		if origOnStep != nil {
+			origOnStep(step, resp)
+		}
+	}
+	defer func() { r.OnStep = origOnStep }()
+	return r.Run(ctx, full)
+}
+
+// RunStream 与 Run 相同的会话编排,但转发底层 StreamAgent 的事件。
 // 仅在收到 EventFinal 时持久化会话;EventError 不写库(本轮未完成)。
 // 返回的 channel 在结束后关闭;调用方应排空直至关闭。
-func (m *Manager) RunStream(ctx context.Context, id string, r *agent.Runner, req llm.Request) <-chan agent.Event {
+//
+// a 可为任意 agent.StreamAgent(*Runner / *Chain / *Team 等);工具调用中间消息据事件
+// (EventStep 带 tool_calls / EventToolResult)捕获持久化,对所有 StreamAgent 一致。
+func (m *Manager) RunStream(ctx context.Context, id string, r agent.StreamAgent, req llm.Request) <-chan agent.Event {
 	ch := make(chan agent.Event, 32)
 	go func() {
 		defer close(ch)

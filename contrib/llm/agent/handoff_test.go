@@ -51,6 +51,54 @@ func TestTeam_UnknownTarget(t *testing.T) {
 	}
 }
 
+// RunStream 流式:中间成员的 final 被内部消费,全程对外仅一条终态 EventFinal;
+// transfer 归因正确(entry 成员为 user,被移交的成员为 transfer)。
+func TestTeam_RunStream(t *testing.T) {
+	researcher := &agent.Runner{Name: "researcher", Client: &fakeClient{steps: []*llm.Response{
+		{Content: "HANDOFF: writer 写报告"},
+	}}}
+	writer := &agent.Runner{Name: "writer", Client: &fakeClient{steps: []*llm.Response{
+		{Content: "final report"},
+	}}}
+	tm := &agent.Team{
+		Members: map[string]agent.Agent{"researcher": researcher, "writer": writer},
+		Entry:   "researcher",
+	}
+
+	var finals []agent.Event
+	sawResearcherUser, sawWriterTransfer := false, false
+	for ev := range tm.RunStream(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究 X"}}}) {
+		if ev.Type == agent.EventError {
+			t.Fatalf("unexpected error event: %v", ev.Err)
+		}
+		switch ev.AgentName {
+		case "researcher":
+			if ev.TriggerType == agent.TriggerUser {
+				sawResearcherUser = true
+			}
+		case "writer":
+			if ev.TriggerType == agent.TriggerTransfer && ev.TriggerID == "writer" {
+				sawWriterTransfer = true
+			}
+		}
+		if ev.Type == agent.EventFinal {
+			finals = append(finals, ev)
+		}
+	}
+	if len(finals) != 1 {
+		t.Fatalf("应恰好一条终态 EventFinal, got %d", len(finals))
+	}
+	if finals[0].Response.Content != "final report" || finals[0].AgentName != "writer" {
+		t.Fatalf("终态 = %q by %q, want \"final report\" by writer", finals[0].Response.Content, finals[0].AgentName)
+	}
+	if !sawResearcherUser {
+		t.Error("researcher 的事件应带 TriggerUser 归因")
+	}
+	if !sawWriterTransfer {
+		t.Error("writer 的事件应带 TriggerTransfer/writer 归因")
+	}
+}
+
 // A↔B 打转:MaxHandoffs 护栏应在有限次后停机。
 func TestTeam_MaxHandoffsGuard(t *testing.T) {
 	a := &agent.Runner{Name: "a", Client: constClient{content: "HANDOFF: b to-b"}}

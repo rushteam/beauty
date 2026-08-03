@@ -154,7 +154,7 @@ type Agent interface {
     Run(ctx context.Context, req llm.Request) (*llm.Response, error)
     Info() Info                     // Name/Description/暴露的工具声明
 }
-type StreamAgent interface {         // Runner / Chain 额外实现,可推事件
+type StreamAgent interface {         // Runner / Chain / Team 实现,可推事件
     Agent
     RunStream(ctx context.Context, req llm.Request) <-chan Event
 }
@@ -171,7 +171,8 @@ r := &agent.Runner{Client: cli, Planner: &agent.ReActPlanner{}}
 
 **Team(多 agent 移交)**:成员在终态文本里写 `HANDOFF: <成员名> <输入>` 即把控制权交给同伴;无标记即终态。
 每次移交都过 **loop-safety 护栏**——`MaxHandoffs`(默认 16)上限 + 滑动窗口重复检测(窗口内不同目标数 <
-`MinUnique` 判为 A↔B 打转),避免无限委托。`Team` 本身也是 `Agent`,可再被 `Chain` / `AgentAsTool` 嵌套。
+`MinUnique` 判为 A↔B 打转),避免无限委托。`Team` 实现 `StreamAgent`,`RunStream` 会转发各成员事件
+(带 `TriggerTransfer` 归因)、全程仅产出一条终态 `EventFinal`;它也可再被 `Chain` / `AgentAsTool` 嵌套。
 
 ```go
 team := &agent.Team{
@@ -220,9 +221,10 @@ r := &agent.Runner{
 
 ### 会话记忆(`llm/agent/session`)
 
-`session.Manager` 在 `Runner` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
-历史与摘要自动拼进请求。内置 `MemoryStore` 与 **`FileStore`(JSON 落盘)**;
-生产 SQLite/Redis 见 [`contrib/llmsession`](../llmsession)。
+`session.Manager` 在任意 `Agent` 之上加多轮记忆:持久化对话历史,超长时滚动摘要。每轮只传新输入,
+历史与摘要自动拼进请求。`Run` 收 `Agent`、`RunStream` 收 `StreamAgent`,故 `Runner` 之外的
+`Chain` / `Team` / `BestOfN` / `VerifyLoop` 组合体也能套上会话记忆。内置 `MemoryStore` 与
+**`FileStore`(JSON 落盘)**;生产 SQLite/Redis 见 [`contrib/llmsession`](../llmsession)。
 
 ```go
 store, _ := session.NewFileStore("./data/sessions")

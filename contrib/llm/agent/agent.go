@@ -9,7 +9,13 @@
 //     调用等适配成 Tool 只需几行(见 example),故本包不 import mcp,保持零外部依赖。
 //
 // 支持 Run(同步 Generate)与 RunStream(Stream 推 EventToken + 步骤事件,ctx 可取消);
-// 同轮多 tool 默认可并行;工具权限三态;AgentAsTool / Chain;Steer;Hooks。
+// 同轮多 tool 默认可并行;工具权限三态;Steer;Hooks。
+//
+// 统一编排:Runner / Chain / Team / BestOfN / VerifyLoop 都实现同一 Agent(+ 可选 StreamAgent)
+// 契约,可互相嵌套——AgentAsTool 把任意 Agent 包成工具、Chain 按序跑、Team 靠 HANDOFF 文本标记
+// 做带 loop-safety 护栏的多 agent 移交、BestOfN/VerifyLoop 在任意 Agent 上加采样/校验策略。
+// Planner 接缝(ReActPlanner)可在循环前注入规划指令、逐轮后处理响应。RunStream 的 Event 带
+// AgentName/TriggerType/TriggerID,支持多 agent 场景下的父子归因(见 WithTrigger)。
 package agent
 
 import (

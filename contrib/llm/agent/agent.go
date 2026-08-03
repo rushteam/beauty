@@ -66,6 +66,35 @@ type Decision struct {
 	Reason   string
 }
 
+// TriggerType 标识一次 agent 运行(及其发出的 Event)由何种事件触发,用于多 agent 场景下的父子归因。
+type TriggerType string
+
+const (
+	// TriggerUser 顶层用户请求(默认)。
+	TriggerUser TriggerType = "user"
+	// TriggerToolCall 由父 agent 的某次工具调用触发(如 AgentAsTool)。
+	TriggerToolCall TriggerType = "tool_call"
+	// TriggerTransfer 由多 agent 移交(handoff/transfer)触发。
+	TriggerTransfer TriggerType = "transfer"
+)
+
+// triggerCtxKey 是 WithTrigger 在 ctx 上存放触发信息的键(零大小类型,避免碰撞)。
+type triggerCtxKey struct{}
+
+// WithTrigger 在 ctx 上标注「本次 agent 运行由何种事件触发、关联哪个 id」,
+// 使该运行发出的每条 Event 都带上 TriggerType/TriggerID。编排点(AgentAsTool / Team)在调用
+// 子 agent 前设置;顶层调用未设置时默认为 TriggerUser。
+func WithTrigger(ctx context.Context, tt TriggerType, id string) context.Context {
+	return context.WithValue(ctx, triggerCtxKey{}, [2]string{string(tt), id})
+}
+
+func triggerFrom(ctx context.Context) (TriggerType, string) {
+	if v, ok := ctx.Value(triggerCtxKey{}).([2]string); ok {
+		return TriggerType(v[0]), v[1]
+	}
+	return TriggerUser, ""
+}
+
 // EventType 标识 RunStream 中的事件种类。
 type EventType string
 
@@ -85,6 +114,9 @@ const (
 //   - tool_start / tool_result: ToolCall (+ Result 仅 result)
 //   - steer: Result 为注入的用户文本
 //   - error: Err (+ 可选 Response 为最后一次模型输出)
+//
+// AgentName / TriggerType / TriggerID 由 Runner 统一打上:AgentName 为发出事件的 agent 名
+// (Runner.Name);TriggerType/TriggerID 取自 ctx(见 WithTrigger),顶层默认 TriggerUser/""。
 type Event struct {
 	Type     EventType
 	Step     int
@@ -92,6 +124,11 @@ type Event struct {
 	ToolCall *llm.ToolCall
 	Result   string
 	Err      error
+
+	// 父子关联元数据(多 agent 场景):
+	AgentName   string      // 产生该事件的 agent 名(Runner.Name)
+	TriggerType TriggerType // 触发本次运行的事件种类
+	TriggerID   string      // 关联 id(如触发的 tool 名 / 移交目标)
 }
 
 // Hooks 是分层观测/拦截点。任一回调返回 error 会中止整个 Run。
@@ -145,11 +182,40 @@ func (s *Steer) drain() []string {
 	}
 }
 
+// Info 是一个 Agent 的元信息(名字/描述/对外暴露的工具声明),供编排与观测使用。
+type Info struct {
+	Name        string
+	Description string
+	Tools       []llm.ToolDef
+}
+
+// Agent 是可被统一编排的最小契约:给定 Request 跑完并返回终态 Response,并能自述 Info。
+// *Runner、*Chain、策略包装器(*BestOfN / *VerifyLoop)、*Team 都实现它,从而可互相嵌套
+// (AgentAsTool 包任意 Agent、Chain 步骤为任意 Agent、Team 成员为任意 Agent)。
+type Agent interface {
+	Run(ctx context.Context, req llm.Request) (*llm.Response, error)
+	Info() Info
+}
+
+// StreamAgent 是额外支持流式事件的 Agent。*Runner 与 *Chain 实现它;
+// 语义上无单一事件流的包装器(如 *BestOfN 的 N 路并行)只实现 Agent。
+type StreamAgent interface {
+	Agent
+	RunStream(ctx context.Context, req llm.Request) <-chan Event
+}
+
 // Runner 驱动 agent 循环。Client 可以是任意 llm.Client(含 Fallback/Retry/Metered/Guard 叠加后的)。
 type Runner struct {
 	Client   llm.Client
 	Tools    []Tool
 	MaxSteps int // <=0 时用 DefaultMaxSteps
+
+	// Name / Description 是本 agent 的元信息(供 Info() 与多 agent 编排/观测),均可为空。
+	Name        string
+	Description string
+
+	// Planner 可选:在首轮模型调用前注入规划指令,并对每轮响应做后处理(如 ReAct)。nil=不启用。
+	Planner Planner
 
 	// ParallelTools 控制同轮多个 tool_call 是否并发执行。nil=默认并行(>1 时);
 	// 指向 false 则强制串行。并行时 Hooks.Before/AfterTool 与 Approve 可能并发,需自行同步。
@@ -168,6 +234,17 @@ type Runner struct {
 	Steer *Steer
 }
 
+var _ StreamAgent = (*Runner)(nil)
+
+// Info 实现 Agent:返回本 Runner 的名字/描述与其工具声明。
+func (r *Runner) Info() Info {
+	defs := make([]llm.ToolDef, len(r.Tools))
+	for i, t := range r.Tools {
+		defs[i] = t.Def
+	}
+	return Info{Name: r.Name, Description: r.Description, Tools: defs}
+}
+
 // Run 跑完整的工具循环并返回终态响应(内部走 Client.Generate)。ctx 取消会中止循环。
 func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	return r.run(ctx, req, nil)
@@ -180,7 +257,14 @@ func (r *Runner) RunStream(ctx context.Context, req llm.Request) <-chan Event {
 	ch := make(chan Event, 32)
 	go func() {
 		defer close(ch)
-		emit := func(e Event) { ch <- e }
+		// 统一给每条 Event 打上 AgentName 与来自 ctx 的触发元数据(TriggerType/TriggerID)。
+		tt, tid := triggerFrom(ctx)
+		emit := func(e Event) {
+			e.AgentName = r.Name
+			e.TriggerType = tt
+			e.TriggerID = tid
+			ch <- e
+		}
 		resp, err := r.run(ctx, req, emit)
 		if err != nil {
 			emit(Event{Type: EventError, Response: resp, Err: err})
@@ -192,6 +276,7 @@ func (r *Runner) RunStream(ctx context.Context, req llm.Request) <-chan Event {
 }
 
 func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*llm.Response, error) {
+	// 注:Event 的 AgentName/Trigger 元数据统一由 RunStream 的 emit 打上(Run 走 nil emit,无事件)。
 	maxSteps := r.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = DefaultMaxSteps
@@ -204,6 +289,16 @@ func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*l
 		byName[t.Def.Name] = t
 	}
 	req.Tools = defs
+
+	// 规划器:进循环前把规划指令一次性并入 system(后续各轮复用同一 req.System)。
+	if r.Planner != nil {
+		if instr := r.Planner.BuildPlanningInstruction(&req); instr != "" {
+			if req.System != "" {
+				req.System += "\n\n"
+			}
+			req.System += instr
+		}
+	}
 
 	msgs := make([]llm.Message, len(req.Messages))
 	copy(msgs, req.Messages)
@@ -232,6 +327,9 @@ func (r *Runner) run(ctx context.Context, req llm.Request, emit func(Event)) (*l
 		resp, err := r.callModel(ctx, req, step, emit)
 		if err != nil {
 			return last, err
+		}
+		if r.Planner != nil {
+			resp = r.Planner.ProcessPlanningResponse(step, resp)
 		}
 		last = resp
 		if r.Hooks.AfterModel != nil {

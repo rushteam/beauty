@@ -51,6 +51,7 @@ func RegisterElector(scheme string, fn ElectorFactory) {
 //	dlock.New("consul://127.0.0.1:8500/?ttl=15s")
 //	dlock.New("redis://:pass@127.0.0.1:6379/0?ttl=15s&retry=100ms")
 //	dlock.New("postgres://user:pass@127.0.0.1:5432/db?sslmode=disable&prefix=beauty/dlock/")
+//	dlock.New("mysql://user:pass@127.0.0.1:3306/db?prefix=beauty:dlock:&retry=2s")
 //
 // 注:k8s 后端只提供 Elector(client-go 是选主语义,没有互斥锁原语),用 NewElector。
 func New(rawURL string) (Locker, error) {
@@ -68,10 +69,11 @@ func New(rawURL string) (Locker, error) {
 }
 
 // NewElector 根据 DSN 构造一个 Elector(选主器),用法同 New。除 etcd/consul/redis
-// 外,k8s 后端也注册了 Elector(基于 Lease 资源),postgres 后端基于 Advisory Lock
-// 实现选主(session-level 锁随连接释放,无需额外 TTL),DSN 分别形如
-// "k8s://?namespace=prod&kubeconfig=/path" 和
-// "postgres://user:pass@host:5432/db?retry=2s&heartbeat=5s"。
+// 外,k8s 后端也注册了 Elector(基于 Lease 资源),postgres / mysql 后端基于
+// Advisory Lock 实现选主(session-level 锁随连接释放,无需额外 TTL),DSN 分别形如
+// "k8s://?namespace=prod&kubeconfig=/path"、
+// "postgres://user:pass@host:5432/db?retry=2s&heartbeat=5s" 和
+// "mysql://user:pass@host:3306/db?retry=2s&heartbeat=5s"。
 func NewElector(rawURL string) (Elector, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {

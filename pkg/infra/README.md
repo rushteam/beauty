@@ -24,12 +24,15 @@ Polaris）适配到框架定义的**后端无关接口**上。核心接口都在
 | **consul** | ✅ `consul` | ✅ Locker + Elector | — | ✅ |
 | **k8s** | ✅ `configmap` / `secret` | ✅ 仅 Elector¹ | — | ✅ |
 | **redis** | — | ✅ Locker + Elector² | ✅ | — |
+| **mysql** | — | ✅ Locker + Elector³ | — | — |
 | **nacos** | ✅ `nacos` | — | — | ✅ |
 | **polaris** | ✅ `polaris` | — | — | ✅ |
 
 > ¹ k8s 基于 Lease 的 leaderelection 是「选主」语义,没有互斥锁原语,故只实现 `Elector`。
 > ² Redis 锁是**单节点语义**(SET NX PX + Lua CAS),不是跨多 master 的 Redlock。
 > 需要更强保证时用 etcd / consul 后端。
+> ³ MySQL 锁基于 `GET_LOCK`/`RELEASE_LOCK`（advisory lock），session-level,
+> 连接断开自动释放。要求 MySQL 5.7.5+（支持同连接多锁）。
 
 ## 配置中心 `conf`
 
@@ -86,6 +89,7 @@ defer lock.Unlock(ctx)
 etcd://[user:pass@]host1,host2/?ttl=10s&prefix=/beauty/dlock/&dial_ms=3000
 consul://[:token@]host:port/?ttl=15s&prefix=beauty/dlock/&datacenter=dc1&identity=host-a
 redis://[:password@]host:port/db?ttl=15s&retry=100ms&prefix=beauty:dlock:
+mysql://user:pass@host:3306/dbname?prefix=beauty:dlock:&retry=2s&heartbeat=5s
 k8s://?namespace=prod&kubeconfig=/path&identity=pod-a               # 仅 Elector
 ```
 
@@ -119,6 +123,7 @@ n, _ := store.Incr(ctx, "quota:user:42", 1, time.Minute)
 | `consul/` | `config_client.go`(含连接)、`dlock.go`、`factory.go` |
 | `k8s/` | `client.go`、`config_center.go`、`dlock.go`(Elector)、`factory.go` |
 | `redis/` | `client.go`、`dlock.go`、`kvstore.go`、`factory.go` |
+| `mysql/` | `dlock.go`（advisory lock）、`factory.go` |
 | `nacos/` | `config.go`、`config_client.go`、`nacos.go`、`factory.go` |
 | `polaris/` | `config_client.go`、`factory.go` |
 

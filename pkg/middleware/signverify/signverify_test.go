@@ -1,6 +1,7 @@
 package signverify
 
 import (
+	"crypto/hmac"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -208,6 +209,88 @@ func TestSecretDeriverUnknownApp(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("deriver unknown: got %d, want 401", rec.Code)
+	}
+}
+
+func TestDerivedKey(t *testing.T) {
+	h := HTTPMiddleware(getSecret, WithDerivedKey(300))(http.HandlerFunc(ok200))
+
+	ts := time.Now().Unix()
+	tsStr := strconv.FormatInt(ts, 10)
+	dk := DeriveKey(testSecret, ts, 300)
+	body := `{"amount":50}`
+	sig := Sign(dk, tsStr, "user-1", []byte(body))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pay", strings.NewReader(body))
+	req.Header.Set("X-App-Id", "app1")
+	req.Header.Set("X-Timestamp", tsStr)
+	req.Header.Set("X-Sign", sig)
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("derived key: got %d, want 200", rec.Code)
+	}
+}
+
+func TestDerivedKeyPreviousWindow(t *testing.T) {
+	h := HTTPMiddleware(getSecret, WithDerivedKey(300), WithMaxAge(10*time.Minute))(http.HandlerFunc(ok200))
+
+	// 用上一个窗口的 derivedKey 签名（模拟窗口边界漂移）
+	ts := time.Now().Unix()
+	tsStr := strconv.FormatInt(ts, 10)
+	dk := DeriveKey(testSecret, ts-300, 300) // 上一个窗口
+	body := `{"x":1}`
+	sig := Sign(dk, tsStr, "u2", []byte(body))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/do", strings.NewReader(body))
+	req.Header.Set("X-App-Id", "app1")
+	req.Header.Set("X-Timestamp", tsStr)
+	req.Header.Set("X-Sign", sig)
+	req.Header.Set("X-User-Id", "u2")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("previous window: got %d, want 200", rec.Code)
+	}
+}
+
+func TestDerivedKeyWrongMaster(t *testing.T) {
+	h := HTTPMiddleware(getSecret, WithDerivedKey(300))(http.HandlerFunc(ok200))
+
+	ts := time.Now().Unix()
+	tsStr := strconv.FormatInt(ts, 10)
+	dk := DeriveKey([]byte("wrong-master"), ts, 300)
+	sig := Sign(dk, tsStr, "u1", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pay", nil)
+	req.Header.Set("X-App-Id", "app1")
+	req.Header.Set("X-Timestamp", tsStr)
+	req.Header.Set("X-Sign", sig)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong master: got %d, want 401", rec.Code)
+	}
+}
+
+func TestDeriveKeyDeterministic(t *testing.T) {
+	master := []byte("key")
+	// 1700000000 / 300 = 5666666, 1700000050 / 300 = 5666666 (同窗口)
+	dk1 := DeriveKey(master, 1700000000, 300)
+	dk2 := DeriveKey(master, 1700000050, 300)
+	// 1700000400 / 300 = 5666668 (不同窗口)
+	dk3 := DeriveKey(master, 1700000400, 300)
+
+	if !hmac.Equal(dk1, dk2) {
+		t.Fatal("same window should produce same derived key")
+	}
+	if hmac.Equal(dk1, dk3) {
+		t.Fatal("different window should produce different derived key")
 	}
 }
 

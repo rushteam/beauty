@@ -41,6 +41,9 @@ type SecretFunc func(appID string) (secret []byte, ok bool)
 // 适用于基于请求内容（时间戳、region 等）派生密钥的场景，如 AWS SigV4 风格。
 type SecretDeriver func(appID string, r *http.Request) (secret []byte, ok bool)
 
+// DefaultWindowSec 派生 key 的默认时间窗口（秒）。
+const DefaultWindowSec int64 = 300
+
 type options struct {
 	appIDHeader     string
 	signHeader      string
@@ -50,6 +53,7 @@ type options struct {
 	skipPrefixes    []string
 	extractUser     bool
 	deriver         SecretDeriver
+	deriveWindowSec int64 // >0 表示启用 DeriveKey 模式
 	onReject        func(w http.ResponseWriter, reason string)
 }
 
@@ -103,20 +107,30 @@ func WithExtractUser() Option {
 	return func(o *options) { o.extractUser = true }
 }
 
-// WithSecretDeriver 使用动态 key 派生替代静态 SecretFunc。
+// WithSecretDeriver 使用完全自定义的动态 key 派生替代静态 SecretFunc。
 // 设置后 HTTPMiddleware 的 getSecret 参数将被忽略。
-//
-// 典型场景：
-//
-//	// 按小时轮转派生
-//	signverify.WithSecretDeriver(func(appID string, r *http.Request) ([]byte, bool) {
-//	    master, ok := secrets[appID]
-//	    if !ok { return nil, false }
-//	    hour := r.Header.Get("X-Timestamp")[:10]
-//	    return hkdf(master, hour), true
-//	})
 func WithSecretDeriver(fn SecretDeriver) Option {
 	return func(o *options) { o.deriver = fn }
+}
+
+// WithDerivedKey 启用基于时间窗口的 key 派生模式。
+//
+// masterKey 始终不出现在网络上；客户端和服务端各自用 DeriveKey 从 masterKey
+// 派生出短时效的 derivedKey 来签名。验签时自动尝试当前窗口和上一个窗口，
+// 容忍窗口边界漂移。
+//
+// windowSec 为时间窗口秒数，传 0 使用默认值 300（5 分钟）。
+//
+// 用法：
+//
+//	signverify.HTTPMiddleware(getSecret, signverify.WithDerivedKey(300))
+func WithDerivedKey(windowSec int64) Option {
+	return func(o *options) {
+		if windowSec <= 0 {
+			windowSec = DefaultWindowSec
+		}
+		o.deriveWindowSec = windowSec
+	}
 }
 
 // WithRejectHandler 自定义拒绝响应。reason 可能为：
@@ -180,9 +194,8 @@ func HTTPMiddleware(getSecret SecretFunc, opts ...Option) func(http.Handler) htt
 			r.Body = io.NopCloser(bytes.NewReader(body))
 
 			userID := r.Header.Get(o.userIDHeader)
-			expected := Sign(secret, tsStr, userID, body)
 
-			if !hmac.Equal([]byte(sig), []byte(expected)) {
+			if !verifySignature(secret, tsStr, userID, body, sig, ts, o.deriveWindowSec) {
 				o.onReject(w, "signature_mismatch")
 				return
 			}
@@ -205,6 +218,41 @@ func Sign(secret []byte, timestamp, userID string, body []byte) string {
 	mac.Write([]byte(userID))
 	mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// DeriveKey 从 masterKey + 时间窗口编号派生短时效签名 key。
+// window = floor(unixTimestamp / windowSec)，masterKey 始终不出现在网络上。
+//
+// 客户端用法：
+//
+//	ts := time.Now().Unix()
+//	dk := signverify.DeriveKey(masterSecret, ts, 300)
+//	sig := signverify.Sign(dk, strconv.FormatInt(ts, 10), userID, body)
+func DeriveKey(masterKey []byte, unixTimestamp int64, windowSec int64) []byte {
+	if windowSec <= 0 {
+		windowSec = DefaultWindowSec
+	}
+	window := unixTimestamp / windowSec
+	mac := hmac.New(sha256.New, masterKey)
+	mac.Write([]byte(strconv.FormatInt(window, 10)))
+	return mac.Sum(nil)
+}
+
+// verifySignature 校验签名。deriveWindowSec > 0 时启用派生模式，
+// 自动尝试当前窗口和上一个窗口的 derivedKey。
+func verifySignature(secret []byte, tsStr, userID string, body []byte, sig string, ts, deriveWindowSec int64) bool {
+	if deriveWindowSec <= 0 {
+		expected := Sign(secret, tsStr, userID, body)
+		return hmac.Equal([]byte(sig), []byte(expected))
+	}
+	for _, offset := range []int64{0, -1} {
+		dk := DeriveKey(secret, ts+offset*deriveWindowSec, deriveWindowSec)
+		expected := Sign(dk, tsStr, userID, body)
+		if hmac.Equal([]byte(sig), []byte(expected)) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldSkip(path string, prefixes []string) bool {

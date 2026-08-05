@@ -58,17 +58,17 @@ type Handler func(ctx context.Context, m Match) error
 
 // Matchmaker 管理候选池并周期性尝试匹配。
 type Matchmaker struct {
-	mu        sync.RWMutex
-	tickets   map[string]*Ticket                 // ticket ID -> ticket
-	buckets   map[string]map[string]*bucketEntry // pool -> bucket key -> entry
-	handler   Handler
-	cfg       config
-	tickRate  time.Duration
-	stopped   atomic.Bool
-	startOnce sync.Once
-	stopCh    chan struct{}
-	done      chan struct{}
-	count     atomic.Int64
+	mu         sync.RWMutex
+	tickets    map[string]*Ticket                 // ticket ID -> ticket
+	buckets    map[string]map[string]*bucketEntry // pool -> bucket key -> entry
+	handler    Handler
+	cfg        config
+	tickRate   time.Duration
+	stopped    atomic.Bool
+	startOnce  sync.Once
+	stopCh     chan struct{}
+	done       chan struct{}
+	count      atomic.Int64
 	handlerSem chan struct{} // 限制 handler 并发数
 
 	// numeric 索引:pool -> attr -> 按值排序的 ticket 列表(用于范围/近邻查询)。

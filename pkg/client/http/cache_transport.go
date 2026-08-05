@@ -48,14 +48,14 @@ func (cr *CachedResponse) toHTTPResponse(req *http.Request) *http.Response {
 type CacheTransportOption func(*cacheTransportCfg)
 
 type cacheTransportCfg struct {
-	defaultTTL       time.Duration
-	forceTTL         bool
-	ignoreReqCC      bool
-	methods          map[string]bool
-	filter           func(*http.Request) bool
-	keyFn            func(*http.Request) string
-	singleflight     bool
-	conditional      bool
+	defaultTTL   time.Duration
+	forceTTL     bool
+	ignoreReqCC  bool
+	methods      map[string]bool
+	filter       func(*http.Request) bool
+	keyFn        func(*http.Request) string
+	singleflight bool
+	conditional  bool
 }
 
 const defaultCacheTTL = time.Minute
@@ -123,10 +123,10 @@ func WithCacheConditionalRequest() CacheTransportOption {
 // The transport respects standard Cache-Control directives (no-store, no-cache,
 // max-age, private) unless WithCacheForceTTL is set.
 type CacheTransport struct {
-	next  http.RoundTripper
-	store HTTPCacheStore
-	cfg   cacheTransportCfg
-	hits  int64
+	next   http.RoundTripper
+	store  HTTPCacheStore
+	cfg    cacheTransportCfg
+	hits   int64
 	misses int64
 
 	mu       sync.Mutex

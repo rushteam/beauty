@@ -24,20 +24,19 @@ type Config struct {
 	WatchTimeout int `mapstructure:"watch_timeout" schema:"watch_timeout"`
 }
 
-// String 返回配置的字符串表示
+// String 返回配置的字符串表示（用作 registry 单例缓存 key）。
 func (c *Config) String() string {
 	u := url.URL{
 		Scheme: "k8s",
 		Host:   c.Namespace,
 	}
 
-	if c.ServiceType != "" {
-		u.Path = "/" + c.ServiceType
-	}
-
 	values := url.Values{}
 	if c.Kubeconfig != "" {
 		values.Set("kubeconfig", c.Kubeconfig)
+	}
+	if c.ServiceType != "" && c.ServiceType != "ClusterIP" {
+		values.Set("service_type", c.ServiceType)
 	}
 	if c.PortName != "" {
 		values.Set("port_name", c.PortName)
@@ -53,25 +52,39 @@ func (c *Config) String() string {
 	return u.String()
 }
 
-// NewFromURL 从 URL 创建配置
+// NewFromURL 从 URL 创建配置。格式遵循 K8s DNS 风格：
+//
+//	k8s://service.namespace[.svc[.cluster.local]]?params
+//
+// 示例：
+//
+//	k8s://payment-internal.mall?port_name=grpc
+//	k8s://my-svc.kube-system.svc.cluster.local?port_name=http
+//	k8s://payment-internal?port_name=grpc                        (省略 namespace → default)
+//
+// Host 中第一段是服务名（由 grpcclient / gRPC resolver 消费），第二段是 namespace。
+// 无 "." 时 namespace 为 "default"，与 K8s DNS 语义一致。
+// service_type 仅通过 query 参数 ?service_type=... 指定，默认 ClusterIP。
 func NewFromURL(u url.URL) (*Config, error) {
 	c := &Config{}
 
-	// 设置默认值
 	c.Namespace = "default"
 	c.ServiceType = "ClusterIP"
 	c.WatchTimeout = 30
 
-	// 从 URL 解析配置
 	if u.Host != "" {
-		c.Namespace = u.Host
+		if i := strings.IndexByte(u.Host, '.'); i >= 0 {
+			// service.namespace[.svc[.cluster.local]] → 取第二段为 namespace
+			rest := u.Host[i+1:]
+			if j := strings.IndexByte(rest, '.'); j >= 0 {
+				c.Namespace = rest[:j]
+			} else {
+				c.Namespace = rest
+			}
+		}
+		// 无 "." → namespace 保持 "default"（K8s DNS：裸名 = default 命名空间）
 	}
 
-	if u.Path != "" {
-		c.ServiceType = strings.TrimPrefix(u.Path, "/")
-	}
-
-	// 解析查询参数
 	decoder := schema.NewDecoder()
 	if err := decoder.Decode(c, u.Query()); err != nil {
 		return nil, err

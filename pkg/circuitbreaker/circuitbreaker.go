@@ -116,8 +116,8 @@ type Breaker struct {
 	openedAt time.Time // Open 生效时刻
 
 	// Closed 统计
-	total   int64
-	failures int64
+	total       int64
+	failures    int64
 	windowStart time.Time
 
 	// HalfOpen 统计

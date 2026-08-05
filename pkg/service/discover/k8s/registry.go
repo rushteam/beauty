@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,8 +65,23 @@ func (r *Registry) Register(_ context.Context, _ discover.Service) (context.Canc
 	return func() {}, fmt.Errorf("k8s registry does not support manual service registration; use Kubernetes Service resources instead")
 }
 
+// normalizeServiceName 从 K8s DNS 风格的名称中提取纯服务名。
+// "payment-internal.mall" → "payment-internal"
+// "payment-internal.mall.svc.cluster.local" → "payment-internal"
+// "payment-internal" → "payment-internal"（无 "." 时原样返回）
+//
+// K8s 资源名遵循 RFC 1123（小写字母、数字、连字符），不含 "."，
+// 因此按 "." 切分不会误伤。
+func normalizeServiceName(name string) string {
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		return name[:i]
+	}
+	return name
+}
+
 // Find 查找服务实例
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
+	serviceName = normalizeServiceName(serviceName)
 	services, err := r.client.CoreV1().Services(r.config.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: r.buildLabelSelector(serviceName),
 		FieldSelector: r.buildFieldSelector(),
@@ -98,6 +114,8 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 
 // Watch 监听服务变化
 func (r *Registry) Watch(ctx context.Context, serviceName string, notify discover.Notify) error {
+	serviceName = normalizeServiceName(serviceName)
+
 	r.watcherMu.Lock()
 	defer r.watcherMu.Unlock()
 

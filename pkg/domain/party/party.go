@@ -53,11 +53,11 @@ type Party struct {
 	members   map[string]*Member // key = UserID
 	joinOrder []string           // 加入顺序(不含已移除成员)
 	requests  []JoinRequest
-	open     bool
-	maxSize  int
-	reserved int // 已预留座位数
-	onChange OnChange
-	stopped  bool
+	open      bool
+	maxSize   int
+	reserved  int // 已预留座位数
+	onChange  OnChange
+	stopped   bool
 }
 
 // ErrPartyFull 派对已满(含预留)。
@@ -95,8 +95,8 @@ func New(id string, leader Member, onChange OnChange, opts ...Option) *Party {
 		members:   map[string]*Member{leader.UserID: &leader},
 		joinOrder: []string{leader.UserID},
 		open:      cfg.open,
-		maxSize:  cfg.maxSize,
-		onChange: onChange,
+		maxSize:   cfg.maxSize,
+		onChange:  onChange,
 	}
 	return p
 }

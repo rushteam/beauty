@@ -30,7 +30,13 @@ func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, _ resolv
 	if reg == nil {
 		return nil, fmt.Errorf("k8s resolver: failed to create registry")
 	}
-	r := grpcclient.NewResolver(cc, target.Endpoint(), reg)
+	// Endpoint() 取 URL Path；新格式 k8s://service.namespace 没有 Path，
+	// 回退到 Host（Find/Watch 内部会 normalizeServiceName 提取纯服务名）。
+	serviceName := target.Endpoint()
+	if serviceName == "" {
+		serviceName = target.URL.Host
+	}
+	r := grpcclient.NewResolver(cc, serviceName, reg)
 	go r.Start()
 	return r, nil
 }

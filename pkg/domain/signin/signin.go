@@ -43,9 +43,9 @@ type RewardFunc func(day int, streak int) []Reward
 type Option func(*config)
 
 type config struct {
-	retroMax  int        // 每月补签次数上限
-	rewardFn  RewardFunc // 签到奖励回调
-	location  *time.Location
+	retroMax int        // 每月补签次数上限
+	rewardFn RewardFunc // 签到奖励回调
+	location *time.Location
 }
 
 // WithRetroMax 设置每月补签次数上限(默认 3)。
@@ -81,11 +81,11 @@ type MonthKey struct {
 type Record struct {
 	cfg config
 
-	mu       sync.Mutex
-	months   map[MonthKey]uint32 // 每月位图
-	retros   map[MonthKey]int    // 每月已用补签次数
-	lastDay  time.Time           // 最后签到日(零值表示从未签)
-	streak   int                 // 当前连签天数
+	mu      sync.Mutex
+	months  map[MonthKey]uint32 // 每月位图
+	retros  map[MonthKey]int    // 每月已用补签次数
+	lastDay time.Time           // 最后签到日(零值表示从未签)
+	streak  int                 // 当前连签天数
 }
 
 // New 创建新的签到记录。

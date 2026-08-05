@@ -55,21 +55,29 @@ import (
     "google.golang.org/grpc"
 )
 
-// 直接在 gRPC 客户端中使用
-conn, err := grpc.Dial("k8s://default/my-service", grpc.WithInsecure())
+conn, err := grpc.Dial("k8s://my-service.default?port_name=grpc", grpc.WithInsecure())
 ```
 
 ### 3. URL 配置格式
 
+遵循 K8s DNS 风格：
+
 ```
-k8s://[namespace][/service_type]?[query_params]
+k8s://service.namespace[.svc[.cluster.local]]?[query_params]
+```
+
+省略 namespace 时默认 `default`（与 K8s DNS 语义一致）：
+
+```
+k8s://service?[query_params]
 ```
 
 示例：
-- `k8s://default` - 使用默认命名空间和集群内配置
-- `k8s://my-namespace?kubeconfig=/path/to/config` - 指定命名空间和配置文件
-- `k8s://default?label_selector=app=my-service,version=v1` - 使用标签选择器
-- `k8s://default/ClusterIP?port_name=http` - 指定服务类型和端口名
+- `k8s://payment-internal.mall?port_name=grpc` - 指定 namespace
+- `k8s://my-svc.kube-system.svc.cluster.local?port_name=http` - 完整 DNS 格式
+- `k8s://my-svc.default?service_type=All&port_name=grpc` - 发现所有类型的 Service
+- `k8s://my-svc?port_name=grpc` - 省略 namespace，默认 default
+- `k8s://my-svc.prod?kubeconfig=/path/to/config` - 集群外访问
 
 ### 4. 服务监听
 

@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/rushteam/beauty/pkg/middleware/recovery"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
@@ -24,6 +23,8 @@ import (
 )
 
 var _ discover.Service = (*Server)(nil)
+
+type Option func(*Server)
 
 func WithGrpcServerOptions(opts ...grpc.ServerOption) Option {
 	return func(s *Server) {
@@ -67,9 +68,6 @@ func WithAutoServiceDiscovery(registries []discover.Registry, sdOpts ...ServiceD
 // WithRegionInfo 设置地域信息，兼容Polaris
 func WithRegionInfo(region, zone, campus string) Option {
 	return func(s *Server) {
-		if s.metadata == nil {
-			s.metadata = make(map[string]string)
-		}
 		s.metadata["region"] = region
 		s.metadata["zone"] = zone
 		s.metadata["campus"] = campus
@@ -79,9 +77,6 @@ func WithRegionInfo(region, zone, campus string) Option {
 // WithEnvironment 设置环境信息
 func WithEnvironment(env string) Option {
 	return func(s *Server) {
-		if s.metadata == nil {
-			s.metadata = make(map[string]string)
-		}
 		s.metadata["environment"] = env
 	}
 }
@@ -89,9 +84,6 @@ func WithEnvironment(env string) Option {
 // WithWeight 设置服务权重
 func WithWeight(weight int) Option {
 	return func(s *Server) {
-		if s.metadata == nil {
-			s.metadata = make(map[string]string)
-		}
 		s.metadata["weight"] = fmt.Sprintf("%d", weight)
 	}
 }
@@ -99,14 +91,9 @@ func WithWeight(weight int) Option {
 // WithPriority 设置服务优先级
 func WithPriority(priority int) Option {
 	return func(s *Server) {
-		if s.metadata == nil {
-			s.metadata = make(map[string]string)
-		}
 		s.metadata["priority"] = fmt.Sprintf("%d", priority)
 	}
 }
-
-type Option func(*Server)
 
 // WithVersion 将服务版本写入 metadata，注册到注册中心后可见，灰度发布时可用于流量路由。
 func WithVersion(version string) Option {
@@ -161,20 +148,8 @@ func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 		o(s)
 	}
 
-	// 构建 gRPC 选项
-	grpcOpts := s.grpcOpts
-
-	// recovery 始终作为最外层拦截器，防止 handler panic 导致进程崩溃
-	unary := append([]grpc.UnaryServerInterceptor{recovery.UnaryServerInterceptor()}, s.unaryInterceptors...)
-	stream := append([]grpc.StreamServerInterceptor{recovery.StreamServerInterceptor()}, s.streamInterceptors...)
-
-	grpcOpts = append(grpcOpts,
-		grpc.UnaryInterceptor(middleware.ChainUnaryServer(unary...)),
-		grpc.StreamInterceptor(middleware.ChainStreamServer(stream...)),
-	)
-
-	// 添加默认选项
-	grpcOpts = append(grpcOpts,
+	// 默认选项放前面，用户通过 WithGrpcServerOptions 传入的选项在后面可覆盖
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     time.Minute * 5,
 			MaxConnectionAge:      time.Minute * 30,
@@ -187,6 +162,15 @@ func New(addr string, handler func(*grpc.Server), opts ...Option) *Server {
 			PermitWithoutStream: true,
 		}),
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+	}
+	grpcOpts = append(grpcOpts, s.grpcOpts...)
+
+	// recovery 始终作为最外层拦截器，防止 handler panic 导致进程崩溃
+	unary := append([]grpc.UnaryServerInterceptor{recovery.UnaryServerInterceptor()}, s.unaryInterceptors...)
+	stream := append([]grpc.StreamServerInterceptor{recovery.StreamServerInterceptor()}, s.streamInterceptors...)
+	grpcOpts = append(grpcOpts,
+		grpc.ChainUnaryInterceptor(unary...),
+		grpc.ChainStreamInterceptor(stream...),
 	)
 
 	s.Server = grpc.NewServer(grpcOpts...)

@@ -178,7 +178,6 @@ require (
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/gorilla/schema v1.4.1
-	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.3
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect

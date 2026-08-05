@@ -61,7 +61,7 @@ func HTTPMiddleware(auth *AuthMiddleware) func(http.Handler) http.Handler {
 func buildHTTPMetadata(r *http.Request) map[string]any {
 	md := make(map[string]any, 7)
 
-	md["headers"] = r.Header // http.Header 即 map[string][]string，直接引用
+	md["headers"] = map[string][]string(r.Header)
 	md["query"] = map[string][]string(r.URL.Query())
 	md["method"] = r.Method
 	md["path"] = r.URL.Path

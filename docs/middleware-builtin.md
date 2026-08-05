@@ -168,11 +168,96 @@ app := beauty.New(
 
 ---
 
+## AntiReplay（防重放）
+
+基于 nonce + `kvstore.Store.SetNX` 的防重放中间件。每个请求携带唯一 nonce，重复提交会被拒绝。
+
+```go
+import (
+    "github.com/rushteam/beauty/pkg/middleware/antireplay"
+    "github.com/rushteam/beauty/pkg/kvstore"
+)
+
+store := redis.NewStore(redisClient) // 或 kvstore.NewMemory()
+
+webserver.WithMiddleware(antireplay.HTTPMiddleware(store))
+
+// 自定义选项
+webserver.WithMiddleware(antireplay.HTTPMiddleware(store,
+    antireplay.WithHeader("X-Request-Nonce"),        // 默认 X-Nonce
+    antireplay.WithKeyPrefix("replay:"),              // 默认 nonce:
+    antireplay.WithTTL(5*time.Minute),                // 默认 10 分钟
+    antireplay.WithSkipPrefixes("/healthz", "/callback/"),
+))
+```
+
+---
+
+## SignVerify（HMAC 签名校验）
+
+基于 HMAC-SHA256 的请求签名校验。签名公式：`hex(HMAC-SHA256(secret, timestamp + userID + body))`。
+
+```go
+import "github.com/rushteam/beauty/pkg/middleware/signverify"
+
+getSecret := func(appID string) ([]byte, bool) {
+    return secrets[appID]  // 根据 X-App-Id 查找 secret
+}
+
+webserver.WithMiddleware(signverify.HTTPMiddleware(getSecret))
+
+// 签名校验 + 自动提取用户身份到 auth.User context
+webserver.WithMiddleware(signverify.HTTPMiddleware(getSecret,
+    signverify.WithExtractUser(),                     // 将 X-User-Id 写入 auth.User
+    signverify.WithMaxAge(3*time.Minute),             // 默认 5 分钟
+    signverify.WithSkipPrefixes("/healthz", "/callback/"),
+))
+
+// 自定义所有 header 名称
+signverify.WithAppIDHeader("App-Key")       // 默认 X-App-Id
+signverify.WithSignHeader("Signature")      // 默认 X-Sign
+signverify.WithTimestampHeader("Req-Time")  // 默认 X-Timestamp
+signverify.WithUserIDHeader("Caller-Id")    // 默认 X-User-Id
+```
+
+客户端计算签名（`Sign` 函数已公开导出）：
+
+```go
+sig := signverify.Sign(secret, timestamp, userID, bodyBytes)
+```
+
+---
+
+## TrustedHeaderAuthenticator（信任网关认证）
+
+适用于 API 网关已完成认证、后端服务信任 header 的场景。配合 `signverify` 中间件可防止 header 伪造。
+
+```go
+import "github.com/rushteam/beauty/pkg/middleware/auth"
+
+// 信任 X-User-Id header 作为用户身份
+authMW := auth.NewAuthMiddleware(auth.Config{
+    TokenExtractor: auth.NewHeaderTokenExtractor("X-User-Id", ""),
+    Authenticator:  auth.NewTrustedHeaderAuthenticator(),
+    SkipPaths:      []string{"/healthz", "/readyz"},
+})
+webserver.WithMiddleware(auth.HTTPMiddleware(authMW))
+
+// 下游读取用户
+user, ok := auth.GetUserFromContext(ctx)
+```
+
+---
+
 ## 中间件推荐顺序
 
 ```go
-webserver.WithMiddleware(recovery.HTTPMiddleware()),   // 1. 最外层兜底 panic
-webserver.WithMiddleware(cors.Default().Middleware()), // 2. CORS（OPTIONS 提前返回）
-webserver.WithMiddleware(health.Middleware()),         // 3. 健康检查（短路，不走后续）
-webserver.WithMiddleware(compress.Middleware(1024)),   // 4. 压缩（最内层，压缩最终响应）
+webserver.WithMiddleware(recovery.HTTPMiddleware()),            // 1. 兜底 panic
+webserver.WithMiddleware(cors.Default().Middleware()),          // 2. CORS
+webserver.WithMiddleware(health.Middleware()),                  // 3. 健康检查短路
+webserver.WithMiddleware(antireplay.HTTPMiddleware(store)),     // 4. 防重放
+webserver.WithMiddleware(signverify.HTTPMiddleware(getSecret,   // 5. 签名校验
+    signverify.WithExtractUser(),
+)),
+webserver.WithMiddleware(compress.Middleware(1024)),            // 6. 压缩
 ```

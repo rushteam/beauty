@@ -14,7 +14,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
@@ -74,7 +73,10 @@ func (r *Registry) Register(_ context.Context, _ discover.Service) (context.Canc
 // 因此按 "." 切分不会误伤。
 func normalizeServiceName(name string) string {
 	if i := strings.IndexByte(name, '.'); i >= 0 {
-		return name[:i]
+		name = name[:i]
+	}
+	if name == "*" {
+		return ""
 	}
 	return name
 }
@@ -82,10 +84,8 @@ func normalizeServiceName(name string) string {
 // Find 查找服务实例
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
 	serviceName = normalizeServiceName(serviceName)
-	services, err := r.client.CoreV1().Services(r.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: r.buildLabelSelector(serviceName),
-		FieldSelector: r.buildFieldSelector(),
-	})
+
+	services, err := r.client.CoreV1().Services(r.config.Namespace).List(ctx, r.serviceListOptions(serviceName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
@@ -146,11 +146,9 @@ func (r *Registry) watchServices(ctx context.Context, serviceName string, notify
 		if ctx.Err() != nil {
 			return
 		}
-		watcher, err := r.client.CoreV1().Services(r.config.Namespace).Watch(ctx, metav1.ListOptions{
-			LabelSelector:  r.buildLabelSelector(serviceName),
-			FieldSelector:  r.buildFieldSelector(),
-			TimeoutSeconds: &timeout,
-		})
+		opts := r.serviceListOptions(serviceName)
+		opts.TimeoutSeconds = &timeout
+		watcher, err := r.client.CoreV1().Services(r.config.Namespace).Watch(ctx, opts)
 		if err != nil {
 			logger.Error("failed to watch services", slog.Any("err", err))
 			if !sleepOrDone(ctx, time.Second*5) {
@@ -185,7 +183,7 @@ func (r *Registry) watchEndpointSlices(ctx context.Context, serviceName string, 
 			return
 		}
 		watcher, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).Watch(ctx, metav1.ListOptions{
-			LabelSelector:  r.buildLabelSelector(serviceName),
+			LabelSelector:  r.endpointSliceSelector(serviceName),
 			TimeoutSeconds: &timeout,
 		})
 		if err != nil {
@@ -318,38 +316,38 @@ func (r *Registry) endpointSliceToServiceInfos(svc *corev1.Service, eps *discove
 	return serviceInfos
 }
 
-// buildLabelSelector 构建标签选择器
-func (r *Registry) buildLabelSelector(serviceName string) string {
-	selector := r.config.LabelSelector
+// serviceListOptions 构建 Service 资源的 List/Watch 选项。
+// 按 metadata.name 精确匹配服务资源名，而非依赖 app= label 约定。
+func (r *Registry) serviceListOptions(serviceName string) metav1.ListOptions {
+	opts := metav1.ListOptions{
+		LabelSelector: r.config.LabelSelector,
+	}
 
-	// 如果指定了服务名称，添加到选择器中
+	var fs []string
+	if serviceName != "" {
+		fs = append(fs, "metadata.name="+serviceName)
+	}
+	if r.config.ServiceType != "" && r.config.ServiceType != "All" {
+		fs = append(fs, "spec.type="+r.config.ServiceType)
+	}
+	if len(fs) > 0 {
+		opts.FieldSelector = strings.Join(fs, ",")
+	}
+
+	return opts
+}
+
+// endpointSliceSelector 构建 EndpointSlice 的 label selector。
+// K8s 自动为 EndpointSlice 打 kubernetes.io/service-name 标签，直接用它匹配。
+func (r *Registry) endpointSliceSelector(serviceName string) string {
+	selector := r.config.LabelSelector
 	if serviceName != "" {
 		if selector != "" {
 			selector += ","
 		}
-		// 可以根据需要调整标签选择逻辑
-		selector += "app=" + serviceName
+		selector += "kubernetes.io/service-name=" + serviceName
 	}
-
 	return selector
-}
-
-// buildFieldSelector 构建字段选择器
-func (r *Registry) buildFieldSelector() string {
-	var selectors []string
-
-	// 根据服务类型过滤
-	if r.config.ServiceType != "" && r.config.ServiceType != "All" {
-		selectors = append(selectors, "spec.type="+r.config.ServiceType)
-	}
-
-	if len(selectors) == 0 {
-		return ""
-	}
-
-	return fields.AndSelectors(
-		fields.ParseSelectorOrDie(selectors[0]),
-	).String()
 }
 
 // Close 关闭所有监听器

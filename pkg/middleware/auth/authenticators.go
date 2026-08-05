@@ -164,6 +164,31 @@ func (a *CallbackAuthenticator) Authenticate(ctx context.Context, token string) 
 	return a.AuthFunc(ctx, token)
 }
 
+// TrustedHeaderAuthenticator 信任上游（API 网关 / SignVerify 中间件）已验证的
+// header 值，直接将其作为用户 ID 写入 auth.User。适用于"网关已认证"场景，
+// 通常配合 signverify 中间件使用以防止 header 伪造。
+//
+// 用法：
+//
+//	auth.NewAuthMiddleware(auth.Config{
+//	    TokenExtractor: auth.NewHeaderTokenExtractor("X-User-Id", ""),
+//	    Authenticator:  auth.NewTrustedHeaderAuthenticator(),
+//	})
+type TrustedHeaderAuthenticator struct{}
+
+// NewTrustedHeaderAuthenticator 创建信任 header 认证器。
+func NewTrustedHeaderAuthenticator() *TrustedHeaderAuthenticator {
+	return &TrustedHeaderAuthenticator{}
+}
+
+// Authenticate 将 token（即 header 值）直接作为用户 ID。
+func (a *TrustedHeaderAuthenticator) Authenticate(_ context.Context, token string) (User, error) {
+	if token == "" {
+		return nil, ErrUnauthorized
+	}
+	return NewUser(token, "", nil), nil
+}
+
 // ChainAuthenticator 链式认证器（按顺序尝试多个认证器）
 type ChainAuthenticator struct {
 	Authenticators []Authenticator

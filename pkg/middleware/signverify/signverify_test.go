@@ -156,6 +156,61 @@ func TestCustomHeaders(t *testing.T) {
 	}
 }
 
+func TestSecretDeriver(t *testing.T) {
+	// 模拟按请求时间戳派生 key：master + timestamp 前 8 位
+	master := []byte("master-key")
+	deriver := func(appID string, r *http.Request) ([]byte, bool) {
+		if appID != "app1" {
+			return nil, false
+		}
+		ts := r.Header.Get("X-Timestamp")
+		if len(ts) < 8 {
+			return nil, false
+		}
+		derived := append(master, []byte(ts[:8])...)
+		return derived, true
+	}
+
+	h := HTTPMiddleware(nil, WithSecretDeriver(deriver))(http.HandlerFunc(ok200))
+
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	derivedKey := append(master, []byte(ts[:8])...)
+	body := `{"data":1}`
+	sig := Sign(derivedKey, ts, "u1", []byte(body))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pay", strings.NewReader(body))
+	req.Header.Set("X-App-Id", "app1")
+	req.Header.Set("X-Timestamp", ts)
+	req.Header.Set("X-Sign", sig)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deriver: got %d, want 200", rec.Code)
+	}
+}
+
+func TestSecretDeriverUnknownApp(t *testing.T) {
+	deriver := func(appID string, r *http.Request) ([]byte, bool) {
+		return nil, false
+	}
+
+	h := HTTPMiddleware(nil, WithSecretDeriver(deriver))(http.HandlerFunc(ok200))
+
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/api/pay", nil)
+	req.Header.Set("X-App-Id", "unknown")
+	req.Header.Set("X-Timestamp", ts)
+	req.Header.Set("X-Sign", "anything")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deriver unknown: got %d, want 401", rec.Code)
+	}
+}
+
 func TestSignFunction(t *testing.T) {
 	s1 := Sign(testSecret, "1700000000", "user1", []byte("body"))
 	s2 := Sign(testSecret, "1700000000", "user1", []byte("body"))

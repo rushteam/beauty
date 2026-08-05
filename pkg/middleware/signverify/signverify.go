@@ -34,8 +34,12 @@ import (
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 )
 
-// SecretFunc 根据 appID 查找 secret。返回 false 表示未知 appID。
+// SecretFunc 根据 appID 查找静态 secret。返回 false 表示未知 appID。
 type SecretFunc func(appID string) (secret []byte, ok bool)
+
+// SecretDeriver 根据 appID 和请求上下文动态派生 secret。
+// 适用于基于请求内容（时间戳、region 等）派生密钥的场景，如 AWS SigV4 风格。
+type SecretDeriver func(appID string, r *http.Request) (secret []byte, ok bool)
 
 type options struct {
 	appIDHeader     string
@@ -45,6 +49,7 @@ type options struct {
 	maxAge          time.Duration
 	skipPrefixes    []string
 	extractUser     bool
+	deriver         SecretDeriver
 	onReject        func(w http.ResponseWriter, reason string)
 }
 
@@ -98,6 +103,22 @@ func WithExtractUser() Option {
 	return func(o *options) { o.extractUser = true }
 }
 
+// WithSecretDeriver 使用动态 key 派生替代静态 SecretFunc。
+// 设置后 HTTPMiddleware 的 getSecret 参数将被忽略。
+//
+// 典型场景：
+//
+//	// 按小时轮转派生
+//	signverify.WithSecretDeriver(func(appID string, r *http.Request) ([]byte, bool) {
+//	    master, ok := secrets[appID]
+//	    if !ok { return nil, false }
+//	    hour := r.Header.Get("X-Timestamp")[:10]
+//	    return hkdf(master, hour), true
+//	})
+func WithSecretDeriver(fn SecretDeriver) Option {
+	return func(o *options) { o.deriver = fn }
+}
+
 // WithRejectHandler 自定义拒绝响应。reason 可能为：
 // "missing_headers"、"invalid_timestamp"、"timestamp_expired"、"unknown_app"、"signature_mismatch"。
 func WithRejectHandler(fn func(w http.ResponseWriter, reason string)) Option {
@@ -105,12 +126,20 @@ func WithRejectHandler(fn func(w http.ResponseWriter, reason string)) Option {
 }
 
 // HTTPMiddleware 返回 HMAC 签名校验 HTTP 中间件。
+// 若配置了 WithSecretDeriver，则 getSecret 可传 nil。
 func HTTPMiddleware(getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
 	o := defaults()
 	for _, fn := range opts {
 		fn(o)
 	}
 	maxAgeSec := int64(o.maxAge.Seconds())
+
+	resolveSecret := func(appID string, r *http.Request) ([]byte, bool) {
+		if o.deriver != nil {
+			return o.deriver(appID, r)
+		}
+		return getSecret(appID)
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +166,7 @@ func HTTPMiddleware(getSecret SecretFunc, opts ...Option) func(http.Handler) htt
 				return
 			}
 
-			secret, ok := getSecret(appID)
+			secret, ok := resolveSecret(appID, r)
 			if !ok {
 				o.onReject(w, "unknown_app")
 				return

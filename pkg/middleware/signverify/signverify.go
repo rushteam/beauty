@@ -11,13 +11,20 @@
 // 可选功能：WithExtractUser() 在签名校验通过后自动将 X-User-Id 写入
 // auth.User context，下游通过 auth.GetUserFromContext 读取。
 //
-// 典型用法：
+// 两种预设模式：
 //
-//	getSecret := func(appID string) ([]byte, bool) { return secrets[appID] }
-//	mux.Use(signverify.HTTPMiddleware(getSecret,
-//	    signverify.WithExtractUser(),
-//	    signverify.WithSkipPrefixes("/healthz", "/callback/"),
+//	// 无网关（直连）— 完整安全链：防重放 + 签名校验 + 身份提取
+//	mux.Use(signverify.FullChain(store, getSecret,
+//	    signverify.WithDerivedKey(300),
+//	    signverify.WithSkipPrefixes("/healthz"),
 //	))
+//
+//	// 有网关 — 仅验网关签名 + 提取身份
+//	mux.Use(signverify.GatewayMode(getSecret,
+//	    signverify.WithSkipPrefixes("/healthz"),
+//	))
+//
+// 也可直接使用底层 HTTPMiddleware 自由组合。
 package signverify
 
 import (
@@ -31,6 +38,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/kvstore"
+	"github.com/rushteam/beauty/pkg/middleware/antireplay"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 )
 
@@ -284,4 +293,57 @@ func defaultReject(w http.ResponseWriter, reason string) {
 	default:
 		http.Error(w, "signature mismatch", http.StatusUnauthorized)
 	}
+}
+
+// ---- 预设模式 ----
+
+// FullChain 返回无网关（直连）场景的完整安全中间件，内部按顺序串联：
+//
+//  1. AntiReplay — nonce 防重放
+//  2. SignVerify — HMAC 签名校验 + 自动提取用户身份
+//
+// 合成为单个 func(http.Handler) http.Handler，调用方无需关心顺序和组合。
+// opts 同时作用于 AntiReplay 和 SignVerify（WithSkipPrefixes 等共享）。
+//
+// 典型用法（服务直接面向客户端，无 API 网关）：
+//
+//	store := redis.NewStore(redisClient)
+//	getSecret := func(appID string) ([]byte, bool) { return secrets[appID] }
+//	mux.Use(signverify.FullChain(store, getSecret,
+//	    signverify.WithDerivedKey(300),
+//	    signverify.WithSkipPrefixes("/healthz", "/callback/"),
+//	))
+func FullChain(store kvstore.Store, getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
+	o := defaults()
+	for _, fn := range opts {
+		fn(o)
+	}
+
+	var replayOpts []antireplay.Option
+	if len(o.skipPrefixes) > 0 {
+		replayOpts = append(replayOpts, antireplay.WithSkipPrefixes(o.skipPrefixes...))
+	}
+	antiReplayMW := antireplay.HTTPMiddleware(store, replayOpts...)
+
+	signOpts := append(opts, WithExtractUser())
+	signMW := HTTPMiddleware(getSecret, signOpts...)
+
+	return func(next http.Handler) http.Handler {
+		return antiReplayMW(signMW(next))
+	}
+}
+
+// GatewayMode 返回有网关场景的中间件：仅校验网关签名 + 提取用户身份。
+//
+// 适用于：API 网关已完成客户端认证（JWT 等），用 HMAC 签名保护
+// 转发给后端服务的请求，后端只需验证网关签名即可信任 X-User-Id。
+//
+// 典型用法（服务位于 API 网关之后）：
+//
+//	getSecret := func(appID string) ([]byte, bool) { return gatewaySecrets[appID] }
+//	mux.Use(signverify.GatewayMode(getSecret,
+//	    signverify.WithSkipPrefixes("/healthz"),
+//	))
+func GatewayMode(getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
+	return HTTPMiddleware(getSecret, append(opts, WithExtractUser())...)
 }

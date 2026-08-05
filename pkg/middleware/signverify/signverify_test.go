@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/kvstore"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 )
 
@@ -291,6 +292,77 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 	}
 	if hmac.Equal(dk1, dk3) {
 		t.Fatal("different window should produce different derived key")
+	}
+}
+
+func TestFullChain(t *testing.T) {
+	store := kvstore.NewMemory()
+	defer store.Stop()
+
+	var gotUser auth.User
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.GetUserFromContext(r.Context())
+		if ok {
+			gotUser = u
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	h := FullChain(store, getSecret, WithSkipPrefixes("/healthz"))(handler)
+
+	// 正常请求
+	req := signedRequest(http.MethodPost, "/api/pay", `{"a":1}`, "user-7")
+	req.Header.Set("X-Nonce", "full-chain-nonce-1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("full chain: got %d, want 200", rec.Code)
+	}
+	if gotUser == nil || gotUser.ID() != "user-7" {
+		t.Fatalf("user not extracted, got %v", gotUser)
+	}
+
+	// 重放同一 nonce → 403
+	req2 := signedRequest(http.MethodPost, "/api/pay", `{"a":1}`, "user-7")
+	req2.Header.Set("X-Nonce", "full-chain-nonce-1")
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusForbidden {
+		t.Fatalf("replay: got %d, want 403", rec2.Code)
+	}
+
+	// skip prefix
+	req3 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec3 := httptest.NewRecorder()
+	h.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("skip: got %d, want 200", rec3.Code)
+	}
+}
+
+func TestGatewayMode(t *testing.T) {
+	var gotUser auth.User
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.GetUserFromContext(r.Context())
+		if ok {
+			gotUser = u
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	h := GatewayMode(getSecret)(handler)
+
+	req := signedRequest(http.MethodPost, "/api/order", `{"id":1}`, "user-88")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gateway mode: got %d, want 200", rec.Code)
+	}
+	if gotUser == nil || gotUser.ID() != "user-88" {
+		t.Fatalf("user not extracted, got %v", gotUser)
 	}
 }
 

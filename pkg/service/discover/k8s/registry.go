@@ -112,23 +112,45 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 	return serviceInfos, nil
 }
 
-// Watch 监听服务变化
+// Watch 监听服务变化。阻塞直到 ctx 取消或 Close() 被调用，
+// 与 etcd/consul 等后端保持相同的阻塞契约。
 func (r *Registry) Watch(ctx context.Context, serviceName string, notify discover.Notify) error {
 	serviceName = normalizeServiceName(serviceName)
 
-	r.watcherMu.Lock()
-	defer r.watcherMu.Unlock()
-
-	// 如果已经有监听器在运行，先取消它
-	if cancel, exists := r.watchers[serviceName]; exists {
-		cancel()
+	// 初始拉取当前端点，确保 resolver 启动后立即有可用地址
+	if services, err := r.Find(ctx, serviceName); err != nil {
+		logger.Warn("k8s watch: initial find failed",
+			slog.String("service", serviceName), slog.Any("err", err))
+	} else {
+		notify(services)
 	}
 
 	watchCtx, cancel := context.WithCancel(ctx)
-	r.watchers[serviceName] = cancel
 
-	go r.watchServices(watchCtx, serviceName, notify)
-	go r.watchEndpointSlices(watchCtx, serviceName, notify)
+	r.watcherMu.Lock()
+	if oldCancel, exists := r.watchers[serviceName]; exists {
+		oldCancel()
+	}
+	r.watchers[serviceName] = cancel
+	r.watcherMu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		r.watchServices(watchCtx, serviceName, notify)
+	}()
+	go func() {
+		defer wg.Done()
+		r.watchEndpointSlices(watchCtx, serviceName, notify)
+	}()
+
+	<-watchCtx.Done()
+	wg.Wait()
+
+	r.watcherMu.Lock()
+	delete(r.watchers, serviceName)
+	r.watcherMu.Unlock()
 
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/schema"
+	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
 type Config struct {
@@ -16,25 +17,18 @@ type Config struct {
 	Username  string   `mapstructure:"username"`
 	Password  string   `mapstructure:"password"`
 	AppName   string   `mapstructure:"app_name" schema:"app_name"`
+
+	// Codec 自定义过滤策略，用于兼容其他框架的服务实例。
+	// 为 nil 时使用 beauty 原生格式（仅接受 kind="grpc"）。
+	Codec discover.Codec `mapstructure:"-" schema:"-"`
 }
 
-// func (c *Config) String() string {
-// 	var user *url.Userinfo
-// 	if len(c.Username) > 0 {
-// 		user = url.User(c.Username)
-// 		if len(c.Password) > 0 {
-// 			user = url.UserPassword(c.Username, c.Password)
-// 		}
-// 	}
-// 	u := url.URL{
-// 		Scheme:   "nacos",
-// 		User:     user,
-// 		Host:     strings.Join(c.Addr, ","),
-// 		Path:     c.Namespace,
-// 		RawQuery: fmt.Sprintf("app_name=%s&weight=%v", c.AppName, c.Weight),
-// 	}
-// 	return u.String()
-// }
+func (c *Config) effectiveCodec() discover.Codec {
+	if c != nil && c.Codec != nil {
+		return c.Codec
+	}
+	return discover.NewBeautyCodec()
+}
 
 func NewFromURL(u url.URL) (*Registry, error) {
 	c := &Config{}

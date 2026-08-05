@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"fmt"
 	"net/url"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
@@ -18,5 +19,9 @@ func createRegistryFromURL(targetURL *url.URL) (discover.RegistryDiscovery, erro
 	if err != nil {
 		return nil, err
 	}
-	return NewRegistry(config), nil
+	reg := NewRegistry(config)
+	if reg == nil {
+		return nil, fmt.Errorf("k8s: failed to create registry for %s", targetURL.Redacted())
+	}
+	return reg, nil
 }

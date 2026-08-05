@@ -4,6 +4,7 @@ import (
 	"net/url"
 
 	"github.com/gorilla/schema"
+	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
 type Config struct {
@@ -12,6 +13,17 @@ type Config struct {
 	Namespace  string `mapstructure:"namespace" schema:"namespace"`
 	Partition  string `mapstructure:"partition" schema:"partition"`
 	Datacenter string `mapstructure:"datacenter" schema:"datacenter"`
+
+	// Codec 自定义过滤策略，用于兼容其他框架的服务实例。
+	// 为 nil 时使用 beauty 原生格式（仅接受 kind="grpc"）。
+	Codec discover.Codec `mapstructure:"-" schema:"-"`
+}
+
+func (c *Config) effectiveCodec() discover.Codec {
+	if c != nil && c.Codec != nil {
+		return c.Codec
+	}
+	return discover.NewBeautyCodec()
 }
 
 func NewFromURL(u url.URL) (*Registry, error) {

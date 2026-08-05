@@ -22,6 +22,7 @@ var _ discover.RegistryDiscovery = (*Registry)(nil)
 
 type Registry struct {
 	c      *Config
+	codec  discover.Codec
 	client *api.Client
 }
 
@@ -38,7 +39,7 @@ func NewRegistry(c *Config) *Registry {
 		logger.Error("consul: failed to create client", slog.Any("err", err))
 		return nil
 	}
-	return &Registry{c: c, client: client}
+	return &Registry{c: c, codec: c.effectiveCodec(), client: client}
 }
 
 func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
@@ -123,7 +124,7 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 	if err != nil {
 		return nil, fmt.Errorf("consul find %s: %w", serviceName, err)
 	}
-	return buildServiceInfos(entries), nil
+	return r.filterEntries(entries), nil
 }
 
 func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
@@ -158,12 +159,12 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 		}
 		if meta.LastIndex > lastIndex {
 			lastIndex = meta.LastIndex
-			update(buildServiceInfos(entries))
+			update(r.filterEntries(entries))
 		}
 	}
 }
 
-func buildServiceInfos(entries []*api.ServiceEntry) []discover.ServiceInfo {
+func (r *Registry) filterEntries(entries []*api.ServiceEntry) []discover.ServiceInfo {
 	var ss []discover.ServiceInfo
 	for _, e := range entries {
 		if e.Checks.AggregatedStatus() != api.HealthPassing {
@@ -173,19 +174,20 @@ func buildServiceInfos(entries []*api.ServiceEntry) []discover.ServiceInfo {
 		if meta == nil {
 			meta = make(map[string]string)
 		}
-		if meta["kind"] != "grpc" {
-			continue
-		}
-		addr := net.JoinHostPort(e.Service.Address, strconv.Itoa(e.Service.Port))
+		svcAddr := net.JoinHostPort(e.Service.Address, strconv.Itoa(e.Service.Port))
 		if e.Service.Address == "" {
-			addr = net.JoinHostPort(e.Node.Address, strconv.Itoa(e.Service.Port))
+			svcAddr = net.JoinHostPort(e.Node.Address, strconv.Itoa(e.Service.Port))
 		}
-		ss = append(ss, discover.ServiceInfo{
+		info := discover.ServiceInfo{
 			ID:       e.Service.ID,
 			Name:     e.Service.Service,
-			Addr:     addr,
+			Addr:     svcAddr,
 			Metadata: meta,
-		})
+		}
+		if !r.codec.Accept(info) {
+			continue
+		}
+		ss = append(ss, info)
 	}
 	sort.Slice(ss, func(i, j int) bool {
 		if ss[i].Name == ss[j].Name {

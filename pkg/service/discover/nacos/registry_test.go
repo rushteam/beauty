@@ -9,7 +9,11 @@ import (
 	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
-func TestBuildService_FilterAndSort(t *testing.T) {
+func TestFilterInstances_BeautyFormat(t *testing.T) {
+	reg := &Registry{
+		c:     &Config{},
+		codec: discover.NewBeautyCodec(),
+	}
 	instances := []model.Instance{
 		{InstanceId: "2", ServiceName: "svc", Ip: "127.0.0.1", Port: 8080, Enable: true, Healthy: true, Weight: 1, Metadata: map[string]string{"kind": "grpc"}},
 		{InstanceId: "1", ServiceName: "svc", Ip: "127.0.0.1", Port: 8081, Enable: true, Healthy: true, Weight: 1, Metadata: map[string]string{"kind": "grpc"}},
@@ -18,7 +22,7 @@ func TestBuildService_FilterAndSort(t *testing.T) {
 		{InstanceId: "5", ServiceName: "svc", Ip: "127.0.0.1", Port: 8084, Enable: true, Healthy: true, Weight: 1, Metadata: map[string]string{"kind": "http"}},
 	}
 
-	got := buildService(instances)
+	got := reg.filterInstances(instances)
 	want := []discover.ServiceInfo{
 		{ID: "1", Name: "svc", Addr: fmt.Sprintf("%s:%d", "127.0.0.1", 8081), Metadata: map[string]string{"kind": "grpc"}},
 		{ID: "2", Name: "svc", Addr: fmt.Sprintf("%s:%d", "127.0.0.1", 8080), Metadata: map[string]string{"kind": "grpc"}},

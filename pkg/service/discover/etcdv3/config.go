@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/schema"
+	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
 type Config struct {
@@ -14,6 +15,11 @@ type Config struct {
 	Prefix    string   `mapstructure:"prefix"`
 	TTL       int64    `mapstructure:"ttl" schema:"ttl"`
 	DialMS    int      `mapstructure:"dial_ms" schema:"dial_ms"`
+
+	// Codec 自定义 KV 编解码策略，用于兼容其他框架的注册格式。
+	// 为 nil 时使用 beauty 原生格式。
+	// 三方格式实现见 contrib/codec/gozero、contrib/codec/kratos 等。
+	Codec discover.KVCodec `mapstructure:"-" schema:"-"`
 }
 
 func (c *Config) String() string {
@@ -33,6 +39,17 @@ func (c *Config) String() string {
 	return u.String()
 }
 
+func (c *Config) effectiveKVCodec() discover.KVCodec {
+	if c != nil && c.Codec != nil {
+		return c.Codec
+	}
+	prefix := "beauty"
+	if c != nil && c.Prefix != "" {
+		prefix = c.Prefix
+	}
+	return discover.NewBeautyKVCodec(prefix)
+}
+
 func NewFromURL(u url.URL) (*Registry, error) {
 	c := &Config{}
 	c.Endpoints = strings.Split(u.Host, ",")
@@ -40,7 +57,6 @@ func NewFromURL(u url.URL) (*Registry, error) {
 	if c.Prefix == "" {
 		c.Prefix = "beauty"
 	}
-	// defaults
 	c.TTL = 10
 	c.DialMS = 3000
 	if u.User != nil {

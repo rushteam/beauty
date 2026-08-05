@@ -21,9 +21,6 @@ type ServiceInfo struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// Version   string            `json:"version"`
-// Weight    int               `json:"weight"`
-
 func (s *ServiceInfo) Unmarshal(b []byte) error {
 	buf := bytes.NewBuffer(b)
 	decoder := json.NewDecoder(buf)

@@ -45,6 +45,7 @@ func NewRegistry(c *Config) *Registry {
 		client: client,
 		prefix: c.Prefix,
 		config: c,
+		codec:  c.effectiveKVCodec(),
 	}
 	instance[key] = r
 	return r
@@ -54,29 +55,32 @@ type Registry struct {
 	config *Config
 	client *clientv3.Client
 	prefix string
+	codec  discover.KVCodec
 	discover.Registry
 	discover.Discovery
 }
 
-func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
-	if info.Kind() != "grpc" {
-		return func() {}, fmt.Errorf("etcdRegistry only supports grpc services, got kind=%q", info.Kind())
+func (r *Registry) effectiveCodec() discover.KVCodec {
+	if r.codec != nil {
+		return r.codec
 	}
-	value := discover.ServiceInfo{
-		ID:       info.ID(),
-		Kind:     info.Kind(),
-		Name:     info.Name(),
-		Addr:     info.Addr(),
-		Metadata: info.Metadata(),
-	}
-	key := buildServiceKey(r.prefix, info.Name(), info.ID())
+	return discover.NewBeautyKVCodec("beauty")
+}
 
-	valueStr, err := value.Marshal()
+func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
+	codec := r.effectiveCodec()
+
+	candidate := discover.ServiceInfo{Kind: info.Kind(), Metadata: info.Metadata()}
+	if !codec.Accept(candidate) {
+		return func() {}, fmt.Errorf("etcdRegistry: service kind %q not accepted by current codec", info.Kind())
+	}
+
+	key := codec.BuildKey(info.Name(), info.ID())
+	valueStr, err := codec.MarshalValue(info)
 	if err != nil {
 		return func() {}, fmt.Errorf("failed to marshal service info: %w", err)
 	}
 
-	// 同步首次注册（带重试）
 	leaseID, err := r.registerWithRetry(ctx, key, valueStr)
 	if err != nil {
 		return func() {}, err
@@ -186,26 +190,8 @@ outer:
 	}
 }
 
-func buildServiceKey(prefix, name, id string) string {
-	return fmt.Sprintf("/%s/%s/%s", strings.TrimPrefix(prefix, "/"), name, id)
-}
-
-func buildServicePath(prefix, name string) string {
-	return fmt.Sprintf("/%s/%s", strings.TrimPrefix(prefix, "/"), name)
-}
-
 func getInstanceFromKey(key, prefix string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(key, prefix), "/")
-}
-
-func isGrpcService(v discover.ServiceInfo) bool {
-	if v.Kind == "grpc" {
-		return true
-	}
-	if v.Metadata != nil && v.Metadata["kind"] == "grpc" {
-		return true
-	}
-	return false
 }
 
 func buildSortedServices(endpoints map[string]discover.ServiceInfo) []discover.ServiceInfo {
@@ -223,13 +209,14 @@ func buildSortedServices(endpoints map[string]discover.ServiceInfo) []discover.S
 }
 
 func (r *Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, path string, key string, val []byte) []discover.ServiceInfo {
-	v := discover.ServiceInfo{}
-	if err := v.Unmarshal(val); err != nil {
+	codec := r.effectiveCodec()
+	v, err := codec.UnmarshalValue(val, path)
+	if err != nil {
 		logger.Error("etcdRegistry.applyPutEvent unmarshal error", slog.String("key", key), slog.Any("err", err))
 		return buildSortedServices(endpoints)
 	}
 	v.ID = getInstanceFromKey(key, path)
-	if isGrpcService(v) {
+	if codec.Accept(v) {
 		endpoints[v.ID] = v
 	} else {
 		delete(endpoints, v.ID)
@@ -244,27 +231,26 @@ func (r *Registry) applyDeleteEvent(endpoints map[string]discover.ServiceInfo, p
 }
 
 func (r *Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo, error) {
+	codec := r.effectiveCodec()
 	var services []discover.ServiceInfo
-	path := buildServicePath(r.prefix, name)
+	path := codec.BuildWatchPrefix(name)
 	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
 	if err != nil {
 		return services, err
 	}
 	for _, kv := range resp.Kvs {
-		// /beauty/helloworld.rpc/6bf14822-755d-4571-a7f5-bfe336783742
 		instanceID := getInstanceFromKey(string(kv.Key), path)
-		v := discover.ServiceInfo{}
-		if err := v.Unmarshal(kv.Value); err != nil {
+		v, err := codec.UnmarshalValue(kv.Value, name)
+		if err != nil {
 			logger.Error("etcdRegistry.Find unmarshal error", slog.String("key", string(kv.Key)), slog.Any("err", err))
 			continue
 		}
 		v.ID = instanceID
-		if !isGrpcService(v) {
+		if !codec.Accept(v) {
 			continue
 		}
 		services = append(services, v)
 	}
-	// 稳定排序
 	sort.Slice(services, func(i, j int) bool {
 		if services[i].Name == services[j].Name {
 			return services[i].ID < services[j].ID
@@ -275,7 +261,8 @@ func (r *Registry) Find(ctx context.Context, name string) ([]discover.ServiceInf
 }
 
 func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
-	path := buildServicePath(r.prefix, serviceName)
+	codec := r.effectiveCodec()
+	path := codec.BuildWatchPrefix(serviceName)
 	backoff := 200 * time.Millisecond
 
 	// 用带缓冲 channel 将 notify 回调与事件循环解耦，避免慢回调阻塞 watcher。
@@ -342,19 +329,20 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 
 // watchSnapshot 拉取初始快照并通知，返回当前 endpoints 和 revision。
 func (r *Registry) watchSnapshot(ctx context.Context, path string, update discover.Notify) (map[string]discover.ServiceInfo, int64, error) {
+	codec := r.effectiveCodec()
 	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get service: %w", err)
 	}
 	endpoints := make(map[string]discover.ServiceInfo)
 	for _, kv := range resp.Kvs {
-		v := discover.ServiceInfo{}
-		if err := v.Unmarshal(kv.Value); err != nil {
+		v, err := codec.UnmarshalValue(kv.Value, path)
+		if err != nil {
 			logger.Error("etcdRegistry.Watch unmarshal error", slog.String("key", string(kv.Key)), slog.Any("err", err))
 			continue
 		}
 		v.ID = getInstanceFromKey(string(kv.Key), path)
-		if !isGrpcService(v) {
+		if !codec.Accept(v) {
 			continue
 		}
 		endpoints[v.ID] = v

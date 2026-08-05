@@ -27,12 +27,14 @@ var _ discover.RegistryDiscovery = (*Registry)(nil)
 func NewRegistry(c *Config) *Registry {
 	return &Registry{
 		c:       c,
+		codec:   c.effectiveCodec(),
 		clients: make(map[string]naming_client.INamingClient),
 	}
 }
 
 type Registry struct {
 	c       *Config
+	codec   discover.Codec
 	mu      sync.Mutex
 	clients map[string]naming_client.INamingClient
 }
@@ -130,7 +132,7 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 	if err != nil {
 		return nil, fmt.Errorf("nacos SelectInstances failed for service %s: %w", serviceName, err)
 	}
-	return buildService(instances), nil
+	return r.filterInstances(instances), nil
 }
 
 func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
@@ -147,7 +149,7 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 	}); err != nil {
 		logger.Warn("nacos SelectInstances failed", slog.String("service", serviceName), slog.Any("err", err))
 	} else if len(services) > 0 {
-		update(buildService(services))
+		update(r.filterInstances(services))
 	}
 
 	// 订阅回调，用于 Unsubscribe 时匹配
@@ -157,7 +159,7 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 			return
 		}
 		logger.Info("nacos service update", slog.Any("services", services))
-		update(buildService(services))
+		update(r.filterInstances(services))
 	}
 
 	go func() {
@@ -179,7 +181,7 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 	})
 }
 
-func buildService(services []model.Instance) []discover.ServiceInfo {
+func (r *Registry) filterInstances(services []model.Instance) []discover.ServiceInfo {
 	var ss []discover.ServiceInfo
 	for _, v := range services {
 		if !v.Healthy {
@@ -197,19 +199,18 @@ func buildService(services []model.Instance) []discover.ServiceInfo {
 		if v.Metadata == nil {
 			v.Metadata = make(map[string]string)
 		}
-		if v.Metadata["kind"] != "grpc" {
-			logger.Warn("service metadata.kind != grpc", slog.Any("v", v))
-			continue
-		}
-
-		ss = append(ss, discover.ServiceInfo{
+		info := discover.ServiceInfo{
 			ID:       v.InstanceId,
 			Name:     v.ServiceName,
 			Addr:     net.JoinHostPort(v.Ip, fmt.Sprintf("%d", v.Port)),
 			Metadata: v.Metadata,
-		})
+		}
+		if !r.codec.Accept(info) {
+			logger.Warn("service not accepted by codec", slog.Any("v", v))
+			continue
+		}
+		ss = append(ss, info)
 	}
-	// 稳定排序（与 etcd 保持一致）
 	sort.Slice(ss, func(i, j int) bool {
 		if ss[i].Name == ss[j].Name {
 			return ss[i].ID < ss[j].ID

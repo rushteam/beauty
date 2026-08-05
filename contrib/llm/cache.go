@@ -159,7 +159,7 @@ func defaultCacheKey(req Request) string {
 		Messages       []Message       `json:"msg"`
 		Tools          []ToolDef       `json:"t,omitempty"`
 		ToolChoice     string          `json:"tc,omitempty"`
-		ResponseFormat *ResponseFormat  `json:"rf,omitempty"`
+		ResponseFormat *ResponseFormat `json:"rf,omitempty"`
 		Temperature    float64         `json:"temp,omitempty"`
 	}
 	b, _ := json.Marshal(keyData{

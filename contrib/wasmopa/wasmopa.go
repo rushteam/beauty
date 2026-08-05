@@ -200,8 +200,8 @@ func buildEnvModule() []byte {
 	t4 := funcType([]byte{valI32, valI32, valI32, valI32, valI32}, []byte{valI32})
 	t5 := funcType([]byte{valI32, valI32, valI32, valI32, valI32, valI32}, []byte{valI32})
 
-	nop := []byte{0x0b}                         // end (nop for void funcs)
-	retZero := []byte{0x41, 0x00, 0x0b}         // i32.const 0; end
+	nop := []byte{0x0b}                 // end (nop for void funcs)
+	retZero := []byte{0x41, 0x00, 0x0b} // i32.const 0; end
 
 	m := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00} // magic + version
 

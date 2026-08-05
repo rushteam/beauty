@@ -53,25 +53,38 @@ func (c *Config) String() string {
 	return u.String()
 }
 
-// NewFromURL 从 URL 创建配置
+// NewFromURL 从 URL 创建配置。支持两种格式：
+//
+//	旧格式: k8s://namespace[/service_type]?params
+//	新格式: k8s://service.namespace[.svc[.cluster.local]]?params  (K8s DNS 风格)
+//
+// 区分规则：Host 含 "." 时按 service.namespace 解析（K8s 资源名不含 "."），
+// 否则视为纯 namespace（向后兼容旧格式）。
 func NewFromURL(u url.URL) (*Config, error) {
 	c := &Config{}
 
-	// 设置默认值
 	c.Namespace = "default"
 	c.ServiceType = "ClusterIP"
 	c.WatchTimeout = 30
 
-	// 从 URL 解析配置
 	if u.Host != "" {
-		c.Namespace = u.Host
+		if i := strings.IndexByte(u.Host, '.'); i >= 0 {
+			// service.namespace[.svc[.cluster.local]] → 取第二段为 namespace
+			rest := u.Host[i+1:]
+			if j := strings.IndexByte(rest, '.'); j >= 0 {
+				c.Namespace = rest[:j]
+			} else {
+				c.Namespace = rest
+			}
+		} else {
+			c.Namespace = u.Host
+		}
 	}
 
 	if u.Path != "" {
 		c.ServiceType = strings.TrimPrefix(u.Path, "/")
 	}
 
-	// 解析查询参数
 	decoder := schema.NewDecoder()
 	if err := decoder.Decode(c, u.Query()); err != nil {
 		return nil, err

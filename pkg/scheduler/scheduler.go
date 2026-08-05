@@ -28,7 +28,7 @@ type ErrorHandler func(taskName string, err error, panicStack []byte)
 // Scheduler 管理工作池。
 type Scheduler struct {
 	queue     chan *Task
-	queueMu  sync.RWMutex // Submit 持读锁, Stop close(queue) 持写锁
+	queueMu   sync.RWMutex // Submit 持读锁, Stop close(queue) 持写锁
 	workers   int
 	onError   ErrorHandler
 	wg        sync.WaitGroup

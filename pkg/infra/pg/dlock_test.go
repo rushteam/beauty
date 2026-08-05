@@ -153,8 +153,8 @@ type fakeStmt struct {
 	query string
 }
 
-func (s *fakeStmt) Close() error                               { return nil }
-func (s *fakeStmt) NumInput() int                               { return 1 }
+func (s *fakeStmt) Close() error                                    { return nil }
+func (s *fakeStmt) NumInput() int                                   { return 1 }
 func (s *fakeStmt) Exec(args []driver.Value) (driver.Result, error) { return fakeResult{}, nil }
 
 func (s *fakeStmt) Query(args []driver.Value) (driver.Rows, error) {

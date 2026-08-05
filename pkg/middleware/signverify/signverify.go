@@ -13,14 +13,14 @@
 //
 // 两种预设模式：
 //
-//	// 无网关（直连）— 完整安全链：防重放 + 签名校验 + 身份提取
-//	mux.Use(signverify.FullChain(store, getSecret,
+//	// 直连（无网关）— 完整安全链：防重放 + 签名校验 + 身份提取
+//	mux.Use(signverify.DirectMode(store, getSecret,
 //	    signverify.WithDerivedKey(300),
 //	    signverify.WithSkipPrefixes("/healthz"),
 //	))
 //
-//	// 有网关 — 仅验网关签名 + 提取身份
-//	mux.Use(signverify.GatewayMode(getSecret,
+//	// 网关后 — 仅验网关签名 + 提取身份
+//	mux.Use(signverify.BehindGateway(getSecret,
 //	    signverify.WithSkipPrefixes("/healthz"),
 //	))
 //
@@ -297,7 +297,7 @@ func defaultReject(w http.ResponseWriter, reason string) {
 
 // ---- 预设模式 ----
 
-// FullChain 返回无网关（直连）场景的完整安全中间件，内部按顺序串联：
+// DirectMode 返回直连场景（无 API 网关）的完整安全中间件，内部按顺序串联：
 //
 //  1. AntiReplay — nonce 防重放
 //  2. SignVerify — HMAC 签名校验 + 自动提取用户身份
@@ -305,15 +305,15 @@ func defaultReject(w http.ResponseWriter, reason string) {
 // 合成为单个 func(http.Handler) http.Handler，调用方无需关心顺序和组合。
 // opts 同时作用于 AntiReplay 和 SignVerify（WithSkipPrefixes 等共享）。
 //
-// 典型用法（服务直接面向客户端，无 API 网关）：
+// 典型用法（服务直接面向客户端）：
 //
 //	store := redis.NewStore(redisClient)
 //	getSecret := func(appID string) ([]byte, bool) { return secrets[appID] }
-//	mux.Use(signverify.FullChain(store, getSecret,
+//	mux.Use(signverify.DirectMode(store, getSecret,
 //	    signverify.WithDerivedKey(300),
 //	    signverify.WithSkipPrefixes("/healthz", "/callback/"),
 //	))
-func FullChain(store kvstore.Store, getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
+func DirectMode(store kvstore.Store, getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
 	o := defaults()
 	for _, fn := range opts {
 		fn(o)
@@ -333,7 +333,7 @@ func FullChain(store kvstore.Store, getSecret SecretFunc, opts ...Option) func(h
 	}
 }
 
-// GatewayMode 返回有网关场景的中间件：仅校验网关签名 + 提取用户身份。
+// BehindGateway 返回网关后场景的中间件：仅校验网关签名 + 提取用户身份。
 //
 // 适用于：API 网关已完成客户端认证（JWT 等），用 HMAC 签名保护
 // 转发给后端服务的请求，后端只需验证网关签名即可信任 X-User-Id。
@@ -341,9 +341,9 @@ func FullChain(store kvstore.Store, getSecret SecretFunc, opts ...Option) func(h
 // 典型用法（服务位于 API 网关之后）：
 //
 //	getSecret := func(appID string) ([]byte, bool) { return gatewaySecrets[appID] }
-//	mux.Use(signverify.GatewayMode(getSecret,
+//	mux.Use(signverify.BehindGateway(getSecret,
 //	    signverify.WithSkipPrefixes("/healthz"),
 //	))
-func GatewayMode(getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
+func BehindGateway(getSecret SecretFunc, opts ...Option) func(http.Handler) http.Handler {
 	return HTTPMiddleware(getSecret, append(opts, WithExtractUser())...)
 }

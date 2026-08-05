@@ -295,7 +295,7 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 	}
 }
 
-func TestFullChain(t *testing.T) {
+func TestDirectMode(t *testing.T) {
 	store := kvstore.NewMemory()
 	defer store.Stop()
 
@@ -308,7 +308,7 @@ func TestFullChain(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	h := FullChain(store, getSecret, WithSkipPrefixes("/healthz"))(handler)
+	h := DirectMode(store, getSecret, WithSkipPrefixes("/healthz"))(handler)
 
 	// 正常请求
 	req := signedRequest(http.MethodPost, "/api/pay", `{"a":1}`, "user-7")
@@ -342,7 +342,7 @@ func TestFullChain(t *testing.T) {
 	}
 }
 
-func TestGatewayMode(t *testing.T) {
+func TestBehindGateway(t *testing.T) {
 	var gotUser auth.User
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, ok := auth.GetUserFromContext(r.Context())
@@ -352,7 +352,7 @@ func TestGatewayMode(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	h := GatewayMode(getSecret)(handler)
+	h := BehindGateway(getSecret)(handler)
 
 	req := signedRequest(http.MethodPost, "/api/order", `{"id":1}`, "user-88")
 	rec := httptest.NewRecorder()

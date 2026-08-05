@@ -83,8 +83,8 @@ func (s *Semaphore) Acquire(ctx context.Context, cost int64) error {
 	s.mu.Lock()
 	if s.used+cost <= s.cfg.capacity {
 		s.used += cost
-		s.mu.Unlock()
 		s.inFlight.Add(cost)
+		s.mu.Unlock()
 		return nil
 	}
 	s.mu.Unlock()
@@ -109,7 +109,7 @@ func (s *Semaphore) TryAcquire(cost int64) bool {
 	defer s.mu.Unlock()
 	if s.used+cost <= s.cfg.capacity {
 		s.used += cost
-		s.inFlight.Add(cost)
+		s.inFlight.Add(cost) // under lock to keep inFlight consistent with used
 		return true
 	}
 	return false
@@ -123,8 +123,8 @@ func (s *Semaphore) Release(cost int64) {
 		s.mu.Unlock()
 		panic("semaphore: released more than acquired")
 	}
-	s.mu.Unlock()
 	s.inFlight.Add(-cost)
+	s.mu.Unlock()
 	s.cond.Broadcast()
 }
 
@@ -168,8 +168,8 @@ func (s *Semaphore) acquireWait(ctx context.Context, cost int64) error {
 		s.mu.Lock()
 		if s.used+cost <= s.cfg.capacity {
 			s.used += cost
-			s.mu.Unlock()
 			s.inFlight.Add(cost)
+			s.mu.Unlock()
 			return nil
 		}
 		s.mu.Unlock()

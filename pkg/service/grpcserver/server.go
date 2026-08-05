@@ -32,15 +32,15 @@ func WithGrpcServerOptions(opts ...grpc.ServerOption) Option {
 }
 
 func WithGrpcServerUnaryInterceptor(interceptors ...grpc.UnaryServerInterceptor) Option {
-	return WithGrpcServerOptions(grpc.UnaryInterceptor(
-		middleware.ChainUnaryServer(interceptors...),
-	))
+	return func(s *Server) {
+		s.unaryInterceptors = append(s.unaryInterceptors, interceptors...)
+	}
 }
 
 func WithGrpcServerStreamInterceptor(interceptors ...grpc.StreamServerInterceptor) Option {
-	return WithGrpcServerOptions(grpc.StreamInterceptor(
-		middleware.ChainStreamServer(interceptors...),
-	))
+	return func(s *Server) {
+		s.streamInterceptors = append(s.streamInterceptors, interceptors...)
+	}
 }
 
 func WithServiceName(name string) Option {

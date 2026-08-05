@@ -73,7 +73,10 @@ func (r *Registry) Register(_ context.Context, _ discover.Service) (context.Canc
 // 因此按 "." 切分不会误伤。
 func normalizeServiceName(name string) string {
 	if i := strings.IndexByte(name, '.'); i >= 0 {
-		return name[:i]
+		name = name[:i]
+	}
+	if name == "*" {
+		return ""
 	}
 	return name
 }

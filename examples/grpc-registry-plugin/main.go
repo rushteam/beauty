@@ -57,7 +57,7 @@ func demonstrateRegistryCreation() {
 		"etcd://127.0.0.1:2379",
 		"nacos://127.0.0.1:8848",
 		"polaris://127.0.0.1:8091",
-		"k8s://kubernetes.default.svc.cluster.local",
+		"k8s://my-service.default?port_name=grpc",
 		"unknown://example.com", // 不支持的方案
 	}
 
@@ -85,7 +85,7 @@ func demonstrateDialContext() {
 		"etcd://127.0.0.1:2379/v1alpha.UserService",
 		"nacos://127.0.0.1:8848/v1alpha.UserService?env=production",
 		"polaris://127.0.0.1:8091/v1alpha.UserService?region=us-west-1",
-		"k8s://kubernetes.default.svc.cluster.local/v1alpha.UserService",
+		"k8s://user-service.default?port_name=grpc",
 	}
 
 	for _, target := range testTargets {

@@ -127,5 +127,27 @@ n, _ := store.Incr(ctx, "quota:user:42", 1, time.Minute)
 | `nacos/` | `config.go`、`config_client.go`、`nacos.go`、`factory.go` |
 | `polaris/` | `config_client.go`、`factory.go` |
 
-服务发现(`discover`)的注册中心适配在 `pkg/service/discover/{etcdv3,consul,k8s,nacos,polaris}`,
-其连接构造复用本目录对应后端的 `NewClient` / `NewClientset`。
+## 服务发现 `discover`
+
+注册中心适配在 `pkg/service/discover/{etcdv3,consul,k8s,nacos,polaris}`,
+连接构造复用本目录对应后端的 `NewClient` / `NewClientset`。
+
+K8s 服务发现 DSN 采用 **K8s DNS 风格**：
+
+```text
+k8s://service.namespace[.svc[.cluster.local]]?params
+```
+
+示例：
+
+```text
+k8s://payment-internal.mall?port_name=grpc                         # 精确服务
+k8s://my-svc.kube-system.svc.cluster.local?port_name=http          # 完整 DNS
+k8s://my-service?port_name=grpc                                    # 省略 namespace → default
+k8s://*.mall?label_selector=team=payment                           # 通配+标签筛选
+k8s://my-svc.prod?kubeconfig=/path/to/config                       # 集群外
+```
+
+可用参数：`namespace`、`service_type`（默认 ClusterIP）、`port_name`、`label_selector`、`kubeconfig`、`watch_timeout`。
+
+> 详细说明参见 `pkg/service/discover/k8s/README.md`。

@@ -109,6 +109,34 @@ conn, err := grpcclient.DialContext(ctx, "etcd://127.0.0.1:2379/v1alpha.UserServ
 | `polaris` | `pkg/service/discover/polaris` | - | ✅ 支持 |
 | `k8s` | `pkg/service/discover/k8s` | `kubernetes` | ✅ 支持 |
 
+### K8s 服务发现 DSN
+
+K8s 服务发现 URL 采用 **K8s DNS 风格**：
+
+```text
+k8s://service.namespace[.svc[.cluster.local]]?params
+```
+
+示例：
+
+```go
+// 精确服务发现
+conn, _ := grpc.Dial("k8s://payment-internal.mall?port_name=grpc")
+
+// 省略 namespace（默认 default）
+conn, _ := grpc.Dial("k8s://my-service?port_name=grpc")
+
+// 完整 DNS 格式
+conn, _ := grpc.Dial("k8s://my-svc.kube-system.svc.cluster.local?port_name=http")
+
+// 通配：按标签筛选 namespace 下的多个 Service
+conn, _ := grpc.Dial("k8s://*.mall?label_selector=team=payment")
+```
+
+可用查询参数：`namespace`、`service_type`（默认 ClusterIP）、`port_name`、`label_selector`、`kubeconfig`、`watch_timeout`。
+
+> 详细说明参见 [pkg/service/discover/k8s/README.md](../pkg/service/discover/k8s/README.md)。
+
 ## 扩展新的注册中心
 
 ### 1. 实现注册中心

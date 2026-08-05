@@ -81,6 +81,28 @@ func TestNewFromURL_QueryOverridesNamespace(t *testing.T) {
 
 // ---- normalizeServiceName ----
 
+func TestNewFromURL_WildcardNamespace(t *testing.T) {
+	// k8s://*.mall → namespace=mall，serviceName 为通配
+	c, err := NewFromURL(mustParse("k8s://*.mall?label_selector=team%3Dpayment"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Namespace != "mall" {
+		t.Fatalf("Namespace = %q, want %q", c.Namespace, "mall")
+	}
+}
+
+func TestNewFromURL_QueryOnlyNamespace(t *testing.T) {
+	// k8s://?namespace=mall → 纯 query 指定 namespace
+	c, err := NewFromURL(mustParse("k8s://?namespace=mall&label_selector=team%3Dpayment"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Namespace != "mall" {
+		t.Fatalf("Namespace = %q, want %q", c.Namespace, "mall")
+	}
+}
+
 func TestNormalizeServiceName(t *testing.T) {
 	tests := []struct {
 		input string
@@ -89,6 +111,9 @@ func TestNormalizeServiceName(t *testing.T) {
 		{"payment-internal", "payment-internal"},
 		{"payment-internal.mall", "payment-internal"},
 		{"my-svc.kube-system.svc.cluster.local", "my-svc"},
+		{"*.mall", ""},
+		{"*", ""},
+		{".mall", ""},
 		{"", ""},
 	}
 	for _, tt := range tests {

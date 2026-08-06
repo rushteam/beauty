@@ -76,7 +76,7 @@ func TestMergeMessagesHook(t *testing.T) {
 	_, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{
 		{Role: llm.User, Content: "一"},
 		{Role: llm.User, Content: "二"},
-	}})
+	}}).Final()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -64,9 +64,10 @@ func ExampleReActPlanner() {
 	}}
 	r := &agent.Runner{Client: client, Planner: &agent.ReActPlanner{}}
 
-	resp, _ := r.Run(context.Background(), llm.Request{
+	out := r.Run(context.Background(), llm.Request{
 		Messages: []llm.Message{{Role: llm.User, Content: "6*7=?"}},
 	})
+	resp, _ := out.Final()
 	fmt.Println(resp.Content)
 	// Output: 42
 }
@@ -83,9 +84,10 @@ func ExampleTeam() {
 		Members: map[string]agent.Agent{"researcher": researcher, "writer": writer},
 		Entry:   "researcher",
 	}
-	resp, _ := team.Run(context.Background(), llm.Request{
+	out := team.Run(context.Background(), llm.Request{
 		Messages: []llm.Message{{Role: llm.User, Content: "调研主题 X"}},
 	})
+	resp, _ := out.Final()
 	fmt.Println(resp.Content)
 	// Output: 报告:方案 A 最优。
 }
@@ -95,9 +97,10 @@ func ExampleBestOfN() {
 	sub := &agent.Runner{Client: &exPool{outs: []string{"短", "中等", "最长的候选答案"}}}
 	best := &agent.BestOfN{Agent: sub, N: 3} // Select 为 nil → LongestSelector
 
-	resp, _ := best.Run(context.Background(), llm.Request{
+	out := best.Run(context.Background(), llm.Request{
 		Messages: []llm.Message{{Role: llm.User, Content: "给个答复"}},
 	})
+	resp, _ := out.Final()
 	fmt.Println(resp.Content)
 	// Output: 最长的候选答案
 }
@@ -114,9 +117,10 @@ func ExampleVerifyLoop() {
 			return false, "请在结尾加上 OK 标记", nil
 		},
 	}
-	resp, _ := loop.Run(context.Background(), llm.Request{
+	out := loop.Run(context.Background(), llm.Request{
 		Messages: []llm.Message{{Role: llm.User, Content: "写点东西"}},
 	})
+	resp, _ := out.Final()
 	fmt.Println(resp.Content)
 	// Output: 修订稿 OK
 }
@@ -131,9 +135,10 @@ func Example_nesting() {
 			return strings.Contains(resp.Content, "OK"), "需含 OK", nil
 		},
 	}
-	resp, _ := loop.Run(context.Background(), llm.Request{
+	out := loop.Run(context.Background(), llm.Request{
 		Messages: []llm.Message{{Role: llm.User, Content: "q"}},
 	})
+	resp, _ := out.Final()
 	fmt.Println(resp.Content)
 	// Output: zzz OK
 }

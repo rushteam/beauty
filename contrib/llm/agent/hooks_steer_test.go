@@ -88,7 +88,7 @@ func TestHooks_BeforeAfter(t *testing.T) {
 			},
 		},
 	}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}); err != nil {
+	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
 		t.Fatal(err)
 	}
 	want := "bm am bt at bm am"
@@ -112,7 +112,8 @@ func TestHooks_BeforeModelError(t *testing.T) {
 			BeforeModel: func(context.Context, int, *llm.Request) error { return want },
 		},
 	}
-	_, err := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	_, err := out.Final()
 	if !errors.Is(err, want) {
 		t.Fatalf("got %v", err)
 	}

@@ -26,7 +26,8 @@ func TestParallel_DefaultConcat(t *testing.T) {
 		&agent.Runner{Name: "a", Client: constClient{content: "结果A"}},
 		&agent.Runner{Name: "b", Client: constClient{content: "结果B"}},
 	}}
-	resp, err := p.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	out := p.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,8 @@ func TestParallel_CustomCombiner(t *testing.T) {
 			return best, nil
 		},
 	}
-	resp, err := p.Run(context.Background(), llm.Request{})
+	out := p.Run(context.Background(), llm.Request{})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,8 @@ func TestParallel_PartialFailure(t *testing.T) {
 		&agent.Runner{Client: errClient{}},
 		&agent.Runner{Client: constClient{content: "幸存"}},
 	}}
-	resp, err := p.Run(context.Background(), llm.Request{})
+	out := p.Run(context.Background(), llm.Request{})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("部分失败仍应合并成功分支: %v", err)
 	}
@@ -82,7 +85,7 @@ func TestParallel_AllFail(t *testing.T) {
 		&agent.Runner{Client: errClient{}},
 		&agent.Runner{Client: errClient{}},
 	}}
-	if _, err := p.Run(context.Background(), llm.Request{}); err == nil {
+	if out := p.Run(context.Background(), llm.Request{}); out.IsDone() {
 		t.Fatal("全部失败应报错")
 	}
 }

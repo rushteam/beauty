@@ -106,7 +106,7 @@ func TestPermission_Deny(t *testing.T) {
 		{Content: "ok"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{denied}}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}); err != nil {
+	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
 		t.Fatal(err)
 	}
 	got := fc.lastReq.Messages[len(fc.lastReq.Messages)-1].Content
@@ -123,12 +123,12 @@ func TestPermission_AskCompatApproval(t *testing.T) {
 		{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{}`)}}},
 		{Content: "done"},
 	}}
-	r := &agent.Runner{Client: fc, Tools: []agent.Tool{ttool},
-		Approve: func(context.Context, llm.ToolCall) (agent.Decision, error) {
-			called = true
-			return agent.Decision{Approved: true}, nil
-		}}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}); err != nil {
+	inner := &agent.Runner{Client: fc, Tools: []agent.Tool{ttool}}
+	r := agent.SyncHITL(inner, func(context.Context, llm.ToolCall) (agent.Resolution, error) {
+		called = true
+		return agent.Resolution{Approved: true}, nil
+	})
+	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
 		t.Fatal(err)
 	}
 	if !called {
@@ -147,7 +147,8 @@ func TestAgentAsTool(t *testing.T) {
 		Client: parentFC,
 		Tools:  []agent.Tool{agent.AgentAsTool("researcher", "研究", sub, agent.WithAgentToolModel("m"))},
 	}
-	resp, err := parent.Run(context.Background(), llm.Request{Model: "m"})
+	out := parent.Run(context.Background(), llm.Request{Model: "m"})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,10 +168,11 @@ func TestChain(t *testing.T) {
 		{Name: "draft", Runner: a, Model: "m"},
 		{Name: "polish", Runner: b, Model: "m", System: "polish"},
 	}}
-	resp, err := ch.Run(context.Background(), llm.Request{
+	out := ch.Run(context.Background(), llm.Request{
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "write"}},
 	})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}

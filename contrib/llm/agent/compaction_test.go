@@ -82,7 +82,7 @@ func TestRunner_Compactor(t *testing.T) {
 		Tools:     []agent.Tool{tool},
 		Compactor: &agent.Compactor{MaxTokens: 100, KeepRecent: 1, ToolResultMaxRunes: 50},
 	}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}); err != nil {
+	if _, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}).Final(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	// 第 3 轮请求:[user, asst(c1), tool(BIG), asst(c2), tool(BIG)];

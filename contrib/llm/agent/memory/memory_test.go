@@ -44,7 +44,8 @@ func TestMemoryTools_WithRunner(t *testing.T) {
 		{Content: "记得你住上海"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: tools}
-	resp, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "记一下"}}})
+	out := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "记一下"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}

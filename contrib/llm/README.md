@@ -95,7 +95,7 @@ r := &agent.Runner{
     },
 }
 resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o",
-    Messages: []llm.Message{{Role: llm.User, Content: "北京天气?"}}})
+    Messages: []llm.Message{{Role: llm.User, Content: "北京天气?"}}}).Final()
 fmt.Println(resp.Content)
 
 // 事件流:模型走 Stream 推 EventToken;工具轮结束后推 step / tool_* / final
@@ -107,6 +107,8 @@ for ev := range r.RunStream(ctx, req) {
         fmt.Print(ev.Result) // 增量文本
     case agent.EventToolResult:
         log.Println(ev.ToolCall.Name, ev.Result)
+    case agent.EventPaused:
+        // out.Requirements / ev.RunID → Continue
     case agent.EventFinal:
         fmt.Println("\n>", ev.Response.Content)
     case agent.EventError:
@@ -124,10 +126,10 @@ provider 若不支持流式 tool_calls,会自动回退 `Generate`。
 
 ### 工具权限三态 + 多 Agent 薄编排
 
-- **Permission**:`PermitAllow`(默认) / `PermitAsk`(经 `Approve`) / `PermitDeny`(策略拒绝)。
+- **Permission**:`PermitAllow`(默认) / `PermitAsk`(整轮原子暂停,待 `Continue`) / `PermitDeny`(策略拒绝)。
   旧字段 `Approval: true` 仍等价于 Ask。
-- **AgentAsTool**:把子 `Agent`(任意实现,不限 `*Runner`)包成工具,父 agent 可委托子任务。
-- **Chain**:按序跑多个 agent(上一步终态文本作为下一步输入)。
+- **AgentAsTool**:把子 `Agent`(任意实现,不限 `*Runner`)包成工具,父 agent 可委托子任务;子 Paused 会冒泡到父。
+- **Chain**:按序跑多个 agent(上一步终态文本作为下一步输入);任一步 Paused 则整链暂停。
 - 更完整的编排(统一 `Agent` 接口 / Planner / Team 移交 / BestOfN / VerifyLoop)见下一节。
 
 ```go
@@ -141,7 +143,8 @@ chain := &agent.Chain{Steps: []agent.ChainStep{
     {Name: "draft", Runner: drafter, Model: "gpt-4o"},
     {Name: "review", Runner: reviewer, Model: "gpt-4o", System: "严格审稿"},
 }}
-resp, _ = chain.Run(ctx, req)
+out := chain.Run(ctx, req)
+resp, _ := out.Final()
 ```
 
 ### 统一 Agent 接口 + 规划 / 团队 / 策略包装
@@ -151,14 +154,18 @@ resp, _ = chain.Run(ctx, req)
 
 ```go
 type Agent interface {
-    Run(ctx context.Context, req llm.Request) (*llm.Response, error)
-    Info() Info                     // Name/Description/暴露的工具声明
+    Run(ctx context.Context, req llm.Request) RunOutcome
+    Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome
+    Info() Info
 }
-type StreamAgent interface {         // Runner / Chain / Team / Parallel 实现,可推事件
+type StreamAgent interface {
     Agent
     RunStream(ctx context.Context, req llm.Request) <-chan Event
+    ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event
 }
 ```
+
+`RunOutcome.Status` 为 `done` / `paused` / `error`。`out.Final()` 在 Done 时返回 `*Response`,Paused 时返回 `ErrPaused`。
 
 **Planner 接缝 + ReActPlanner**:给 `Runner.Planner` 赋值即在首轮前注入规划指令、并对每轮响应做后处理。
 `ReActPlanner` 让模型按 `/*PLANNING*/`→`/*REASONING*/`/`/*ACTION*/` 组织输出、以 `FINAL ANSWER:` 收尾,
@@ -180,7 +187,7 @@ team := &agent.Team{
     Entry:   "researcher",
     Config:  agent.HandoffConfig{MaxHandoffs: 8}, // 0 用默认
 }
-resp, _ := team.Run(ctx, req) // researcher 可 "HANDOFF: writer ..." 移交给 writer
+resp, _ := team.Run(ctx, req).Final() // researcher 可 "HANDOFF: writer ..." 移交给 writer
 ```
 
 **策略包装器**(在任意 `Agent` 之上再包一层运行策略,判定/校验逻辑是 policy,由你注入):
@@ -194,7 +201,7 @@ loop := &agent.VerifyLoop{Agent: best, MaxRounds: 3,   // 包装器可任意嵌�
     Verify: func(ctx context.Context, resp *llm.Response) (ok bool, feedback string, err error) {
         return check(resp.Content) // 跑断言 / bash / 再问模型……都行
     }}
-resp, _ := loop.Run(ctx, req)
+resp, _ := loop.Run(ctx, req).Final()
 ```
 
 **`Parallel`(并发扇出 + 合并)**:把**不同的** Agent 并发跑同一 Request,再用可插拔 `Combiner` 合并
@@ -207,7 +214,7 @@ resp, _ := loop.Run(ctx, req)
 p := &agent.Parallel{Agents: []agent.Agent{legal, finance, tech}} // 默认拼接
 // 或注入自定义合并:投票 / 取最优 / 再交给一个模型综合
 p.Combine = func(ctx context.Context, req llm.Request, cands []*llm.Response) (*llm.Response, error) { ... }
-resp, _ := p.Run(ctx, req)
+resp, _ := p.Run(ctx, req).Final()
 ```
 
 **事件父子归因**:`RunStream` 的每条 `Event` 都带 `AgentName`(`Runner.Name`)与 `TriggerType`/`TriggerID`
@@ -239,20 +246,32 @@ r := &agent.Runner{
 }
 ```
 
-### 人工审批(human-in-the-loop)
+### 人工审批 / 暂停续跑(human-in-the-loop)
 
-给敏感工具标 `Permission: agent.PermitAsk`(或旧 `Approval: true`),并设 `Runner.Approve`:
-执行前先过审批门。返回 `Approved:false` 把拒绝理由喂回模型继续;返回 error 视为审批失败、中止整个 Run。
+给敏感工具标 `Permission: agent.PermitAsk`(或旧 `Approval: true`)。同轮一旦出现 Ask,**整轮工具都不执行**
+(原子暂停),`Run` 返回 `Status=paused` 与 `Requirements`。调用方决议后 `Continue`:
 
 ```go
-r := &agent.Runner{
-    Client: cli,
-    Tools:  []agent.Tool{{Def: ..., Call: ..., Permission: agent.PermitAsk}},
-    Approve: func(ctx context.Context, tc llm.ToolCall) (agent.Decision, error) {
-        ok := askHuman(tc)
-        return agent.Decision{Approved: ok, Reason: "需管理员确认"}, nil
-    },
+r := &agent.Runner{Client: cli, Tools: []agent.Tool{{Def: ..., Call: ..., Permission: agent.PermitAsk}}}
+out := r.Run(ctx, req)
+if out.IsPaused() {
+    var resolutions []agent.Resolution
+    for _, rq := range out.Requirements {
+        ok := askHuman(rq.ToolCall)
+        resolutions = append(resolutions, agent.Resolution{ID: rq.ID, Approved: ok, Reason: "需确认"})
+    }
+    out = r.Continue(ctx, out.RunID, resolutions)
 }
+resp, err := out.Final()
+```
+
+需要进程内阻塞审批时,用可选适配器(不进 Runner 核心):
+
+```go
+a := agent.SyncHITL(r, func(ctx context.Context, tc llm.ToolCall) (agent.Resolution, error) {
+    return agent.Resolution{Approved: askHuman(tc)}, nil
+})
+out := a.Run(ctx, req) // 内部自动 Continue 直到 Done/Error
 ```
 
 ### 会话记忆(`llm/agent/session`)
@@ -266,9 +285,12 @@ r := &agent.Runner{
 store, _ := session.NewFileStore("./data/sessions")
 mgr := &session.Manager{Store: store,
     Summarizer: &session.Summarizer{Client: cli, Model: "gpt-4o-mini", MaxMessages: 20, KeepRecent: 6}}
-resp, _ := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
+out := mgr.Run(ctx, "session-123", r, llm.Request{Model: "gpt-4o",
     Messages: []llm.Message{{Role: llm.User, Content: "接着上次说"}}})
+resp, _ := out.Final()
 ```
+
+Paused 时会话记下 `PendingRunID`,用 `mgr.Continue(ctx, id, a, resolutions)` 恢复。
 
 详见 [`llm/agent/session`](agent/session)。也可用 `mgr.RunStream` 转发事件并在 `EventFinal` 时落盘。
 
@@ -315,7 +337,7 @@ import "github.com/rushteam/beauty/contrib/llm/agent/skills"
 sk, _ := skills.Load(skills.LocalSkills{Dir: "./skills"})
 r := &agent.Runner{Client: cli, Tools: sk.Tools()} // 三个元工具:instructions/reference/script
 resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o", System: sk.SystemPrompt(),
-    Messages: []llm.Message{{Role: llm.User, Content: "..."}}})
+    Messages: []llm.Message{{Role: llm.User, Content: "..."}}}).Final()
 ```
 
 脚本执行默认关闭(只读),`sk.EnableExec(30*time.Second)` 显式开启;文件访问带路径穿越防护。

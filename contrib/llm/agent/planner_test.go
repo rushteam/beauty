@@ -15,10 +15,11 @@ func TestReActPlanner_InjectAndConverge(t *testing.T) {
 		{Content: "/*PLANNING*/ 先想想\n/*REASONING*/ 因为\nFINAL ANSWER: 42"},
 	}}
 	r := &agent.Runner{Client: fc, Planner: &agent.ReActPlanner{}}
-	resp, err := r.Run(context.Background(), llm.Request{
+	out := r.Run(context.Background(), llm.Request{
 		System:   "be nice",
 		Messages: []llm.Message{{Role: llm.User, Content: "q"}},
 	})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}

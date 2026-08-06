@@ -41,7 +41,8 @@ func TestBestOfN_CustomSelector(t *testing.T) {
 		return 0, errors.New("pick-me 未出现在候选中")
 	}
 	b := &agent.BestOfN{Agent: sub, N: 3, Select: sel}
-	resp, err := b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	out := b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,8 @@ func TestBestOfN_CustomSelector(t *testing.T) {
 func TestBestOfN_DefaultLongest(t *testing.T) {
 	sub := &agent.Runner{Client: &seqClient{outs: []string{"a", "bb", "cccccc"}}}
 	b := &agent.BestOfN{Agent: sub, N: 3}
-	resp, err := b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	out := b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,8 @@ func TestBestOfN_DefaultLongest(t *testing.T) {
 func TestBestOfN_Passthrough(t *testing.T) {
 	sub := &agent.Runner{Client: &fakeClient{steps: []*llm.Response{{Content: "once"}}}}
 	b := &agent.BestOfN{Agent: sub, N: 1}
-	resp, err := b.Run(context.Background(), llm.Request{})
+	out := b.Run(context.Background(), llm.Request{})
+	resp, err := out.Final()
 	if err != nil || resp.Content != "once" {
 		t.Fatalf("resp=%+v err=%v", resp, err)
 	}
@@ -91,7 +94,8 @@ func TestVerifyLoop_RetryUntilPass(t *testing.T) {
 			return false, "请加上 good", nil
 		},
 	}
-	resp, err := v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "写点东西"}}})
+	out := v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "写点东西"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +124,8 @@ func TestVerifyLoop_MaxRounds(t *testing.T) {
 		MaxRounds: 2,
 		Verify:    func(context.Context, *llm.Response) (bool, string, error) { return false, "nope", nil },
 	}
-	resp, err := v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "go"}}})
+	out := v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "go"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("MaxRounds 应 best-effort 返回, got err %v", err)
 	}

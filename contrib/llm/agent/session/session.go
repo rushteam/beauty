@@ -18,10 +18,11 @@ import (
 
 // Session 是一段对话的持久状态:滚动摘要 + 近期消息。
 type Session struct {
-	ID        string
-	Summary   string // 早期消息被折叠成的摘要(可为空)
-	Messages  []llm.Message
-	UpdatedAt time.Time
+	ID           string
+	Summary      string // 早期消息被折叠成的摘要(可为空)
+	Messages     []llm.Message
+	PendingRunID string // 非空表示有暂停中的 agent run,应走 Manager.Continue
+	UpdatedAt    time.Time
 }
 
 // Store 持久化会话。Load 对不存在的 id 应返回 (nil, nil) 而非错误。
@@ -61,7 +62,7 @@ func (s *MemoryStore) Save(_ context.Context, sess *Session) error {
 func cloneSession(s *Session) *Session {
 	msgs := make([]llm.Message, len(s.Messages))
 	copy(msgs, s.Messages)
-	return &Session{ID: s.ID, Summary: s.Summary, Messages: msgs, UpdatedAt: s.UpdatedAt}
+	return &Session{ID: s.ID, Summary: s.Summary, Messages: msgs, PendingRunID: s.PendingRunID, UpdatedAt: s.UpdatedAt}
 }
 
 // Manager 用 Store(+ 可选 Summarizer)给 Runner 加会话记忆。
@@ -103,30 +104,82 @@ func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Mess
 	return m.Store.Save(ctx, sess)
 }
 
-// Run 以会话 id 跑一轮:req.Messages 只放**本轮新输入**(通常一条 user 消息);Manager 负责
-// 把历史与摘要拼进去,跑完把本轮 user 输入与最终 assistant 回复追加进会话并保存。
-//
-// a 可为任意 agent.Agent——除 *Runner 外,Chain / Team / BestOfN / VerifyLoop 等组合体也能套上
-// 会话记忆。若 a 是 *agent.Runner,会借 OnStep 额外持久化工具调用中间消息;其它 Agent 只持久化
-// 本轮 user 输入与最终 assistant 回复。
-func (m *Manager) Run(ctx context.Context, id string, a agent.Agent, req llm.Request) (*llm.Response, error) {
+// Run 以会话 id 跑一轮:req.Messages 只放**本轮新输入**。
+// 返回 RunOutcome:Paused 时写入 PendingRunID 且不 persist 终态;Done 时追加消息。
+func (m *Manager) Run(ctx context.Context, id string, a agent.Agent, req llm.Request) agent.RunOutcome {
 	sess, newMsgs, full, err := m.prepare(ctx, id, req)
 	if err != nil {
-		return nil, err
+		return agent.RunOutcome{Status: agent.StatusError, Err: err}
 	}
 	var intermediates []llm.Message
-	resp, err := m.runAgent(ctx, a, full, &intermediates)
-	if err != nil {
-		return resp, err
+	out := m.runAgent(ctx, a, full, &intermediates)
+	switch out.Status {
+	case agent.StatusPaused:
+		sess.PendingRunID = out.RunID
+		sess.UpdatedAt = time.Now()
+		if err := m.Store.Save(ctx, sess); err != nil {
+			out.Status = agent.StatusError
+			out.Err = err
+		}
+		return out
+	case agent.StatusDone:
+		sess.PendingRunID = ""
+		content := ""
+		if out.Response != nil {
+			content = out.Response.Content
+		}
+		// 优先用 Outcome.Messages 中相对本轮新增的中间态;否则用 OnStep 捕获。
+		if err := m.persist(ctx, sess, newMsgs, intermediates, content); err != nil {
+			out.Status = agent.StatusError
+			out.Err = err
+		}
+		return out
+	default:
+		return out
 	}
-	if err := m.persist(ctx, sess, newMsgs, intermediates, resp.Content); err != nil {
-		return resp, err
-	}
-	return resp, nil
 }
 
-// runAgent 跑底层 agent;若是 *Runner 则临时挂 OnStep 捕获工具调用中间消息(供持久化)。
-func (m *Manager) runAgent(ctx context.Context, a agent.Agent, full llm.Request, intermediates *[]llm.Message) (*llm.Response, error) {
+// Continue 恢复会话上暂停的 run,完成后写入会话。
+func (m *Manager) Continue(ctx context.Context, id string, a agent.Agent, resolutions []agent.Resolution) agent.RunOutcome {
+	sess, err := m.Store.Load(ctx, id)
+	if err != nil {
+		return agent.RunOutcome{Status: agent.StatusError, Err: err}
+	}
+	if sess == nil || sess.PendingRunID == "" {
+		return agent.RunOutcome{Status: agent.StatusError, Err: errNoPending}
+	}
+	out := a.Continue(ctx, sess.PendingRunID, resolutions)
+	switch out.Status {
+	case agent.StatusPaused:
+		sess.PendingRunID = out.RunID
+		sess.UpdatedAt = time.Now()
+		_ = m.Store.Save(ctx, sess)
+		return out
+	case agent.StatusDone:
+		sess.PendingRunID = ""
+		content := ""
+		if out.Response != nil {
+			content = out.Response.Content
+		}
+		// Continue 路径没有本轮 newMsgs;只追加最终 assistant(中间态已在 agent RunStore)。
+		if err := m.persist(ctx, sess, nil, nil, content); err != nil {
+			out.Status = agent.StatusError
+			out.Err = err
+		}
+		return out
+	default:
+		return out
+	}
+}
+
+var errNoPending = errString("session: no pending paused run")
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+// runAgent 跑底层 agent;若是 *Runner 则临时挂 OnStep 捕获工具调用中间消息。
+func (m *Manager) runAgent(ctx context.Context, a agent.Agent, full llm.Request, intermediates *[]llm.Message) agent.RunOutcome {
 	r, ok := a.(*agent.Runner)
 	if !ok {
 		return a.Run(ctx, full)
@@ -145,11 +198,7 @@ func (m *Manager) runAgent(ctx context.Context, a agent.Agent, full llm.Request,
 }
 
 // RunStream 与 Run 相同的会话编排,但转发底层 StreamAgent 的事件。
-// 仅在收到 EventFinal 时持久化会话;EventError 不写库(本轮未完成)。
-// 返回的 channel 在结束后关闭;调用方应排空直至关闭。
-//
-// a 可为任意 agent.StreamAgent(*Runner / *Chain / *Team 等);工具调用中间消息据事件
-// (EventStep 带 tool_calls / EventToolResult)捕获持久化,对所有 StreamAgent 一致。
+// EventFinal 时持久化;EventPaused 时记 PendingRunID;EventError 不写终态。
 func (m *Manager) RunStream(ctx context.Context, id string, r agent.StreamAgent, req llm.Request) <-chan agent.Event {
 	ch := make(chan agent.Event, 32)
 	go func() {
@@ -164,15 +213,24 @@ func (m *Manager) RunStream(ctx context.Context, id string, r agent.StreamAgent,
 		var final *llm.Response
 		var intermediates []llm.Message
 		for ev := range r.RunStream(ctx, full) {
-			if ev.Type == agent.EventFinal {
+			switch ev.Type {
+			case agent.EventFinal:
 				final = ev.Response
 				continue
-			}
-			if ev.Type == agent.EventStep && ev.Response != nil && len(ev.Response.ToolCalls) > 0 {
-				intermediates = append(intermediates, llm.Message{Role: llm.Assistant, Content: ev.Response.Content, ToolCalls: ev.Response.ToolCalls})
-			}
-			if ev.Type == agent.EventToolResult && ev.ToolCall != nil {
-				intermediates = append(intermediates, llm.Message{Role: llm.Tool, ToolCallID: ev.ToolCall.ID, Content: ev.Result})
+			case agent.EventPaused:
+				sess.PendingRunID = ev.RunID
+				sess.UpdatedAt = time.Now()
+				_ = m.Store.Save(ctx, sess)
+				emit(ev)
+				return
+			case agent.EventStep:
+				if ev.Response != nil && len(ev.Response.ToolCalls) > 0 {
+					intermediates = append(intermediates, llm.Message{Role: llm.Assistant, Content: ev.Response.Content, ToolCalls: ev.Response.ToolCalls})
+				}
+			case agent.EventToolResult:
+				if ev.ToolCall != nil {
+					intermediates = append(intermediates, llm.Message{Role: llm.Tool, ToolCallID: ev.ToolCall.ID, Content: ev.Result})
+				}
 			}
 			emit(ev)
 			if ev.Type == agent.EventError {
@@ -182,6 +240,7 @@ func (m *Manager) RunStream(ctx context.Context, id string, r agent.StreamAgent,
 		if final == nil {
 			return
 		}
+		sess.PendingRunID = ""
 		if err := m.persist(ctx, sess, newMsgs, intermediates, final.Content); err != nil {
 			emit(agent.Event{Type: agent.EventError, Response: final, Err: err})
 			return

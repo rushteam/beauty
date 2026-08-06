@@ -44,7 +44,8 @@ func TestRunner_ToolLoop(t *testing.T) {
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}}
 
-	resp, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}})
+	out := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -78,7 +79,8 @@ func TestRunner_UnknownTool(t *testing.T) {
 		{Content: "recovered"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}}
-	resp, err := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestRunner_ToolError(t *testing.T) {
 		{Content: "ok"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{failing}}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}); err != nil {
+	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	last := fc.lastReq.Messages
@@ -115,7 +117,8 @@ func TestRunner_MaxSteps(t *testing.T) {
 	loop := &llm.Response{ToolCalls: []llm.ToolCall{{ID: "c", Name: "echo"}}}
 	fc := &fakeClient{steps: []*llm.Response{loop, loop, loop}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}, MaxSteps: 3}
-	resp, err := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	resp, err := out.Final()
 	if !errors.Is(err, agent.ErrMaxSteps) {
 		t.Fatalf("应返回 ErrMaxSteps, got %v", err)
 	}
@@ -132,7 +135,8 @@ func TestRunner_NoToolAndImmutability(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "hi"}}}
 	r := &agent.Runner{Client: fc}
 	in := []llm.Message{{Role: llm.User, Content: "yo"}}
-	resp, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: in})
+	out := r.Run(context.Background(), llm.Request{Model: "m", Messages: in})
+	resp, err := out.Final()
 	if err != nil || resp.Content != "hi" {
 		t.Fatalf("resp=%+v err=%v", resp, err)
 	}

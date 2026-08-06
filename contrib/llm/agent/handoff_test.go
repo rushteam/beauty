@@ -32,7 +32,8 @@ func TestTeam_Handoff(t *testing.T) {
 		Members: map[string]agent.Agent{"researcher": researcher, "writer": writer},
 		Entry:   "researcher",
 	}
-	resp, err := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究主题 X"}}})
+	out := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究主题 X"}}})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,8 @@ func TestTeam_Handoff(t *testing.T) {
 func TestTeam_UnknownTarget(t *testing.T) {
 	a := &agent.Runner{Name: "a", Client: &fakeClient{steps: []*llm.Response{{Content: "HANDOFF: ghost hi"}}}}
 	tm := &agent.Team{Members: map[string]agent.Agent{"a": a}, Entry: "a"}
-	_, err := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "x"}}})
+	out := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "x"}}})
+	_, err := out.Final()
 	if err == nil || !strings.Contains(err.Error(), "unknown member") {
 		t.Fatalf("want unknown member error, got %v", err)
 	}
@@ -108,7 +110,8 @@ func TestTeam_MaxHandoffsGuard(t *testing.T) {
 		Entry:   "a",
 		Config:  agent.HandoffConfig{MaxHandoffs: 3},
 	}
-	_, err := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "start"}}})
+	out := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "start"}}})
+	_, err := out.Final()
 	if err == nil || !strings.Contains(err.Error(), "max handoffs") {
 		t.Fatalf("want max handoffs guard error, got %v", err)
 	}

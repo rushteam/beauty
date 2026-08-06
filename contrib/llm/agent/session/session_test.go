@@ -54,12 +54,16 @@ func TestManager_PersistsAndInjectsHistory(t *testing.T) {
 	r := &agent.Runner{Client: fc}
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
-	if _, err := m.Run(ctx, "s1", r, user("第一句")); err != nil {
-		t.Fatalf("run1: %v", err)
+	if out := m.Run(ctx, "s1", r, user("第一句")); !out.IsDone() {
+		if _, err := out.Final(); err != nil {
+			t.Fatalf("run1: %v", err)
+		}
 	}
 	fc.reply = "回复B"
-	if _, err := m.Run(ctx, "s1", r, user("第二句")); err != nil {
-		t.Fatalf("run2: %v", err)
+	if out := m.Run(ctx, "s1", r, user("第二句")); !out.IsDone() {
+		if _, err := out.Final(); err != nil {
+			t.Fatalf("run2: %v", err)
+		}
 	}
 
 	// 第二轮 Runner 收到的消息:第一句(user)、回复A(assistant)、第二句(user)。
@@ -80,12 +84,16 @@ func TestManager_AcceptsNonRunnerAgent(t *testing.T) {
 	a := &agent.VerifyLoop{Agent: &agent.Runner{Client: fc}} // 实现 Agent,但不是 *Runner
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
-	if _, err := m.Run(ctx, "s1", a, user("第一句")); err != nil {
-		t.Fatalf("run1: %v", err)
+	if out := m.Run(ctx, "s1", a, user("第一句")); !out.IsDone() {
+		if _, err := out.Final(); err != nil {
+			t.Fatalf("run1: %v", err)
+		}
 	}
 	fc.reply = "答复B"
-	if _, err := m.Run(ctx, "s1", a, user("第二句")); err != nil {
-		t.Fatalf("run2: %v", err)
+	if out := m.Run(ctx, "s1", a, user("第二句")); !out.IsDone() {
+		if _, err := out.Final(); err != nil {
+			t.Fatalf("run2: %v", err)
+		}
 	}
 	msgs := fc.last.Messages
 	if len(msgs) != 3 || msgs[0].Content != "第一句" || msgs[1].Content != "答复A" || msgs[2].Content != "第二句" {
@@ -134,8 +142,10 @@ func TestManager_RollingSummary(t *testing.T) {
 
 	// 跑 3 轮 → 每轮 +2 条(user+assistant)= 6 条 > MaxMessages(4),触发摘要。
 	for _, in := range []string{"a", "b", "c"} {
-		if _, err := m.Run(ctx, "s", r, user(in)); err != nil {
-			t.Fatalf("run %s: %v", in, err)
+		if out := m.Run(ctx, "s", r, user(in)); !out.IsDone() {
+			if _, err := out.Final(); err != nil {
+				t.Fatalf("run %s: %v", in, err)
+			}
 		}
 	}
 	sess, _ := st.Load(ctx, "s")
@@ -151,7 +161,7 @@ func TestManager_RollingSummary(t *testing.T) {
 	}
 
 	// 下一轮:摘要作为系统背景注入。
-	_, _ = m.Run(ctx, "s", r, user("d"))
+	_ = m.Run(ctx, "s", r, user("d"))
 	if !strings.Contains(runClient.last.System, "这是摘要") {
 		t.Fatalf("下一轮应把摘要注入 System: %q", runClient.last.System)
 	}

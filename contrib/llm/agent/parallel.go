@@ -10,24 +10,11 @@ import (
 )
 
 // ==== 并发扇出组合体:Parallel ====
-//
-// Parallel 把若干**不同的** Agent 并发跑同一个 Request,再用 Combine 把各自的终态响应合并成一个。
-// 它补齐了可组合 Agent 家族里"并发"这一维度:
-//   - Chain    串行:上一步输出喂下一步;
-//   - Team     路由:按 HANDOFF 标记在成员间移交控制权;
-//   - BestOfN  同一 Agent 跑 N 次、择优;
-//   - Parallel 不同 Agent 并发跑、合并。
-//
-// 机制而非策略:如何合并(拼接?投票?再交给一个模型综合?)是 policy,由使用方注入 Combine;
-// 本类型只负责并发调度、错误聚合与事件扇入。Parallel 自身也实现 Agent/StreamAgent,可被 Chain /
-// AgentAsTool / Team 再嵌套(例如"并发调研 → 单 agent 汇总"就是 Chain{Parallel, summarizer})。
 
-// Combiner 把并发跑完的多个响应合并成一个终态响应。cands 与 Parallel.Agents 下标一一对应,
-// 失败或 nil 的分支在对应位置为 nil;调用时保证至少有一个非 nil。
+// Combiner 把并发跑完的多个响应合并成一个终态响应。
 type Combiner func(ctx context.Context, req llm.Request, cands []*llm.Response) (*llm.Response, error)
 
-// ConcatCombiner 是平凡默认合并器:按 Agents 顺序把各非空响应的 Content 用空行连接,
-// Usage 汇总相加。适合"把并行结果拼给下游再综合"的场景。
+// ConcatCombiner 按序拼接非空 Content。
 func ConcatCombiner(_ context.Context, _ llm.Request, cands []*llm.Response) (*llm.Response, error) {
 	var parts []string
 	var usage llm.Usage
@@ -48,12 +35,19 @@ func ConcatCombiner(_ context.Context, _ llm.Request, cands []*llm.Response) (*l
 	return &llm.Response{Content: strings.Join(parts, "\n\n"), Usage: usage, Model: model}, nil
 }
 
-// Parallel 并发运行 Agents 中的每个 Agent(各收到相同 Request),再用 Combine 合并结果。
-// Combine 为 nil 时用 ConcatCombiner。任一分支出错不影响其他分支;全部失败时返回聚合错误。
+// Parallel 并发运行各 Agent;任一分支持Paused 则整体 Paused。
 type Parallel struct {
 	Name    string
 	Agents  []Agent
 	Combine Combiner
+	Store   RunStore
+
+	resumes sync.Map // runID → map[int]parallelBranch
+}
+
+type parallelBranch struct {
+	agent   Agent
+	childID string
 }
 
 var (
@@ -61,121 +55,289 @@ var (
 	_ StreamAgent = (*Parallel)(nil)
 )
 
-// runAll 并发跑所有分支,返回与 Agents 一一对应的响应与错误(失败分支响应可能为 nil)。
-func (p *Parallel) runAll(ctx context.Context, req llm.Request) (resps []*llm.Response, errs []error) {
-	resps = make([]*llm.Response, len(p.Agents))
-	errs = make([]error, len(p.Agents))
+func (p *Parallel) ensureStore() {
+	if p.Store == nil {
+		p.Store = NewMemoryRunStore()
+	}
+}
+
+// Run 并发跑所有分支并合并;有 Paused 则暂停。
+func (p *Parallel) Run(ctx context.Context, req llm.Request) RunOutcome {
+	p.ensureStore()
+	if len(p.Agents) == 0 {
+		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel has no agents"))
+	}
+	runID := newRunID()
+	outs := make([]RunOutcome, len(p.Agents))
 	var wg sync.WaitGroup
 	for i := range p.Agents {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			resps[i], errs[i] = p.Agents[i].Run(ctx, req)
+			if p.Agents[i] == nil {
+				outs[i] = outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch %d nil", i))
+				return
+			}
+			outs[i] = p.Agents[i].Run(ctx, req)
 		}(i)
 	}
 	wg.Wait()
-	return resps, errs
+	return p.collect(ctx, runID, req, outs)
 }
 
-// combine 过滤出成功分支交给 Combine;全部失败返回聚合错误。
-func (p *Parallel) combine(ctx context.Context, req llm.Request, resps []*llm.Response, errs []error) (*llm.Response, error) {
+func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, outs []RunOutcome) RunOutcome {
+	done := make(map[int]RunOutcome)
+	paused := make(map[int]string)
+	var reqs []Requirement
+	var firstPaused *RunOutcome
 	var firstErr error
-	any := false
-	for i := range resps {
-		if errs[i] != nil {
-			if firstErr == nil {
-				firstErr = errs[i]
+
+	for i, out := range outs {
+		switch out.Status {
+		case StatusDone:
+			done[i] = out
+		case StatusPaused:
+			paused[i] = out.RunID
+			src := fmt.Sprintf("parallel:%d", i)
+			reqs = append(reqs, remapRequirements(out.Requirements, src)...)
+			if firstPaused == nil {
+				o := out
+				firstPaused = &o
 			}
-			resps[i] = nil
-			continue
-		}
-		if resps[i] != nil {
-			any = true
+			p.storeBranch(runID, i, p.Agents[i], out.RunID)
+		default:
+			if firstErr == nil {
+				firstErr = out.Err
+				if firstErr == nil {
+					firstErr = fmt.Errorf("agent: Parallel branch %d failed", i)
+				}
+			}
 		}
 	}
-	if !any {
+
+	if len(paused) > 0 {
+		bo := make(map[int]RunOutcome, len(done))
+		for k, v := range done {
+			bo[k] = v
+		}
+		pb := make(map[int]string, len(paused))
+		for k, v := range paused {
+			pb[k] = v
+		}
+		snap := &RunSnapshot{
+			Kind:           "parallel",
+			Request:        req,
+			Requirements:   reqs,
+			BranchOutcomes: bo,
+			PausedBranches: pb,
+		}
+		if err := p.Store.Save(ctx, runID, snap); err != nil {
+			return outcomeError(runID, nil, nil, err)
+		}
+		resp := (*llm.Response)(nil)
+		if firstPaused != nil {
+			resp = firstPaused.Response
+		}
+		return outcomePaused(runID, resp, nil, reqs)
+	}
+
+	if len(done) == 0 {
 		if firstErr != nil {
-			return nil, fmt.Errorf("agent: Parallel all %d branches failed: %w", len(p.Agents), firstErr)
+			return outcomeError(runID, nil, nil, fmt.Errorf("agent: Parallel all %d branches failed: %w", len(p.Agents), firstErr))
 		}
-		return nil, fmt.Errorf("agent: Parallel produced no responses")
+		return outcomeError(runID, nil, nil, fmt.Errorf("agent: Parallel produced no responses"))
 	}
+
+	resps := make([]*llm.Response, len(p.Agents))
+	for i, out := range done {
+		resps[i] = out.Response
+	}
+	// 失败分支保持 nil
 	comb := p.Combine
 	if comb == nil {
 		comb = ConcatCombiner
 	}
 	resp, err := comb(ctx, req, resps)
 	if err != nil {
-		return nil, fmt.Errorf("agent: Parallel combine: %w", err)
+		return outcomeError(runID, nil, nil, fmt.Errorf("agent: Parallel combine: %w", err))
 	}
-	return resp, nil
+	return outcomeDone(runID, resp, nil)
 }
 
-// Run 并发跑所有分支并合并结果。
-func (p *Parallel) Run(ctx context.Context, req llm.Request) (*llm.Response, error) {
-	if len(p.Agents) == 0 {
-		return nil, fmt.Errorf("agent: Parallel has no agents")
-	}
-	resps, errs := p.runAll(ctx, req)
-	return p.combine(ctx, req, resps, errs)
+func (p *Parallel) storeBranch(runID string, i int, a Agent, childID string) {
+	v, _ := p.resumes.LoadOrStore(runID, &sync.Map{})
+	m := v.(*sync.Map)
+	m.Store(i, parallelBranch{agent: a, childID: childID})
 }
 
-// RunStream 实现 StreamAgent:并发跑各分支,支持流式的分支透传其中间事件(token/step/tool,
-// 已由分支自行打好归因),不支持的分支同步跑;各分支的 final/error 内部捕获。全部结束后合并,
-// 对外只产出一条终态 EventFinal(合并结果)。任一分支或合并出错则产出 EventError。
+// Continue 只恢复仍暂停的分支,齐了再 Combine。
+func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
+	p.ensureStore()
+	snap, err := p.Store.Load(ctx, runID)
+	if err != nil {
+		return outcomeError(runID, nil, nil, err)
+	}
+	if snap == nil || snap.Kind != "parallel" {
+		return outcomeError(runID, nil, nil, fmt.Errorf("agent: unknown parallel runID %q", runID))
+	}
+	rv, ok := p.resumes.Load(runID)
+	if !ok {
+		return outcomeError(runID, nil, nil, fmt.Errorf("agent: parallel resume lost for %q", runID))
+	}
+	branches := rv.(*sync.Map)
+
+	done := snap.BranchOutcomes
+	if done == nil {
+		done = map[int]RunOutcome{}
+	}
+	paused := map[int]string{}
+	var reqs []Requirement
+	var firstPaused *RunOutcome
+
+	branches.Range(func(k, val any) bool {
+		i := k.(int)
+		br := val.(parallelBranch)
+		out := br.agent.Continue(ctx, br.childID, resolutions)
+		switch out.Status {
+		case StatusDone:
+			done[i] = out
+			branches.Delete(i)
+		case StatusPaused:
+			paused[i] = out.RunID
+			src := fmt.Sprintf("parallel:%d", i)
+			reqs = append(reqs, remapRequirements(out.Requirements, src)...)
+			branches.Store(i, parallelBranch{agent: br.agent, childID: out.RunID})
+			if firstPaused == nil {
+				o := out
+				firstPaused = &o
+			}
+		default:
+			// 记为失败:从 paused 去掉
+			branches.Delete(i)
+		}
+		return true
+	})
+
+	if len(paused) > 0 {
+		pb := make(map[int]string, len(paused))
+		for k, v := range paused {
+			pb[k] = v
+		}
+		snap.BranchOutcomes = done
+		snap.PausedBranches = pb
+		snap.Requirements = reqs
+		_ = p.Store.Save(ctx, runID, snap)
+		resp := (*llm.Response)(nil)
+		if firstPaused != nil {
+			resp = firstPaused.Response
+		}
+		return outcomePaused(runID, resp, nil, reqs)
+	}
+
+	p.resumes.Delete(runID)
+	_ = p.Store.Delete(ctx, runID)
+
+	resps := make([]*llm.Response, len(p.Agents))
+	any := false
+	for i, out := range done {
+		if out.Response != nil {
+			resps[i] = out.Response
+			any = true
+		}
+	}
+	if !any {
+		return outcomeError(runID, nil, nil, fmt.Errorf("agent: Parallel produced no responses after continue"))
+	}
+	comb := p.Combine
+	if comb == nil {
+		comb = ConcatCombiner
+	}
+	resp, err := comb(ctx, snap.Request, resps)
+	if err != nil {
+		return outcomeError(runID, nil, nil, err)
+	}
+	return outcomeDone(runID, resp, nil)
+}
+
+// RunStream 并发透传各分支中间事件;对外仅一条合并后的 EventFinal(或 Paused/Error)。
 func (p *Parallel) RunStream(ctx context.Context, req llm.Request) <-chan Event {
 	ch := make(chan Event, 32)
 	go func() {
 		defer close(ch)
+		p.ensureStore()
 		if len(p.Agents) == 0 {
 			ch <- Event{Type: EventError, AgentName: p.Name, Err: fmt.Errorf("agent: Parallel has no agents")}
 			return
 		}
-		resps := make([]*llm.Response, len(p.Agents))
-		errs := make([]error, len(p.Agents))
+		runID := newRunID()
+		outs := make([]RunOutcome, len(p.Agents))
 		var wg sync.WaitGroup
 		for i := range p.Agents {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				fev, err := p.streamBranch(ctx, p.Agents[i], req, ch)
-				resps[i], errs[i] = fev.Response, err
+				outs[i] = p.streamBranch(ctx, p.Agents[i], req, ch)
 			}(i)
 		}
 		wg.Wait()
-
-		resp, err := p.combine(ctx, req, resps, errs)
-		if err != nil {
-			ch <- Event{Type: EventError, AgentName: p.Name, Err: err}
-			return
+		out := p.collect(ctx, runID, req, outs)
+		switch out.Status {
+		case StatusDone:
+			ch <- Event{Type: EventFinal, AgentName: p.Name, Response: out.Response, RunID: out.RunID}
+		case StatusPaused:
+			ch <- Event{Type: EventPaused, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}
+		default:
+			ch <- Event{Type: EventError, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Err: out.Err}
 		}
-		ch <- Event{Type: EventFinal, AgentName: p.Name, Response: resp}
 	}()
 	return ch
 }
 
-// streamBranch 跑单个分支:支持 StreamAgent 时透传中间事件、捕获 final/error;否则同步跑并合成 final。
-func (p *Parallel) streamBranch(ctx context.Context, a Agent, req llm.Request, ch chan<- Event) (Event, error) {
+func (p *Parallel) streamBranch(ctx context.Context, a Agent, req llm.Request, ch chan<- Event) RunOutcome {
+	if a == nil {
+		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel nil branch"))
+	}
 	if sa, ok := a.(StreamAgent); ok {
 		var fev Event
-		var rerr error
 		for ev := range sa.RunStream(ctx, req) {
 			switch ev.Type {
 			case EventFinal:
 				fev = ev
+			case EventPaused:
+				return outcomePaused(ev.RunID, ev.Response, nil, ev.Requirements)
 			case EventError:
-				fev, rerr = ev, ev.Err
+				return outcomeError(ev.RunID, ev.Response, nil, ev.Err)
 			default:
 				ch <- ev
 			}
 		}
-		return fev, rerr
+		if fev.Response != nil {
+			return outcomeDone(fev.RunID, fev.Response, nil)
+		}
+		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch produced no final"))
 	}
-	resp, err := a.Run(ctx, req)
-	tt, tid := triggerFrom(ctx)
-	return Event{Type: EventFinal, Response: resp, AgentName: a.Info().Name, TriggerType: tt, TriggerID: tid}, err
+	return a.Run(ctx, req)
 }
 
-// Info 实现 Agent:汇总各分支暴露的工具声明。
+// ContinueStream 是 Continue 的流式版。
+func (p *Parallel) ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event {
+	ch := make(chan Event, 32)
+	go func() {
+		defer close(ch)
+		out := p.Continue(ctx, runID, resolutions)
+		switch out.Status {
+		case StatusDone:
+			ch <- Event{Type: EventFinal, AgentName: p.Name, Response: out.Response, RunID: out.RunID}
+		case StatusPaused:
+			ch <- Event{Type: EventPaused, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}
+		default:
+			ch <- Event{Type: EventError, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Err: out.Err}
+		}
+	}()
+	return ch
+}
+
+// Info 实现 Agent。
 func (p *Parallel) Info() Info {
 	var tools []llm.ToolDef
 	for _, a := range p.Agents {

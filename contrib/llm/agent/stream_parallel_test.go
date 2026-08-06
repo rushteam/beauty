@@ -112,7 +112,8 @@ func TestParallelTools(t *testing.T) {
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{slow("a"), slow("b")}}
 	start := time.Now()
-	resp, err := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +163,7 @@ func TestParallelTools_Disabled(t *testing.T) {
 		Tools:         []agent.Tool{mk("a"), mk("b")},
 		ParallelTools: agent.Bool(false),
 	}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}); err != nil {
+	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
 		t.Fatal(err)
 	}
 	if len(order) != 2 || order[0] != "a" || order[1] != "b" {

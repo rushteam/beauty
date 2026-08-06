@@ -12,17 +12,22 @@ go get github.com/rushteam/beauty/contrib/kafka@latest
 import (
     bkafka "github.com/rushteam/beauty/contrib/kafka"
     "github.com/rushteam/beauty/pkg/mq"
+    "github.com/rushteam/beauty/pkg/mq/otelmq"
 )
 
-pub := bkafka.NewPublisher([]string{"127.0.0.1:9092"})
-defer pub.Close()
+raw := bkafka.NewPublisher([]string{"127.0.0.1:9092"})
+defer raw.Close()
+pub := otelmq.Publisher(raw) // opt-in: Headers 透传 W3C trace
 pub.Publish(ctx, mq.Message{Topic: "orders", Key: "user-1", Body: data})
 
 sub := bkafka.NewSubscriber([]string{"127.0.0.1:9092"})
+h := mq.Chain(handle, otelmq.Trace("order"), mq.Recover())
 consumer := mq.NewConsumer(sub).
-    Handle("orders", handle, mq.WithGroup("order-workers")) // 必须指定 group
+    Handle("orders", h, mq.WithGroup("order-workers")) // 必须指定 group
 beauty.New(beauty.WithService(consumer))
 ```
+
+> OTel：用核心包 `pkg/mq/otelmq`（broker 无关），不要用 franz-go 的 `kotel`——本模块基于 **segmentio/kafka-go**，不是 franz-go。
 
 ## 语义
 

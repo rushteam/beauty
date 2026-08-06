@@ -18,8 +18,9 @@
 //   - 投递保证由 broker 决定:进程内实现是 at-most-once(handler 出错不重投,用 Retry 中间件兜
 //     瞬时错误);要持久化/重投/exactly-once 用支持的 broker(如 JetStream)。
 //
-// 边界(机制而非策略):序列化(Body 是 []byte)、trace 透传(用 Headers 承载,配 pkg/metadata)、
-// 分区键(Key)、broker 选型都是 policy。
+// 边界(机制而非策略):序列化(Body 是 []byte)、分区键(Key)、broker 选型都是 policy。
+// OTel trace 透传(Headers 承载 W3C TraceContext)见子包 pkg/mq/otelmq(opt-in,对齐
+// franz-go kotel 的 publish/process 语义,但与具体 broker 解耦)。
 package mq
 
 import (

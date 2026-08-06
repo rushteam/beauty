@@ -213,7 +213,7 @@ independently) — import only what you need; the core dependency graph stays le
 | [`contrib/elasticsearch`](contrib/elasticsearch) | Elasticsearch v8 search / index / health | `…/contrib/elasticsearch` |
 | [`contrib/nats`](contrib/nats) | `pkg/mq` NATS broker (at-most-once) | `…/contrib/nats` |
 | [`contrib/natsjs`](contrib/natsjs) | `pkg/mq` NATS JetStream (persistent, at-least-once) | `…/contrib/natsjs` |
-| [`contrib/kafka`](contrib/kafka) | `pkg/mq` Kafka broker (consumer group) | `…/contrib/kafka` |
+| [`contrib/kafka`](contrib/kafka) | `pkg/mq` Kafka broker (franz-go + kotel) | `…/contrib/kafka` |
 | [`contrib/llm`](contrib/llm) | provider-agnostic LLM client (chat/stream/embed, OpenAI/Anthropic/Azure/compatible) | `…/contrib/llm` |
 | [`contrib/vector`](contrib/vector) | vector store / RAG semantic search | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client (expose services as AI tools) | `…/contrib/mcp` |

@@ -39,7 +39,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/sqldb`](sqldb) | database/sql 读写分离 + OTel(otelsql),配合 **sqlc**/sqlx/手写 SQL | XSAM/otelsql |
 | [`contrib/nats`](nats) | `pkg/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
 | [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
-| [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(consumer group;at-least-once,提交后确认) | segmentio/kafka-go |
+| [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 | [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 多厂商(OpenAI 兼容 / Anthropic / **AWS Bedrock**)+ 薄 **agent 循环**(`llm/agent`,含审批/流式事件/Steer/Hooks + 统一 Agent 接口/**Planner**/**Team 移交**/**Parallel 并发**/**BestOfN**/**VerifyLoop** 编排 + 工具参数 **JSON 容错**/运行内**上下文压缩**/消息合并)+ **会话记忆** + **Agent Skills** | 无(纯 stdlib) |
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |

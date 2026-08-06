@@ -207,7 +207,7 @@ app := beauty.New(beauty.WithService(consumer))
 | [`contrib/elasticsearch`](contrib/elasticsearch) | Elasticsearch v8 搜索 / 写入 / 健康 | `…/contrib/elasticsearch` |
 | [`contrib/nats`](contrib/nats) | `pkg/mq` 的 NATS broker(at-most-once) | `…/contrib/nats` |
 | [`contrib/natsjs`](contrib/natsjs) | `pkg/mq` 的 NATS JetStream(持久、at-least-once) | `…/contrib/natsjs` |
-| [`contrib/kafka`](contrib/kafka) | `pkg/mq` 的 Kafka broker(consumer group) | `…/contrib/kafka` |
+| [`contrib/kafka`](contrib/kafka) | `pkg/mq` 的 Kafka broker(franz-go + kotel) | `…/contrib/kafka` |
 | [`contrib/llm`](contrib/llm) | provider 无关 LLM 客户端(对话/流式/embedding,OpenAI/Anthropic/Azure/兼容) | `…/contrib/llm` |
 | [`contrib/vector`](contrib/vector) | 向量存储 / RAG 语义检索 | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client(把服务暴露成 AI 工具) | `…/contrib/mcp` |

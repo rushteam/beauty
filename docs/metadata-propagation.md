@@ -117,7 +117,7 @@ Beauty 服务端（HTTP/gRPC）已接入 `otelhttp` / `otelgrpc`，它们负责�
 - 从入站请求提取 trace context 并恢复 span
 - 为出站响应注入 trace context
 
-异步 MQ 用 opt-in 的 [`pkg/mq/otelmq`](../pkg/mq/otelmq)（见下方「MQ 异步链路」）。
+异步 MQ 用 [`contrib/kafka`](../contrib/kafka) 内置 kotel（Kafka），或 opt-in 的 [`pkg/mq/otelmq`](../pkg/mq/otelmq)（InProc/NATS 等）。详见下方「MQ 异步链路」。
 
 这依赖全局 `TextMapPropagator` 的正确配置。**只要调用了 `beauty.WithTrace()`，W3C TraceContext + Baggage 就会自动启用**，无需额外操作。
 
@@ -206,24 +206,28 @@ tenantID := b.Member("tenant-id").Value()
 
 > **实践建议**：如果你的系统已经接入 Jaeger/Zipkin 并需要在 trace 界面里看到业务字段，用 Baggage；如果只是微服务间透传业务字段，用业务 metadata 更简单直接。
 
-### MQ 异步链路（opt-in）
+### MQ 异步链路
 
-gRPC / HTTP 默认挂了 `otelgrpc` / `otelhttp`，同步调用链天然贯通；`pkg/mq` 的异步路径需要显式接入 [`pkg/mq/otelmq`](../pkg/mq/otelmq)：
+gRPC / HTTP 默认挂了 `otelgrpc` / `otelhttp`，同步调用链天然贯通；异步 MQ 按传输选型：
+
+**Kafka（`contrib/kafka`，基于 franz-go）**——默认挂载官方 [kotel](https://github.com/twmb/franz-go/tree/master/plugin/kotel)，自动 publish/receive/process span，无需再套 `otelmq`：
+
+```go
+pub, _ := kafka.NewPublisher(brokers) // 默认 WithHooks(kotel)
+sub := kafka.NewSubscriber(brokers)
+```
+
+**InProc / NATS 等**——用 opt-in 的 [`pkg/mq/otelmq`](../pkg/mq/otelmq)：
 
 ```go
 import "github.com/rushteam/beauty/pkg/mq/otelmq"
 
-// 发布端：producer span + Inject traceparent 到 Message.Headers
-pub := otelmq.Publisher(kafka.NewPublisher(brokers))
-
-// 消费端：Extract Headers + process span（可与 Recover/Retry 组合）
+pub := otelmq.Publisher(natsPub)
 h := mq.Chain(business, otelmq.Trace("order"), mq.Recover())
-consumer := mq.NewConsumer(sub).Handle("trade.success", h, mq.WithGroup("g"))
 ```
 
-- 放在子包而非默认开启：`pkg/mq` 保持零外部依赖；并非所有用户都接了 OTel。
-- 基于 `Message.Headers`（`contrib/kafka` 已映射为 Kafka Headers），InProc / NATS / Kafka 都受益。
-- 语义对齐 [franz-go kotel](https://github.com/twmb/franz-go/tree/master/plugin/kotel) 的 publish / process span；beauty 的 `contrib/kafka` 基于 segmentio/kafka-go（非 franz-go），故不直接依赖 kotel。
+- `otelmq` 放在子包：保持 `pkg/mq` 零外部依赖；基于 `Message.Headers`，与 broker 无关。
+- Kafka 已用 kotel 时不要再套 `otelmq`，避免双重 Inject。
 
 ### 传播协议选型建议
 
@@ -234,7 +238,8 @@ consumer := mq.NewConsumer(sub).Handle("trade.success", h, mq.WithGroup("g"))
 | 兼容 Zipkin 或老版 Jaeger | 追加 B3 Multi-Header |
 | 与 AWS X-Ray 集成 | 追加 `go.opentelemetry.io/contrib/propagators/aws/xray` |
 | 多系统混合 | `WithTracePropagator` 可追加多个，按顺序尝试提取 |
-| MQ 异步跨服务 | `pkg/mq/otelmq`（见上） |
+| Kafka 异步跨服务 | `contrib/kafka` 内置 kotel（默认开） |
+| 非 Kafka MQ | `pkg/mq/otelmq` |
 
 ---
 

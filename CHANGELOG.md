@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **`contrib/kafka`**:底层从 segmentio/kafka-go 换为 **twmb/franz-go**,默认挂载官方 **kotel**
+  OTel(publish/receive/process span + metrics)。`NewPublisher` 现返回 `(*Publisher, error)`;
+  原 `WithBalancer`/`WithWriterTimeout` 改为 `WithPartitioner`/`WithProduceTimeout`/
+  `WithClientOpts`。Kafka 场景用内置 kotel,不必再套 `pkg/mq/otelmq`。
+
 ### Added
 - **authz**：新增 `pkg/authz`——授权机制,补齐"只认证不授权"的空白(在 `middleware/auth`/`token`
   确认身份+角色之上,判"能否对某资源做某动作")。`Subject`(id/角色/属性,放 context)+ `Enforcer`

@@ -9,16 +9,13 @@
 // 设计取舍:
 //
 //   - 放在 pkg/mq/otelmq 子包(类似 otelhttp),保持 pkg/mq 零外部依赖、默认不启用。
-//   - 基于 map[string]string Headers,与 broker 无关——InProc / contrib/kafka
-//     (segmentio) / contrib/nats 都受益。
-//   - 不使用 franz-go 的 kotel:beauty 的 contrib/kafka 基于 segmentio/kafka-go,
-//     而非 franz-go;kotel 绑 kgo.Hook,无法复用。本包在语义上对齐 kotel 的
-//     publish / process span(messaging semconv + SpanKind),只是载体换成
-//     mq.Message.Headers。
+//   - 基于 map[string]string Headers,与 broker 无关——适合 InProc / contrib/nats 等。
+//   - contrib/kafka(franz-go) 已默认挂官方 kotel,Kafka 场景请用内置 OTel,勿再套本包
+//     (避免双重 Inject)。本包语义对齐 kotel 的 publish / process span。
 //
 // 用法:
 //
-//	pub := otelmq.Publisher(kafka.NewPublisher(brokers))
+//	pub := otelmq.Publisher(natsPub)
 //	h := mq.Chain(business, otelmq.Trace("order"), mq.Recover())
 //	consumer := mq.NewConsumer(sub).Handle("trade.success", h, mq.WithGroup("g"))
 package otelmq

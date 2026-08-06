@@ -18,7 +18,7 @@ const instrumentationName = "github.com/rushteam/beauty/pkg/mq/otelmq"
 // Message.Headers(W3C traceparent/tracestate)。语义对齐 franz-go kotel 的
 // publish 钩子,但基于 Headers map,与具体 broker 无关(Kafka/NATS/InProc 均可)。
 //
-//	pub := otelmq.Publisher(kafka.NewPublisher(brokers))
+//	pub := otelmq.Publisher(inner) // inner 如 nats / InProc
 func Publisher(inner mq.Publisher, opts ...Option) mq.Publisher {
 	if inner == nil {
 		return nil

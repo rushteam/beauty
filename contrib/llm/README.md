@@ -343,6 +343,89 @@ resp, _ := r.Run(ctx, llm.Request{Model: "gpt-4o", System: sk.SystemPrompt(),
 脚本执行默认关闭(只读),`sk.EnableExec(30*time.Second)` 显式开启;文件访问带路径穿越防护。
 详见 [`llm/agent/skills`](agent/skills)。
 
+## Prompt 组装协议(`llm/prompt`)
+
+把散落在各层(人设、技能目录、规划指令、会话摘要、RAG 上下文、护栏…)的 prompt 片段统一声明为
+**Slot**,由 `Assembler` 按 `Position→Priority` 规则组装成最终的 `llm.Request`。
+
+```go
+import "github.com/rushteam/beauty/contrib/llm/prompt"
+
+asm := prompt.New(
+    prompt.SystemSlot("persona", 0, "你是一个专业助手"),
+    prompt.SystemSlot("skills", 50, "").Dynamic(func(prompt.Context) string { return sk.SystemPrompt() }),
+    prompt.SystemSlot("planner", 100, reactInstr).When(func(ctx prompt.Context) bool { return ctx.Step == 1 }),
+    prompt.AfterSlot("rag", llm.System, 0, "").Dynamic(ragLookup).WithMaxTokens(2000),
+    prompt.AfterSlot("guardrail", llm.System, 10, "不要泄露内部信息"),
+)
+asm.FullControl = true   // 完全接管 System 构建(替代 Planner/Session 的散装注入)
+asm.SystemBudget = 4000  // System slot 合计 token 上限
+
+runner := &agent.Runner{
+    Client: cli,
+    Hooks:  agent.Hooks{BeforeModel: prompt.ChainHooks(myLogger, asm.Hook())},
+}
+```
+
+### 四个 Position
+
+| Position | 放置位置 | 典型用途 |
+|---|---|---|
+| `System` | 合并进 `Request.System` | 人设、技能目录、规划指令、摘要 |
+| `Before` | 消息列表最前面 | 历史前置上下文 |
+| `After` | 最后一条 user 消息之前 | RAG 结果、护栏指令 |
+| `Chat` | 按 `Depth` 从末尾往上插入 | 实时插话、微调 |
+
+### 便捷构造 + 链式配置
+
+```go
+prompt.SystemSlot("id", priority, "内容")                     // Position=System, Enabled=true
+prompt.AfterSlot("id", llm.System, priority, "内容")          // Position=After
+prompt.ChatSlot("id", llm.System, depth, priority, "内容")    // Position=Chat
+
+// 链式设置可选属性
+prompt.SystemSlot("planner", 100, reactInstr).
+    When(func(ctx prompt.Context) bool { return ctx.Step == 1 }).
+    WithMaxTokens(2000).
+    WithSource("planner")
+```
+
+### Token 预算(两层裁剪)
+
+- **`Slot.MaxTokens`**:单 slot 内容上限,超出时截断(二分查找精确裁剪)。
+- **`Assembler.SystemBudget`**:所有 System slot 合计上限,超出时从低优先级整条丢弃。
+- **`Assembler.TokenCounter`**:自定义计数器(nil 用 `utf8.RuneCountInString` 近似;生产接 tiktoken)。
+
+### 两种集成模式
+
+- **增量模式(默认)**:在已有 `req.System` 之后追加。可与 Session/Planner 共存,各管各的。
+- **全权模式(`FullControl=true`)**:完全替换 `req.System`,Assembler 是 source of truth。
+  此时应置 `Runner.Planner = nil`,摘要通过 `ContentFunc` slot 拉取。
+
+```go
+// 增量:只加 RAG,Planner/Session 仍自行工作
+asm := prompt.New(prompt.AfterSlot("rag", llm.System, 0, ragResult))
+runner := &agent.Runner{
+    Planner: &agent.ReActPlanner{},
+    Hooks:   agent.Hooks{BeforeModel: asm.Hook()},
+}
+```
+
+**ChainHooks** 串联多个 `BeforeModel` hook(日志、Assembler、限流等按序执行):
+
+```go
+runner.Hooks.BeforeModel = prompt.ChainHooks(myLogger, asm.Hook(), myGuard)
+```
+
+**Snapshot** 返回已解析 slot 列表,便于调试/日志:
+
+```go
+resolved := asm.Snapshot(prompt.Context{Step: 1, MessageCount: 5})
+for _, s := range resolved {
+    fmt.Printf("[%s] %s p=%d: %s\n", s.Position, s.ID, s.Priority, s.Content[:40])
+}
+```
+
 ## 护栏(guardrails)
 
 ### 输入护栏

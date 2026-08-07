@@ -1,25 +1,18 @@
 // Package prompt 是 contrib/llm 的 prompt 组装协议:把散落在各层(人设、技能目录、规划指令、
 // 会话摘要、RAG 上下文、护栏…)的 prompt 片段统一声明为 Slot,由 Assembler 按 Position→Priority
-// 规则组装成最终的 llm.Request。
+// 规则组装成最终的 llm.Request。Assembler 是可选上层——简单场景直接设 llm.Request.System 即可,
+// 当 prompt 来源 ≥3 个需要编排时才引入。
 //
-// 两种集成模式(由 Assembler.FullControl 决定):
+// Assembler 采用增量模式:在已有 req.System 之后追加 slot 内容。可与 Session.Manager、
+// Runner.Planner 共存——各管各的,互不干扰。
 //
-//   - 增量模式(默认):Assembler 在已有 req.System 之后追加 slot 内容。可与
-//     Session.Manager、Runner.Planner 共存——各管各的。适合渐进式接入。
-//
-//   - 全权模式(FullControl=true):Assembler 完全接管 req.System 的构建,
-//     忽略 Session/Planner 先前注入的内容。所有 prompt 片段都通过 Slot 声明,
-//     Assembler 是唯一的 source of truth。使用时应将 Runner.Planner 置 nil,
-//     Session 的摘要通过 ContentFunc slot 拉取而非由 Session.prepare() 注入。
-//
-// 典型用法(全权模式):
+// 典型用法:
 //
 //	asm := prompt.New(
 //	    prompt.SystemSlot("persona", 0, "你是…"),
 //	    prompt.SystemSlot("skills", 50, "").Dynamic(func(prompt.Context) string { return sk.SystemPrompt() }),
 //	    prompt.AfterSlot("guardrail", llm.System, 0, "不要…"),
 //	)
-//	asm.FullControl = true
 //	runner := &agent.Runner{
 //	    Hooks: agent.Hooks{BeforeModel: asm.Hook()},
 //	}
@@ -49,9 +42,7 @@ type Position int
 
 const (
 	// System 把内容合并进 Request.System。
-	// 多个 System slot 按 Priority 排序后以 "\n\n" 拼接。
-	// FullControl=false(默认)时追加在原 Request.System 之后;
-	// FullControl=true 时完全替换 Request.System。
+	// 多个 System slot 按 Priority 排序后以 "\n\n" 拼接,追加在原 Request.System 之后。
 	System Position = iota
 	// Before 作为消息插入到 Request.Messages 最前面(在历史之前)。
 	Before
@@ -168,12 +159,8 @@ type Context struct {
 }
 
 // Assembler 收集 Slot 并组装最终 prompt。并发安全。
+// 采用增量模式:System slot 追加在已有 req.System 之后,与 Session/Planner 共存。
 type Assembler struct {
-	// FullControl 决定 System slot 如何处理 req.System:
-	//   - false(默认):在原 req.System 之后追加。与已有 Session/Planner 共存。
-	//   - true:完全替换 req.System。Assembler 是 system prompt 的唯一来源。
-	FullControl bool
-
 	// SystemBudget 是所有 System slot 合计的 token 上限(0=不限)。
 	// 超出时从低优先级(Priority 值大)开始整条丢弃,直到总量降到预算内。
 	SystemBudget int
@@ -244,22 +231,16 @@ func (a *Assembler) countTokens(s string) int {
 }
 
 // Build 把所有启用的 Slot 按 Position→Priority 组装到 req 中,返回组装后的新请求。
-// 不修改传入的 req(消息切片会被拷贝)。
+// System slot 追加在原 req.System 之后;不修改传入的 req(消息切片会被拷贝)。
 func (a *Assembler) Build(ctx Context, req llm.Request) llm.Request {
 	a.mu.RLock()
 	raw := make([]Slot, len(a.slots))
 	copy(raw, a.slots)
-	fullCtrl := a.FullControl
 	budget := a.SystemBudget
 	a.mu.RUnlock()
 
 	active := a.resolve(raw, ctx)
 	if len(active) == 0 {
-		if fullCtrl {
-			out := req
-			out.System = ""
-			return out
-		}
 		return req
 	}
 
@@ -286,17 +267,12 @@ func (a *Assembler) Build(ctx Context, req llm.Request) llm.Request {
 		}
 	}
 
-	// System 预算裁剪:从低优先级(尾部)开始整条丢弃。
 	if budget > 0 && len(systemParts) > 0 {
 		systemParts = a.applyBudget(systemParts, budget)
 	}
 
 	out := req
-	if fullCtrl {
-		out.System = strings.Join(systemParts, "\n\n")
-	} else {
-		out.System = joinSystem(req.System, systemParts)
-	}
+	out.System = joinSystem(req.System, systemParts)
 	out.Messages = buildMessages(req.Messages, beforeMsgs, afterMsgs, chatSlots)
 	return out
 }

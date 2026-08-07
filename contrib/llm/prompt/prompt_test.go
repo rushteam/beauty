@@ -228,15 +228,15 @@ func TestSystemBudget_DoesNotAffectMessages(t *testing.T) {
 	)
 }
 
-func TestSystemBudget_WithFullControl(t *testing.T) {
+func TestSystemBudget_WithExistingSystem(t *testing.T) {
 	asm := New(
 		SystemSlot("a", 0, "保留"),
 		SystemSlot("b", 100, "丢弃"),
 	)
-	asm.FullControl = true
 	asm.SystemBudget = 4 // "保留" = 2 runes, 在预算内; 加上 "丢弃" + sep = 2+2+2 = 6 > 4
 	out := asm.Build(Context{}, llm.Request{System: "旧内容"})
-	assertSystem(t, out.System, "保留")
+	// 增量模式:旧内容 + 预算内的 slot
+	assertSystem(t, out.System, "旧内容\n\n保留")
 }
 
 // ---- Tests ----
@@ -600,50 +600,19 @@ func TestHook(t *testing.T) {
 	assertSystem(t, req.System, "hook内容")
 }
 
-// ---- FullControl 模式 ----
+// ---- 增量模式 ----
 
-func TestFullControl_ReplacesSystem(t *testing.T) {
-	asm := New(
-		Slot{ID: "persona", Position: System, Priority: 0, Content: "你是助手", Enabled: true},
-		Slot{ID: "planner", Position: System, Priority: 100, Content: "ReAct指令", Enabled: true},
-	)
-	asm.FullControl = true
-
-	// req.System 模拟 Session/Planner 已注入的内容——FullControl 会丢弃它
-	req := llm.Request{System: "Session注入的摘要\n\nPlanner注入的指令"}
-	out := asm.Build(Context{}, req)
-
-	assertSystem(t, out.System, "你是助手\n\nReAct指令")
-}
-
-func TestFullControl_NoSlots_ClearsSystem(t *testing.T) {
+func TestIncremental_NoSlots_PreservesSystem(t *testing.T) {
 	asm := New()
-	asm.FullControl = true
-
-	req := llm.Request{System: "会被清除"}
+	req := llm.Request{System: "不会被清除"}
 	out := asm.Build(Context{}, req)
-
-	assertSystem(t, out.System, "")
-}
-
-func TestFullControl_DisabledSlots_ClearsSystem(t *testing.T) {
-	asm := New(
-		Slot{ID: "off", Position: System, Content: "禁用的", Enabled: false},
-	)
-	asm.FullControl = true
-
-	req := llm.Request{System: "会被清除"}
-	out := asm.Build(Context{}, req)
-
-	assertSystem(t, out.System, "")
+	assertSystem(t, out.System, "不会被清除")
 }
 
 func TestIncremental_PreservesExistingSystem(t *testing.T) {
 	asm := New(
 		Slot{ID: "extra", Position: System, Priority: 0, Content: "追加", Enabled: true},
 	)
-	// FullControl 默认 false
-
 	req := llm.Request{System: "已有内容"}
 	out := asm.Build(Context{}, req)
 
@@ -701,7 +670,6 @@ func TestChainHooks_WithAssembler(t *testing.T) {
 	asm := New(
 		Slot{ID: "s", Position: System, Content: "slot内容", Enabled: true},
 	)
-	asm.FullControl = true
 
 	logged := false
 	logger := func(_ context.Context, _ int, _ *llm.Request) error {
@@ -718,7 +686,7 @@ func TestChainHooks_WithAssembler(t *testing.T) {
 	if !logged {
 		t.Error("logger hook was not called")
 	}
-	assertSystem(t, req.System, "slot内容")
+	assertSystem(t, req.System, "旧\n\nslot内容")
 }
 
 // ---- 其余测试 ----

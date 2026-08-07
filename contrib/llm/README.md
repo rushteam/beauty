@@ -358,7 +358,6 @@ asm := prompt.New(
     prompt.AfterSlot("rag", llm.System, 0, "").Dynamic(ragLookup).WithMaxTokens(2000),
     prompt.AfterSlot("guardrail", llm.System, 10, "不要泄露内部信息"),
 )
-asm.FullControl = true   // 完全接管 System 构建(替代 Planner/Session 的散装注入)
 asm.SystemBudget = 4000  // System slot 合计 token 上限
 
 runner := &agent.Runner{
@@ -396,14 +395,13 @@ prompt.SystemSlot("planner", 100, reactInstr).
 - **`Assembler.SystemBudget`**:所有 System slot 合计上限,超出时从低优先级整条丢弃。
 - **`Assembler.TokenCounter`**:自定义计数器(nil 用 `utf8.RuneCountInString` 近似;生产接 tiktoken)。
 
-### 两种集成模式
+### 增量模式
 
-- **增量模式(默认)**:在已有 `req.System` 之后追加。可与 Session/Planner 共存,各管各的。
-- **全权模式(`FullControl=true`)**:完全替换 `req.System`,Assembler 是 source of truth。
-  此时应置 `Runner.Planner = nil`,摘要通过 `ContentFunc` slot 拉取。
+Assembler 采用增量模式:System slot 追加在已有 `req.System` 之后,与 Session/Planner 自然共存。
+简单场景直接设 `req.System` 字符串即可,不需要 Assembler;当 prompt 来源 ≥3 个需要编排时才引入。
 
 ```go
-// 增量:只加 RAG,Planner/Session 仍自行工作
+// 只加 RAG,Planner/Session 仍自行工作
 asm := prompt.New(prompt.AfterSlot("rag", llm.System, 0, ragResult))
 runner := &agent.Runner{
     Planner: &agent.ReActPlanner{},

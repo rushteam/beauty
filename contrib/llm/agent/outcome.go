@@ -44,10 +44,10 @@ type Resolution struct {
 type RunOutcome struct {
 	Status       RunStatus
 	RunID        string
-	Response     *llm.Response  // Done 时为终态;Paused 时为触发暂停的那轮模型输出
-	Messages     []llm.Message  // 截至当前的规范历史
-	Requirements []Requirement  // Paused 时非空
-	Err          error          // Status=Error 时非 nil
+	Response     *llm.Response // Done 时为终态;Paused 时为触发暂停的那轮模型输出
+	Messages     []llm.Message // 截至当前的规范历史
+	Requirements []Requirement // Paused 时非空
+	Err          error         // Status=Error 时非 nil
 }
 
 // IsDone 表示已得到终态文本回复。

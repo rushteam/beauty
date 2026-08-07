@@ -30,16 +30,16 @@ type RunSnapshot struct {
 	Step         int
 
 	// 嵌套子 run(AgentAsTool / chain step / team member / parallel branch)
-	ChildRunID string
+	ChildRunID  string
 	ChildSource string
 
 	// chain
-	ChainStep int
+	ChainStep   int
 	LastContent string // 上一步终态文本,供后续 stepReq
 
 	// team
-	Member string
-	HandoffCount int
+	Member        string
+	HandoffCount  int
 	HandoffWindow []string
 
 	// parallel

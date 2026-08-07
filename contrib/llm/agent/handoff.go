@@ -142,12 +142,12 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 			src := "team:" + current
 			reqs := remapRequirements(out.Requirements, src)
 			snap := &RunSnapshot{
-				Kind:         "team",
-				Request:      base,
-				Member:       current,
-				ChildRunID:   out.RunID,
-				ChildSource:  src,
-				Requirements: reqs,
+				Kind:          "team",
+				Request:       base,
+				Member:        current,
+				ChildRunID:    out.RunID,
+				ChildSource:   src,
+				Requirements:  reqs,
 				HandoffWindow: append([]string{}, tracker.history...),
 			}
 			_ = tm.Store.Save(ctx, runID, snap)

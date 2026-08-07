@@ -176,30 +176,36 @@ type Runner struct {
 	Tools    []Tool
 	MaxSteps int
 
-	Name        string
-	Description string
-	Planner     Planner
-	ParallelTools *bool
-	OnStep      func(step int, resp *llm.Response)
-	Hooks       Hooks
-	Steer       *Steer
+	Name           string
+	Description    string
+	Planner        Planner
+	ParallelTools  *bool
+	OnStep         func(step int, resp *llm.Response)
+	Hooks          Hooks
+	Steer          *Steer
 	RepairToolArgs bool
-	Compactor   *Compactor
+	Compactor      *Compactor
 
 	// Store 持久化暂停快照;nil 时用内置 MemoryRunStore(进程内)。
 	Store RunStore
 
 	// nestedResume 保存 AgentAsTool 等冒泡暂停时的子 Continue 回调(进程内,不入 Store)。
 	nestedResume sync.Map // runID → func(ctx, []Resolution) RunOutcome
+
+	// storeOnce 保护 Store 的懒初始化:同一个 *Runner 可被 BestOfN/Parallel 等并发复用,
+	// 多个 goroutine 可能同时首次调用 Run/Continue,若不加同步会在 Store 字段上产生数据竞争。
+	storeOnce sync.Once
 }
 
 var _ StreamAgent = (*Runner)(nil)
 
-// ensureStore 在首次 Run 时初始化默认 Store。
+// ensureStore 在首次 Run 时初始化默认 Store。并发安全(见 storeOnce 注释)。
 func (r *Runner) ensureStore() {
-	if r.Store == nil {
-		r.Store = NewMemoryRunStore()
-	}
+	r.storeOnce.Do(func() {
+		if r.Store == nil {
+			r.Store = NewMemoryRunStore()
+		}
+	})
 }
 
 // Info 实现 Agent。

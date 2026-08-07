@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [gorm, sqldb, elasticsearch, nats, natsjs, kafka, llm, vector, mcp]
+        module: [gorm, sqldb, elasticsearch, nats, natsjs, kafka, llm, vector, mcp, spire]
     defaults:
       run:
         working-directory: contrib/${{ matrix.module }}

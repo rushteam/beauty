@@ -357,6 +357,10 @@ Beauty 的发现客户端只返回 `kind == "grpc"` 的实例。非 Beauty 服�
 Beauty 不在注册 metadata 中嵌入 TLS 信息。客户端需要独立配置传输凭证（TLS / mTLS），
 或通过 xDS 等外部控制面管理证书。
 
+SPIFFE/SPIRE 工作负载身份见独立模块 [`contrib/spire`](../contrib/spire):Workload API 发
+X509-SVID,接到 `WithTLSConfig` / `WithGRPCDialOptions` / `resty.WithBaseTransport`,可选把对端
+SPIFFE ID 映射到 `auth.User` / `authz.Subject`。
+
 ---
 
 ## 总结：如何选择

@@ -130,7 +130,7 @@ func NewServiceDiscoveryHTTPClient(discovery discover.Discovery, serviceName str
 	}
 	t := &discoveryTransport{
 		discoveryConfig: cfg,
-		base:            newDefaultTransport(),
+		base:            wrapDiscoveryBase(cfg.base),
 		rr:              loadbalance.NewRoundRobin[httpServiceNode](nil),
 		wrr:             loadbalance.NewWeightedRoundRobin[httpServiceNode](nil),
 	}
@@ -144,6 +144,12 @@ func NewServiceDiscoveryHTTPClient(discovery discover.Discovery, serviceName str
 // 仅在 ServiceDiscoveryHTTPClient 上生效(配置 *http.Client.Timeout)。
 func WithHTTPTimeout(d time.Duration) HTTPDiscoveryOption {
 	return func(c *discoveryConfig) { c.timeout = d }
+}
+
+// WithHTTPBaseTransport 设置发现客户端最内层 RoundTripper(默认 http.DefaultTransport)。
+// 外层仍包 otel;适合注入自定义 TLS / mTLS(如 SPIFFE SVID)。
+func WithHTTPBaseTransport(rt http.RoundTripper) HTTPDiscoveryOption {
+	return func(c *discoveryConfig) { c.base = rt }
 }
 
 // Start 启动客户端:拉取初始服务列表并启动 watch。幂等。

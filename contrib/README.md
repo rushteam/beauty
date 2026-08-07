@@ -52,10 +52,12 @@ cd contrib/gorm && go test ./...
 | [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
 | [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
 | [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
+| [`contrib/spire`](spire) | SPIFFE/SPIRE Workload API:X509-SVID mTLS + SPIFFE ID→auth/authz | go-spiffe/v2 |
 
 `contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
 接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/authz.Enforcer` 接口——这些都 `require
-github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/gorm`、`contrib/sqldb`、
+github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/spire` 对接核心 auth/authz 与
+TLS 钩子(本地联调暂用 `replace`,发布前去掉);`contrib/gorm`、`contrib/sqldb`、
 `contrib/elasticsearch`、`contrib/llm`、`contrib/vector`、`contrib/mcp` 不依赖核心,可完全独立使用
 (其中 `llm`/`vector` 纯标准库、零外部依赖;`mcp` 的 `Service` 结构上满足 `beauty.Service`)。
 `contrib/mcpagent` 不依赖核心,但依赖 `llm` 与 `mcp`(胶水模块,`go.mod` 用 `replace` 本地联调)。

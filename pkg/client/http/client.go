@@ -31,7 +31,11 @@ func NewHTTPClient(opts ...ClientOption) *http.Client {
 	// 传输链(外→内):缓存 → 熔断 → 重试 → otel → base。
 	// 缓存在最外:命中时跳过熔断/重试(无网络开销);熔断在缓存之内:只统计实际下游请求;
 	// otel 在最内:每次实际尝试各自成 span。
-	var rt http.RoundTripper = otelhttp.NewTransport(http.DefaultTransport, cfg.otelOpts...)
+	base := cfg.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	var rt http.RoundTripper = otelhttp.NewTransport(base, cfg.otelOpts...)
 	if cfg.retry != nil {
 		retryable := cfg.retryable
 		if retryable == nil {
@@ -50,6 +54,7 @@ func NewHTTPClient(opts ...ClientOption) *http.Client {
 
 type clientConfig struct {
 	timeout    time.Duration
+	base       http.RoundTripper
 	otelOpts   []otelhttp.Option
 	retry      *backoff.Policy
 	retryable  RetryableFunc
@@ -65,6 +70,14 @@ type ClientOption func(*clientConfig)
 func WithTimeout(d time.Duration) ClientOption {
 	return func(c *clientConfig) {
 		c.timeout = d
+	}
+}
+
+// WithBaseTransport 设置最内层 RoundTripper(默认 http.DefaultTransport)。
+// 适合注入自定义 TLS / mTLS(如 SPIFFE SVID)或自定义连接池;外层仍会包 otel/重试/熔断/缓存。
+func WithBaseTransport(rt http.RoundTripper) ClientOption {
+	return func(c *clientConfig) {
+		c.base = rt
 	}
 }
 

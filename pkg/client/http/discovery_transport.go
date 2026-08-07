@@ -60,13 +60,14 @@ type discoveryConfig struct {
 	retryDelay      time.Duration
 	retryOnDiffNode bool
 	timeout         time.Duration // http.Client 超时(仅 client 层生效)
+	base            http.RoundTripper
 	// 服务治理:节点级熔断 + 路由过滤。默认 NoopBreaker/NoopRouter,零开销。
 	breaker governancecb.CircuitBreaker
 	router  governancerouter.ServiceRouter
 }
 
 // NewDiscoveryTransport 创建服务发现 RoundTripper。
-// base 为 nil 时用 otelhttp 包装的 http.DefaultTransport。
+// 未设 WithHTTPBaseTransport 时用 otelhttp 包装的 http.DefaultTransport。
 // 返回的 RoundTripper 可直接塞进 http.Client.Transport,或用 NewServiceDiscoveryHTTPClient 包装。
 func NewDiscoveryTransport(discovery discover.Discovery, serviceName string, opts ...HTTPDiscoveryOption) http.RoundTripper {
 	cfg := discoveryConfig{
@@ -83,7 +84,7 @@ func NewDiscoveryTransport(discovery discover.Discovery, serviceName string, opt
 	}
 	t := &discoveryTransport{
 		discoveryConfig: cfg,
-		base:            newDefaultTransport(),
+		base:            wrapDiscoveryBase(cfg.base),
 		rr:              loadbalance.NewRoundRobin[httpServiceNode](nil),
 		wrr:             loadbalance.NewWeightedRoundRobin[httpServiceNode](nil),
 	}
@@ -458,7 +459,15 @@ func (t *discoveryTransport) GetServiceInfo() []discover.ServiceInfo {
 }
 
 func newDefaultTransport() http.RoundTripper {
-	return otelhttp.NewTransport(http.DefaultTransport)
+	return wrapDiscoveryBase(nil)
+}
+
+// wrapDiscoveryBase 用 otelhttp 包装最内层 RoundTripper;rt 为 nil 时用 http.DefaultTransport。
+func wrapDiscoveryBase(rt http.RoundTripper) http.RoundTripper {
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
+	return otelhttp.NewTransport(rt)
 }
 
 var _ http.RoundTripper = (*discoveryTransport)(nil)

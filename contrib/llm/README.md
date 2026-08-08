@@ -511,6 +511,66 @@ r := &agent.Runner{Client: cc, ...}
 fmt.Println(cc.Stats()) // {Hits: 12, Misses: 3}
 ```
 
+## Chat Template / Instruct 格式(`llm/instruct`)
+
+本地模型(Llama、Mistral、Qwen 等)各有不同的 chat template 格式。大部分 OpenAI 兼容服务端
+(ollama、vLLM、llama.cpp)会自动处理,但以下两种场景需要客户端侧格式化:
+
+1. **Completion 端点**:本地部署只暴露 `/v1/completions`(text completion),需要手动拼 prompt。
+2. **Chat 端点但模板不对**:服务端内置 chat template 跟模型训练格式不匹配,需要客户端覆盖。
+
+```go
+import (
+    "github.com/rushteam/beauty/contrib/llm/openai"
+    "github.com/rushteam/beauty/contrib/llm/instruct"
+)
+
+// 走 /v1/completions 端点,用 Llama 3 chat template 格式化
+cli := openai.New(key,
+    openai.WithBaseURL("http://localhost:8080/v1"),
+    openai.WithCompletionMode(&instruct.Llama3),
+)
+// 之后照常用——Generate/Stream 内部自动格式化 + 合并 stop tokens
+resp, _ := cli.Generate(ctx, llm.Request{
+    Model:  "meta-llama/Llama-3.1-8B-Instruct",
+    System: "You are helpful.",
+    Messages: []llm.Message{{Role: llm.User, Content: "hello"}},
+})
+```
+
+内置模板:
+
+| 模板 | 适用模型 | 格式示例 |
+|---|---|---|
+| `instruct.ChatML` | Qwen、Yi、通用 fine-tune | `<\|im_start\|>system\n...<\|im_end\|>` |
+| `instruct.Llama3` | Meta Llama 3/3.1/3.2 | `<\|begin_of_text\|><\|start_header_id\|>system...` |
+| `instruct.Mistral` | Mistral / Mixtral | `<s>[INST] ... [/INST]` |
+| `instruct.Alpaca` | Stanford Alpaca / Vicuna | `### System:\n...\n### Instruction:\n...` |
+| `instruct.Gemma` | Google Gemma | `<start_of_turn>user\n[System: ...]...` |
+
+自定义模板:
+
+```go
+myTemplate := &instruct.Template{
+    Name:            "my-model",
+    BOS:             "<s>",
+    SystemPrefix:    "<|system|>\n",
+    SystemSuffix:    "</s>\n",
+    UserPrefix:      "<|user|>\n",
+    UserSuffix:      "</s>\n",
+    AssistantPrefix: "<|assistant|>\n",
+    AssistantSuffix: "</s>\n",
+    StopStrings:     []string{"</s>"},
+}
+cli := openai.New(key, openai.WithCompletionMode(myTemplate))
+```
+
+也可直接用 `Template.Format(req)` 获取格式化后的纯文本(不经 provider):
+
+```go
+prompt := instruct.Llama3.Format(req) // 拿到格式化文本,自行发 HTTP
+```
+
 ## 多厂商适配
 
 **大部分厂商提供 OpenAI 兼容端点,换 `WithBaseURL` 即用同一 `openai` provider,无需专门适配:**

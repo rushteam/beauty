@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/rushteam/beauty/contrib/llm"
+	"github.com/rushteam/beauty/contrib/llm/instruct"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
@@ -31,7 +32,8 @@ const (
 )
 
 // Client 实现 llm.Client 与 llm.Embedder。支持 OpenAI、OpenAI 兼容厂商(换 BaseURL)、
-// 以及 Azure OpenAI(见 NewAzure)。
+// 以及 Azure OpenAI(见 NewAzure)。WithCompletionMode 可切换为 /v1/completions 端点
+// (配合 instruct.Template 做 chat template 客户端格式化)。
 type Client struct {
 	apiKey     string
 	baseURL    string
@@ -43,6 +45,8 @@ type Client struct {
 	keyPrefix  string // 默认 "Bearer "
 	deployment string // 非空 → Azure 部署名,URL 走 /openai/deployments/<dep>/...
 	apiVersion string // 非空 → 追加 ?api-version=<v>(Azure)
+
+	instTmpl *instruct.Template // 非 nil → completion mode
 }
 
 // Option 配置 Client。
@@ -66,6 +70,18 @@ func WithAPIKeyHeader(header, prefix string) Option {
 // WithAzure 配置 Azure OpenAI 寻址:deployment 部署名 + api-version。
 func WithAzure(deployment, apiVersion string) Option {
 	return func(c *Client) { c.deployment, c.apiVersion = deployment, apiVersion }
+}
+
+// WithCompletionMode 启用 text completion 模式:请求走 /v1/completions 而非 /v1/chat/completions,
+// 用 instruct.Template 把 messages 格式化为单一 prompt 文本。适用于只暴露 completions 端点的本地
+// 模型部署,或需要覆盖服务端内置 chat template 的场景。模板的 StopStrings 会自动合并到请求中。
+//
+//	cli := openai.New(key,
+//	    openai.WithBaseURL("http://localhost:8080/v1"),
+//	    openai.WithCompletionMode(&instruct.Llama3),
+//	)
+func WithCompletionMode(tmpl *instruct.Template) Option {
+	return func(c *Client) { c.instTmpl = tmpl }
 }
 
 // New 创建客户端。默认 OpenAI 认证(Authorization: Bearer <key>)。
@@ -270,8 +286,112 @@ func buildResponseFormat(rf *llm.ResponseFormat) any {
 	return map[string]string{"type": rf.Type}
 }
 
+// ---- completions 端点(instruct mode) ----
+
+type completionReq struct {
+	Model       string   `json:"model"`
+	Prompt      string   `json:"prompt"`
+	MaxTokens   int      `json:"max_tokens,omitempty"`
+	Temperature float64  `json:"temperature,omitempty"`
+	Stop        []string `json:"stop,omitempty"`
+	Stream      bool     `json:"stream,omitempty"`
+}
+
+func (c *Client) generateCompletion(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	resp, err := c.post(ctx, "completions", completionReq{
+		Model: req.Model, Prompt: c.instTmpl.Format(req),
+		MaxTokens: req.MaxTokens, Temperature: req.Temperature,
+		Stop: c.instTmpl.MergeStops(req.Stop),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("openai: completion request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, apiError(resp)
+	}
+	var out struct {
+		Model   string `json:"model"`
+		Choices []struct {
+			Text         string `json:"text"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("openai: completion decode: %w", err)
+	}
+	r := &llm.Response{Model: out.Model, Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}}
+	if len(out.Choices) > 0 {
+		r.Content = out.Choices[0].Text
+		r.StopReason = out.Choices[0].FinishReason
+	}
+	return r, nil
+}
+
+func (c *Client) streamCompletion(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
+	resp, err := c.post(ctx, "completions", completionReq{
+		Model: req.Model, Prompt: c.instTmpl.Format(req),
+		MaxTokens: req.MaxTokens, Temperature: req.Temperature,
+		Stop: c.instTmpl.MergeStops(req.Stop), Stream: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("openai: completion request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		return nil, apiError(resp)
+	}
+	out := make(chan llm.Chunk)
+	go func() {
+		defer close(out)
+		defer resp.Body.Close()
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			data, ok := strings.CutPrefix(line, "data:")
+			if !ok {
+				continue
+			}
+			data = strings.TrimSpace(data)
+			if data == "[DONE]" {
+				out <- llm.Chunk{Done: true}
+				return
+			}
+			var ev struct {
+				Choices []struct {
+					Text string `json:"text"`
+				} `json:"choices"`
+			}
+			if json.Unmarshal([]byte(data), &ev) != nil {
+				continue
+			}
+			if len(ev.Choices) > 0 && ev.Choices[0].Text != "" {
+				select {
+				case out <- llm.Chunk{Delta: ev.Choices[0].Text}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+		if err := sc.Err(); err != nil {
+			out <- llm.Chunk{Err: fmt.Errorf("openai: completion stream: %w", err)}
+			return
+		}
+		out <- llm.Chunk{Done: true}
+	}()
+	return out, nil
+}
+
 // Generate 实现 llm.Client。
 func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	if c.instTmpl != nil {
+		return c.generateCompletion(ctx, req)
+	}
 	resp, err := c.post(ctx, "chat/completions", chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
@@ -317,7 +437,11 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 
 // Stream 实现 llm.Client(SSE:data: {json} ... data: [DONE])。
 // 透传文本增量,并组装流式 tool_calls(按 index 拼接 arguments),在 Done 时带回完整 ToolCalls。
+// Completion mode 下走 /v1/completions 的流式格式(delta 在 choices[0].text)。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
+	if c.instTmpl != nil {
+		return c.streamCompletion(ctx, req)
+	}
 	body := chatReq{
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,

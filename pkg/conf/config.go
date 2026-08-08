@@ -54,6 +54,12 @@ func (l *fileLoader) Watch(ctx context.Context, fn func()) {
 //	conf.New("etcd://127.0.0.1:2379/myapp/config.yaml")
 //	conf.New("nacos://127.0.0.1:8848/myapp.yaml?namespace=dev&group=DEFAULT_GROUP")
 //	conf.New("consul://127.0.0.1:8500/myapp/config.yaml")
+//
+// 密钥与配置分离：YAML 中写占位符，再用 WithSecrets 包装 Loader：
+//
+//	loader, _ := conf.New("config.yaml")
+//	loader = conf.WithSecrets(loader) // ${env:NAME} / ${file:/path}
+//	loader.Unmarshal(&cfg)
 func New(rawURL string) (Loader, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {

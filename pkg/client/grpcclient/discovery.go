@@ -529,7 +529,7 @@ func (c *ServiceDiscoveryClient) selectService(ctx context.Context, services []d
 
 // pickWithBreaker 从负载均衡器选节点,跳过熔断/被ban的节点。
 // 最多尝试 maxAttempts 次(=候选数),防死循环。候选集用于校验选出的节点是否仍可用。
-func pickWithBreaker(ctx context.Context, breaker governancecb.CircuitBreaker, maxAttempts int, next func() (discover.ServiceInfo, bool), candidates []discover.ServiceInfo) *discover.ServiceInfo {
+func pickWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker, maxAttempts int, next func() (discover.ServiceInfo, bool), candidates []discover.ServiceInfo) *discover.ServiceInfo {
 	candidateSet := make(map[string]bool, len(candidates))
 	for _, s := range candidates {
 		candidateSet[s.Addr] = true

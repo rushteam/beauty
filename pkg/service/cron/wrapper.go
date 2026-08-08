@@ -27,10 +27,7 @@ func getFunctionName(i any) string {
 
 	// 如果包含多个点号，说明是结构体方法
 	if strings.Count(relevantPart, ".") > 1 {
-		// 移除 -fm 后缀（如果存在）
-		if strings.HasSuffix(relevantPart, "-fm") {
-			relevantPart = relevantPart[:len(relevantPart)-3]
-		}
+		relevantPart = strings.TrimSuffix(relevantPart, "-fm")
 	}
 
 	return relevantPart

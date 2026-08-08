@@ -113,7 +113,7 @@ func (r *Record) SignIn(now time.Time) ([]Reward, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.lastDay.IsZero() && dayOnly(r.lastDay) == today {
+	if !r.lastDay.IsZero() && dayOnly(r.lastDay).Equal(today) {
 		return nil, ErrAlreadySigned
 	}
 

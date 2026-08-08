@@ -75,12 +75,13 @@ func buildHTTPMetadata(r *http.Request) map[string]any {
 
 // handleRateLimitError 处理限流错误
 func handleRateLimitError(w http.ResponseWriter, err error) {
-	if err == ErrRateLimitExceeded {
+	switch err {
+	case ErrRateLimitExceeded:
 		w.Header().Set("X-RateLimit-Limit", "exceeded")
 		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-	} else if err == context.DeadlineExceeded {
+	case context.DeadlineExceeded:
 		http.Error(w, "Request timeout while waiting for rate limit", http.StatusRequestTimeout)
-	} else {
+	default:
 		http.Error(w, "Rate limit error", http.StatusInternalServerError)
 	}
 }

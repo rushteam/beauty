@@ -61,7 +61,8 @@ func WithMetadata(md map[string]string) Option {
 func WithAutoServiceDiscovery(registries []discover.Registry, sdOpts ...ServiceDiscoveryOption) Option {
 	return func(s *Server) {
 		s.autoDiscover = true
-		s.serviceDiscovery = NewServiceDiscovery(s.Server, registries, sdOpts...)
+		s.sdRegistries = registries
+		s.sdOpts = sdOpts
 	}
 }
 
@@ -204,6 +205,8 @@ type Server struct {
 	// 服务发现相关字段
 	serviceDiscovery *ServiceDiscovery
 	autoDiscover     bool
+	sdRegistries     []discover.Registry
+	sdOpts           []ServiceDiscoveryOption
 }
 
 // Start ..
@@ -221,6 +224,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// 如果启用了自动服务发现
 	var waitRegistrations func()
+	if s.autoDiscover && s.serviceDiscovery == nil && s.sdRegistries != nil {
+		s.serviceDiscovery = NewServiceDiscovery(s.Server, s.sdRegistries, s.sdOpts...)
+	}
 	if s.autoDiscover && s.serviceDiscovery != nil {
 		if err := s.serviceDiscovery.DiscoverServices(s.addr, s.metadata); err != nil {
 			logger.Error("service discovery failed", "error", err)

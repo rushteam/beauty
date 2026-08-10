@@ -115,15 +115,16 @@ var (
 )
 
 type chatReq struct {
-	Model          string       `json:"model"`
-	Messages       []oaiMessage `json:"messages"`
-	MaxTokens      int          `json:"max_tokens,omitempty"`
-	Temperature    float64      `json:"temperature,omitempty"`
-	Stop           []string     `json:"stop,omitempty"`
-	Stream         bool         `json:"stream,omitempty"`
-	Tools          []oaiTool    `json:"tools,omitempty"`
-	ToolChoice     any          `json:"tool_choice,omitempty"`
-	ResponseFormat any          `json:"response_format,omitempty"`
+	Model            string       `json:"model"`
+	Messages         []oaiMessage `json:"messages"`
+	MaxTokens        int          `json:"max_tokens,omitempty"`
+	Temperature      float64      `json:"temperature,omitempty"`
+	Stop             []string     `json:"stop,omitempty"`
+	Stream           bool         `json:"stream,omitempty"`
+	Tools            []oaiTool    `json:"tools,omitempty"`
+	ToolChoice       any          `json:"tool_choice,omitempty"`
+	ResponseFormat   any          `json:"response_format,omitempty"`
+	ReasoningEffort  string       `json:"reasoning_effort,omitempty"`
 }
 
 // oaiMessage 是 OpenAI 的线上消息格式。Content 可能是 string(纯文本)或 []oaiContentPart(多模态)。
@@ -387,17 +388,26 @@ func (c *Client) streamCompletion(ctx context.Context, req llm.Request) (<-chan 
 	return out, nil
 }
 
+func buildChatReq(req llm.Request, stream bool) chatReq {
+	cr := chatReq{
+		Model: req.Model, Messages: buildMessages(req),
+		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
+		Stream: stream,
+		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
+		ResponseFormat: buildResponseFormat(req.ResponseFormat),
+	}
+	if req.Thinking != nil && req.Thinking.ReasoningEffort != "" {
+		cr.ReasoningEffort = req.Thinking.ReasoningEffort
+	}
+	return cr
+}
+
 // Generate 实现 llm.Client。
 func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	if c.instTmpl != nil {
 		return c.generateCompletion(ctx, req)
 	}
-	resp, err := c.post(ctx, "chat/completions", chatReq{
-		Model: req.Model, Messages: buildMessages(req),
-		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
-		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
-		ResponseFormat: buildResponseFormat(req.ResponseFormat),
-	})
+	resp, err := c.post(ctx, "chat/completions", buildChatReq(req, false))
 	if err != nil {
 		return nil, fmt.Errorf("openai: request: %w", err)
 	}
@@ -409,8 +419,9 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
-				Content   string        `json:"content"`
-				ToolCalls []oaiToolCall `json:"tool_calls"`
+				Content          string        `json:"content"`
+				ReasoningContent string        `json:"reasoning_content"`
+				ToolCalls        []oaiToolCall `json:"tool_calls"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -425,6 +436,7 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	r := &llm.Response{Model: out.Model, Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}}
 	if len(out.Choices) > 0 {
 		r.Content = out.Choices[0].Message.Content
+		r.Thinking = out.Choices[0].Message.ReasoningContent
 		r.StopReason = out.Choices[0].FinishReason
 		for _, tc := range out.Choices[0].Message.ToolCalls {
 			r.ToolCalls = append(r.ToolCalls, llm.ToolCall{
@@ -436,19 +448,13 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 }
 
 // Stream 实现 llm.Client(SSE:data: {json} ... data: [DONE])。
-// 透传文本增量,并组装流式 tool_calls(按 index 拼接 arguments),在 Done 时带回完整 ToolCalls。
+// 透传文本增量和思考增量,并组装流式 tool_calls(按 index 拼接 arguments),在 Done 时带回完整 ToolCalls。
 // Completion mode 下走 /v1/completions 的流式格式(delta 在 choices[0].text)。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
 	if c.instTmpl != nil {
 		return c.streamCompletion(ctx, req)
 	}
-	body := chatReq{
-		Model: req.Model, Messages: buildMessages(req),
-		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop, Stream: true,
-		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
-		ResponseFormat: buildResponseFormat(req.ResponseFormat),
-	}
-	resp, err := c.post(ctx, "chat/completions", body)
+	resp, err := c.post(ctx, "chat/completions", buildChatReq(req, true))
 	if err != nil {
 		return nil, fmt.Errorf("openai: request: %w", err)
 	}
@@ -467,12 +473,13 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			args     strings.Builder
 		}
 		byIdx := map[int]*acc{}
+		var thinkingSB strings.Builder
 		finish := func() {
+			thinking := thinkingSB.String()
 			if len(byIdx) == 0 {
-				out <- llm.Chunk{Done: true}
+				out <- llm.Chunk{Done: true, Thinking: thinking}
 				return
 			}
-			// 按 index 稳定排序
 			idxs := make([]int, 0, len(byIdx))
 			for i := range byIdx {
 				idxs = append(idxs, i)
@@ -489,7 +496,7 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 					ID: a.id, Name: a.name, Arguments: json.RawMessage(args),
 				})
 			}
-			out <- llm.Chunk{Done: true, ToolCalls: tcs}
+			out <- llm.Chunk{Done: true, ToolCalls: tcs, Thinking: thinking}
 		}
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
@@ -505,8 +512,9 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			var ev struct {
 				Choices []struct {
 					Delta struct {
-						Content   string `json:"content"`
-						ToolCalls []struct {
+						Content          string `json:"content"`
+						ReasoningContent string `json:"reasoning_content"`
+						ToolCalls        []struct {
 							Index    int    `json:"index"`
 							ID       string `json:"id"`
 							Function struct {
@@ -524,6 +532,14 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 				continue
 			}
 			d := ev.Choices[0].Delta
+			if d.ReasoningContent != "" {
+				thinkingSB.WriteString(d.ReasoningContent)
+				select {
+				case out <- llm.Chunk{ThinkingDelta: d.ReasoningContent}:
+				case <-ctx.Done():
+					return
+				}
+			}
 			if d.Content != "" {
 				select {
 				case out <- llm.Chunk{Delta: d.Content}:

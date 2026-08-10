@@ -35,6 +35,9 @@ cd contrib/gorm && go test ./...
 
 | 模块 | 能力 | 主要依赖 |
 |---|---|---|
+| [`contrib/connectrpc`](connectrpc) | Connect 协议一等公民集成:基于 `net/http` 的 Protobuf RPC,同时兼容 gRPC/gRPC-Web/Connect 三协议;服务端(`Server`)实现 `beauty.Service` + `discover.Service`,自动 H2C、gRPC 健康检查、OTel、按 protobuf 服务名注册到注册中心;客户端(`Transport`)实现 `http.RoundTripper`,集成服务发现 + 轮询负载均衡 | connectrpc.com/connect、grpchealth |
+| [`contrib/kitex`](kitex) | Kitex Thrift 一等公民集成:嵌入 `cloudwego/kitex` Server 为 `beauty.Service` + `discover.Service`,按 Thrift 服务名注册到注册中心;客户端 `ResolverAdapter` 将 beauty Discovery 适配为 Kitex Resolver | cloudwego/kitex |
+| [`contrib/codec/kitex`](codec/kitex) | Kitex 注册中心格式编解码:KVCodec (etcd) + Codec (nacos/consul),使 beauty 服务以 Kitex 原生格式注册,Kitex 客户端可直接发现 | 无(纯 beauty core) |
 | [`contrib/gorm`](gorm) | GORM 集成:读写分离(dbresolver)、otelgorm 链路、slog 日志桥、错误映射 | gorm.io/gorm、driver/mysql、otelgorm |
 | [`contrib/sqldb`](sqldb) | database/sql 读写分离 + OTel(otelsql),配合 **sqlc**/sqlx/手写 SQL | XSAM/otelsql |
 | [`contrib/nats`](nats) | `pkg/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
@@ -54,6 +57,10 @@ cd contrib/gorm && go test ./...
 | [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
 | [`contrib/spire`](spire) | SPIFFE/SPIRE Workload API:X509-SVID mTLS + SPIFFE ID→auth/authz | go-spiffe/v2 |
 
+`contrib/connectrpc` 和 `contrib/kitex` 实现核心 `beauty.Service` 和 `discover.Service` 接口,
+分别将 Connect 协议和 Kitex Thrift 协议作为与 `grpcserver` 对等的一等公民服务类型(依赖核心)。
+`contrib/codec/kitex` 与 `contrib/codec/gozero`、`contrib/codec/kratos` 同级,提供 Kitex 注册
+格式编解码,实现跨框架服务互通。
 `contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
 接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/authz.Enforcer` 接口——这些都 `require
 github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/spire` 对接核心 auth/authz 与

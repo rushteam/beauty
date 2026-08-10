@@ -148,6 +148,123 @@ loader.Watch(ctx, func() {
 
 > `Unmarshal` 每次调用都从最新内容解析，热加载后直接调用即可拿到新值，无需额外同步。
 
+## 密钥与配置分离（Secret Placeholders）
+
+YAML 中写占位符，运行时由 `WithSecrets` 自动解析，避免把敏感信息硬编码在配置文件中。
+
+### 占位符语法
+
+```
+${scheme:reference}           # 必须存在，否则报错（strict 模式）
+${scheme:reference:-default}  # 解析失败时使用 default 值
+```
+
+### 内置 Provider
+
+| scheme | 说明 | 示例 |
+|--------|------|------|
+| `env` | 从进程环境变量读取 | `${env:DB_PASSWORD}` |
+| `file` | 读取文件内容（自动 trim 末尾换行） | `${file:/var/run/secrets/db-pass}` |
+| `dotenv` | 从 .env 文件读取，不污染进程环境 | `${dotenv:API_KEY}` |
+
+### 用法
+
+```go
+loader, _ := conf.New("config.yaml")
+loader = conf.WithSecrets(loader) // 默认启用 env + file Provider
+loader.Unmarshal(&cfg)
+```
+
+配置文件示例：
+
+```yaml
+database:
+  password: "${env:DB_PASSWORD}"
+tls:
+  key: "${file:/var/run/secrets/tls.key}"
+api:
+  token: "${env:API_TOKEN:-default-token}"
+```
+
+### 自定义 Provider
+
+实现 `conf.Provider` 接口即可扩展（如对接 Vault、AWS Secrets Manager）：
+
+```go
+loader = conf.WithSecrets(loader,
+    conf.EnvProvider(),
+    conf.MapProvider("secret", map[string]string{"api": "tok"}),
+)
+```
+
+### 独立使用
+
+也可以脱离 Loader 单独使用占位符扩展：
+
+```go
+// 扩展单个字符串
+val, _ := conf.ExpandString(ctx, "pw=${env:DB_PASS}", conf.EnvProvider())
+
+// 扩展整个结构体的 string 字段
+conf.Expand(ctx, &cfg, conf.EnvProvider(), conf.FileProvider())
+```
+
+## .env 文件支持
+
+通过 [godotenv](https://github.com/joho/godotenv) 支持从 `.env` 文件加载环境变量，适用于本地开发环境。
+
+### 方式一：加载到进程环境
+
+将 `.env` 变量注入进程环境，之后 `${env:VAR}` 占位符和 `os.Getenv` 均可访问。
+
+```go
+// 加载 .env（不覆盖已有环境变量）
+conf.LoadDotEnv()
+
+// 加载多个文件，按顺序加载
+conf.LoadDotEnv(".env", ".env.local")
+
+// 覆盖模式：.env.local 强制覆盖已有变量
+conf.OverloadDotEnv(".env", ".env.local")
+
+// 然后正常使用 WithSecrets
+loader, _ := conf.New("config.yaml")
+loader = conf.WithSecrets(loader) // ${env:VAR} 可解析 .env 中的变量
+```
+
+> `LoadDotEnv` 不覆盖已有环境变量（Docker/K8s 注入的优先），`OverloadDotEnv` 强制覆盖（本地调试用）。
+
+### 方式二：DotEnvProvider（不污染进程环境）
+
+直接从 `.env` 文件读取，使用 `${dotenv:VAR}` 语法，不影响 `os.Getenv`：
+
+```go
+loader, _ := conf.New("config.yaml")
+loader = conf.WithSecrets(loader,
+    conf.EnvProvider(),                      // ${env:VAR} — 进程环境
+    conf.DotEnvProvider(".env", ".env.local"), // ${dotenv:VAR} — .env 文件
+)
+```
+
+配置文件示例：
+
+```yaml
+database:
+  host: "${dotenv:DB_HOST}"
+  password: "${env:DB_PASSWORD:-dev123}"
+```
+
+### .env 文件格式
+
+```bash
+# 注释
+DB_HOST=localhost
+DB_PORT=5432
+DB_PASSWORD="s3cr3t"    # 支持引号
+API_KEY='abc-123'       # 单引号
+MULTILINE="line1\nline2" # 转义
+```
+
 ## 扩展：注册自定义配置中心
 
 实现 `conf.ConfigCenter` 接口，在 `init()` 中注册即可：

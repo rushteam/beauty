@@ -27,6 +27,11 @@ import (
 	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
+func init() {
+	discover.RegisterCodec("kitex", NewCodec())
+	discover.RegisterKVCodec("kitex", NewKVCodec("kitex/registry-etcd"))
+}
+
 // instanceInfo 对应 kitex-contrib/registry-etcd 的注册值格式。
 type instanceInfo struct {
 	Network string            `json:"network"`

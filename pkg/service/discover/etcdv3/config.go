@@ -20,6 +20,11 @@ type Config struct {
 	// 为 nil 时使用 beauty 原生格式。
 	// 三方格式实现见 contrib/codec/gozero、contrib/codec/kratos 等。
 	Codec discover.KVCodec `mapstructure:"-" schema:"-"`
+
+	// CodecName 通过名称引用已注册的 KVCodec（discover.RegisterKVCodec）。
+	// URL 方式使用：etcd://host/svc?codec=kratos
+	// 优先级：Codec > CodecName > 默认 beauty。
+	CodecName string `mapstructure:"codec_name" schema:"codec"`
 }
 
 func (c *Config) String() string {
@@ -42,6 +47,11 @@ func (c *Config) String() string {
 func (c *Config) effectiveKVCodec() discover.KVCodec {
 	if c != nil && c.Codec != nil {
 		return c.Codec
+	}
+	if c != nil && c.CodecName != "" {
+		if codec, ok := discover.GetKVCodec(c.CodecName); ok {
+			return codec
+		}
 	}
 	prefix := "beauty"
 	if c != nil && c.Prefix != "" {

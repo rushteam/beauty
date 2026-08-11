@@ -26,6 +26,11 @@ import (
 	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
+func init() {
+	discover.RegisterCodec("kratos", NewCodec())
+	discover.RegisterKVCodec("kratos", NewKVCodec("microservices"))
+}
+
 // kratosServiceInstance 对应 Kratos registry.ServiceInstance 的序列化格式。
 type kratosServiceInstance struct {
 	ID        string            `json:"id"`

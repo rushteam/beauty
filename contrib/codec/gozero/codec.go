@@ -21,6 +21,11 @@ import (
 	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
+func init() {
+	discover.RegisterCodec("gozero", NewCodec())
+	discover.RegisterKVCodec("gozero", NewKVCodec())
+}
+
 // codec 过滤策略：接受所有服务（go-zero 不按 kind 区分）。
 type codec struct{}
 

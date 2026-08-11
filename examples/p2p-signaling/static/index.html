@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>P2P DataChannel Demo</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 0 auto; padding: 2em 1em; background: #fafafa; }
+h2 { margin-top: 0; }
+.card { background: #fff; border-radius: 12px; padding: 1.5em; margin-bottom: 1em; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+input, button, select { padding: 8px 14px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; }
+button { background: #4a90d9; color: #fff; border: none; cursor: pointer; font-weight: 500; }
+button:hover { background: #357abd; }
+button:disabled { background: #ccc; cursor: not-allowed; }
+button.danger { background: #e55; }
+button.danger:hover { background: #c33; }
+#status { font-size: 13px; color: #666; }
+#status.connected { color: #2a7; font-weight: 500; }
+#peers-list { min-height: 30px; }
+.peer-badge { display: inline-block; background: #e8f5e9; color: #2e7d32; padding: 4px 10px; border-radius: 12px; font-size: 12px; margin: 2px; }
+#log { background: #1e1e1e; color: #d4d4d4; padding: 1em; height: 320px; overflow-y: auto; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; border-radius: 8px; line-height: 1.6; }
+.log-sys { color: #888; }
+.log-send { color: #6bf; }
+.log-recv { color: #6f8; }
+.log-err { color: #f66; }
+.channel-select { margin-left: 8px; }
+</style>
+</head>
+<body>
+
+<h2>🌐 P2P DataChannel 通信</h2>
+
+<div class="card">
+  <div class="row">
+    <input id="room" placeholder="房间名" value="test-room">
+    <input id="peerId" placeholder="Peer ID (可选)">
+    <button id="joinBtn">加入</button>
+    <button id="leaveBtn" class="danger" disabled>离开</button>
+    <span id="status">未连接</span>
+  </div>
+</div>
+
+<div class="card">
+  <div style="margin-bottom: 8px; font-size: 13px; color: #666;">已连接 Peers:</div>
+  <div id="peers-list"><span style="color:#999">暂无</span></div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <input id="msg" placeholder="输入消息..." style="flex:1" disabled>
+    <select id="channel" class="channel-select" disabled>
+      <option value="reliable">可靠通道</option>
+      <option value="unreliable">不可靠通道</option>
+    </select>
+    <button id="sendBtn" disabled>发送</button>
+  </div>
+</div>
+
+<div id="log"></div>
+
+<script src="p2p-client.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+
+let client = null;
+
+function log(msg, cls = 'sys') {
+  const el = document.createElement('div');
+  el.className = 'log-' + cls;
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  el.textContent = `[${time}] ${msg}`;
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+function updatePeersList() {
+  const peers = client ? client.connectedPeers() : [];
+  if (peers.length === 0) {
+    $('peers-list').innerHTML = '<span style="color:#999">暂无</span>';
+  } else {
+    $('peers-list').innerHTML = peers
+      .map((id) => `<span class="peer-badge">${id}</span>`)
+      .join('');
+  }
+}
+
+$('joinBtn').onclick = async () => {
+  const room = $('room').value.trim();
+  if (!room) { alert('请输入房间名'); return; }
+
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${wsProto}://${location.host}/ws`;
+
+  client = new P2PClient(url, {
+    room: room,
+    peerId: $('peerId').value.trim() || undefined,
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+
+    onPeerConnected(peerId) {
+      log(`✓ 与 ${peerId} 建立直连`, 'recv');
+      updatePeersList();
+      $('msg').disabled = false;
+      $('channel').disabled = false;
+      $('sendBtn').disabled = false;
+    },
+
+    onPeerDisconnected(peerId) {
+      log(`✗ ${peerId} 断开`, 'err');
+      updatePeersList();
+      if (client && client.connectedPeers().length === 0) {
+        $('msg').disabled = true;
+        $('channel').disabled = true;
+        $('sendBtn').disabled = true;
+      }
+    },
+
+    onReliableMessage(peerId, data) {
+      log(`[${peerId}/可靠] ${data}`, 'recv');
+    },
+
+    onUnreliableMessage(peerId, data) {
+      log(`[${peerId}/不可靠] ${data}`, 'recv');
+    },
+
+    onStateChange(state) {
+      $('status').textContent = { connecting: '连接中...', connected: '已连接', disconnected: '已断开' }[state];
+      $('status').className = state;
+    },
+  });
+
+  $('joinBtn').disabled = true;
+  try {
+    const id = await client.join();
+    log(`已加入房间 "${room}",本机 ID: ${id}`);
+    $('leaveBtn').disabled = false;
+  } catch (e) {
+    log(`连接失败: ${e}`, 'err');
+    $('joinBtn').disabled = false;
+  }
+};
+
+$('leaveBtn').onclick = () => {
+  if (client) {
+    client.leave();
+    client = null;
+  }
+  log('已离开房间');
+  $('joinBtn').disabled = false;
+  $('leaveBtn').disabled = true;
+  $('msg').disabled = true;
+  $('channel').disabled = true;
+  $('sendBtn').disabled = true;
+  updatePeersList();
+};
+
+$('sendBtn').onclick = () => {
+  const text = $('msg').value.trim();
+  if (!text || !client) return;
+  const channel = $('channel').value;
+  if (channel === 'reliable') {
+    client.sendReliable(text);
+    log(`[我/可靠] ${text}`, 'send');
+  } else {
+    client.sendUnreliable(text);
+    log(`[我/不可靠] ${text}`, 'send');
+  }
+  $('msg').value = '';
+};
+
+$('msg').onkeydown = (e) => { if (e.key === 'Enter') $('sendBtn').click(); };
+</script>
+</body>
+</html>

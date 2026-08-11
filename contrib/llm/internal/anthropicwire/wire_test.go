@@ -190,3 +190,110 @@ func TestEventAccumulator_BadJSONSkipped(t *testing.T) {
 		t.Fatalf("bad json should be skipped, got delta=%q done=%v", d, done)
 	}
 }
+
+func TestBuildMessages_CacheControl(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.User, Content: "cached prompt", CacheControl: "ephemeral"},
+		{Role: llm.User, Content: "normal"},
+	}
+	got := BuildMessages(msgs)
+	if len(got) != 2 {
+		t.Fatalf("want 2 messages, got %d", len(got))
+	}
+	blocks, ok := got[0].Content.([]Block)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("cached message should have 1 block, got %#v", got[0].Content)
+	}
+	if blocks[0].CacheControl == nil || blocks[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("cache_control not set: %#v", blocks[0])
+	}
+	if _, ok := got[1].Content.(string); !ok {
+		t.Fatalf("non-cached message should stay as string, got %T", got[1].Content)
+	}
+}
+
+func TestBuildSystem_WithCacheControl(t *testing.T) {
+	s := BuildSystem("hello", "ephemeral")
+	blocks, ok := s.([]Block)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("cached system should be block array, got %T", s)
+	}
+	if blocks[0].Text != "hello" || blocks[0].CacheControl == nil || blocks[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("block wrong: %#v", blocks[0])
+	}
+
+	plain := BuildSystem("hello", "")
+	if str, ok := plain.(string); !ok || str != "hello" {
+		t.Fatalf("non-cached system should be string, got %T %v", plain, plain)
+	}
+
+	if BuildSystem("", "ephemeral") != nil {
+		t.Fatal("empty system should return nil")
+	}
+}
+
+func TestParseResponse_Thinking(t *testing.T) {
+	body := `{
+		"model": "claude-x",
+		"stop_reason": "end_turn",
+		"content": [
+			{"type":"thinking","thinking":"let me think..."},
+			{"type":"text","text":"the answer"}
+		],
+		"usage": {"input_tokens": 10, "output_tokens": 20, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 3}
+	}`
+	r, err := ParseResponse([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Content != "the answer" {
+		t.Fatalf("content wrong: %q", r.Content)
+	}
+	if r.Thinking != "let me think..." {
+		t.Fatalf("thinking wrong: %q", r.Thinking)
+	}
+	if r.Usage.CacheCreationInputTokens != 5 || r.Usage.CacheReadInputTokens != 3 {
+		t.Fatalf("cache usage wrong: %+v", r.Usage)
+	}
+}
+
+func TestEventAccumulator_ThinkingStream(t *testing.T) {
+	events := []string{
+		`{"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":8}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"step 1"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" step 2"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text"}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"result"}}`,
+		`{"type":"message_delta","usage":{"output_tokens":15}}`,
+		`{"type":"message_stop"}`,
+	}
+	acc := NewEventAccumulator()
+	var text, thinking string
+	var done bool
+	for _, e := range events {
+		sd := acc.FeedExt([]byte(e))
+		text += sd.Text
+		thinking += sd.Thinking
+		if sd.Done {
+			done = true
+		}
+	}
+	if !done {
+		t.Fatal("expected done")
+	}
+	if text != "result" {
+		t.Fatalf("text wrong: %q", text)
+	}
+	if thinking != "step 1 step 2" {
+		t.Fatalf("thinking wrong: %q", thinking)
+	}
+	if acc.ThinkingText() != "step 1 step 2" {
+		t.Fatalf("ThinkingText() wrong: %q", acc.ThinkingText())
+	}
+	_, usage := acc.Result()
+	if usage.InputTokens != 10 || usage.OutputTokens != 15 || usage.CacheReadInputTokens != 8 {
+		t.Fatalf("usage wrong: %+v", usage)
+	}
+}

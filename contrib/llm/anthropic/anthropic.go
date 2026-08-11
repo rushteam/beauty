@@ -59,7 +59,7 @@ var _ llm.Client = (*Client)(nil)
 // 传输相关字段(model)在本包组装。
 type messagesReq struct {
 	Model       string                  `json:"model"`
-	System      string                  `json:"system,omitempty"`
+	System      any                     `json:"system,omitempty"`
 	Messages    []anthropicwire.Message `json:"messages"`
 	MaxTokens   int                     `json:"max_tokens"`
 	Temperature float64                 `json:"temperature,omitempty"`
@@ -67,23 +67,34 @@ type messagesReq struct {
 	Stream      bool                    `json:"stream,omitempty"`
 	Tools       []anthropicwire.Tool    `json:"tools,omitempty"`
 	ToolChoice  any                     `json:"tool_choice,omitempty"`
+	Thinking    *thinkingReq            `json:"thinking,omitempty"`
+}
+
+type thinkingReq struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 func (c *Client) build(req llm.Request, stream bool) messagesReq {
-	return messagesReq{
-		Model:       req.Model,
-		System:      req.System,
-		Messages:    anthropicwire.BuildMessages(req.Messages),
-		MaxTokens:   anthropicwire.ResolveMaxTokens(req.MaxTokens),
-		Temperature: req.Temperature,
-		StopSeqs:    req.Stop,
-		Stream:      stream,
-		Tools:       anthropicwire.BuildTools(req.Tools),
-		ToolChoice:  anthropicwire.BuildToolChoice(req.ToolChoice),
+	r := messagesReq{
+		Model:      req.Model,
+		System:     anthropicwire.BuildSystem(req.System, req.SystemCacheControl),
+		Messages:   anthropicwire.BuildMessages(req.Messages),
+		MaxTokens:  anthropicwire.ResolveMaxTokens(req.MaxTokens),
+		StopSeqs:   req.Stop,
+		Stream:     stream,
+		Tools:      anthropicwire.BuildTools(req.Tools),
+		ToolChoice: anthropicwire.BuildToolChoice(req.ToolChoice),
 	}
+	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+		r.Thinking = &thinkingReq{Type: "enabled", BudgetTokens: req.Thinking.BudgetTokens}
+	} else {
+		r.Temperature = req.Temperature
+	}
+	return r
 }
 
-func (c *Client) post(ctx context.Context, body any) (*http.Response, error) {
+func (c *Client) post(ctx context.Context, body any, betas ...string) (*http.Response, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -95,6 +106,9 @@ func (c *Client) post(ctx context.Context, body any) (*http.Response, error) {
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", c.version)
+	if len(betas) > 0 {
+		httpReq.Header.Set("anthropic-beta", strings.Join(betas, ","))
+	}
 	return c.hc.Do(httpReq)
 }
 
@@ -105,7 +119,8 @@ func apiError(resp *http.Response) error {
 
 // Generate 实现 llm.Client。
 func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
-	resp, err := c.post(ctx, c.build(req, false))
+	betas := collectBetas(req)
+	resp, err := c.post(ctx, c.build(req, false), betas...)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: request: %w", err)
 	}
@@ -124,10 +139,11 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 	return r, nil
 }
 
-// Stream 实现 llm.Client(SSE 事件流,支持文本增量与流式 tool_calls 组装)。
+// Stream 实现 llm.Client(SSE 事件流,支持文本增量、思考增量与流式 tool_calls 组装)。
 // 事件语义由 anthropicwire.EventAccumulator 处理;本函数只负责逐行取 SSE data 并推 channel。
 func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	resp, err := c.post(ctx, c.build(req, true))
+	betas := collectBetas(req)
+	resp, err := c.post(ctx, c.build(req, true), betas...)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: request: %w", err)
 	}
@@ -149,17 +165,24 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			if !ok {
 				continue
 			}
-			delta, done := acc.Feed([]byte(strings.TrimSpace(data)))
-			if delta != "" {
+			sd := acc.FeedExt([]byte(strings.TrimSpace(data)))
+			if sd.Thinking != "" {
 				select {
-				case out <- llm.Chunk{Delta: delta}:
+				case out <- llm.Chunk{ThinkingDelta: sd.Thinking}:
 				case <-ctx.Done():
 					return
 				}
 			}
-			if done {
+			if sd.Text != "" {
+				select {
+				case out <- llm.Chunk{Delta: sd.Text}:
+				case <-ctx.Done():
+					return
+				}
+			}
+			if sd.Done {
 				tcs, usage := acc.Result()
-				out <- llm.Chunk{Done: true, ToolCalls: tcs, Usage: &usage}
+				out <- llm.Chunk{Done: true, ToolCalls: tcs, Usage: &usage, Thinking: acc.ThinkingText()}
 				return
 			}
 		}
@@ -168,4 +191,22 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		}
 	}()
 	return out, nil
+}
+
+// collectBetas 根据请求内容收集需要的 anthropic-beta 头。
+func collectBetas(req llm.Request) []string {
+	var betas []string
+	needCache := req.SystemCacheControl != ""
+	if !needCache {
+		for _, m := range req.Messages {
+			if m.CacheControl != "" {
+				needCache = true
+				break
+			}
+		}
+	}
+	if needCache {
+		betas = append(betas, "prompt-caching-2024-07-31")
+	}
+	return betas
 }

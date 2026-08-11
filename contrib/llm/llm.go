@@ -42,6 +42,11 @@ type Message struct {
 	Parts      []Part     `json:"parts,omitempty"`        // 多模态内容块(文本/图片)
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // 仅 assistant:模型请求调用的工具
 	ToolCallID string     `json:"tool_call_id,omitempty"` // 仅 Role=Tool:对应 ToolCall.ID
+
+	// CacheControl 标记此消息为缓存断点(Anthropic prompt caching)。
+	// 设为 "ephemeral" 时,provider 在该消息的 content block 上附加 cache_control。
+	// 不支持 prompt caching 的 provider 忽略此字段。
+	CacheControl string `json:"cache_control,omitempty"`
 }
 
 // PartType 标识内容块类型。
@@ -95,6 +100,20 @@ type JSONSchema struct {
 	Strict bool            `json:"strict,omitempty"`
 }
 
+// ThinkingConfig 控制模型的深度推理/思考模式。
+// Anthropic: extended thinking (type=enabled, budget_tokens);
+// OpenAI: reasoning_effort (low/medium/high);
+// 不支持的 provider 忽略此配置。
+type ThinkingConfig struct {
+	// Type: "enabled"(开启思考) / ""(不开启)。
+	Type string `json:"type,omitempty"`
+	// BudgetTokens 限制思考阶段最大 token 数(Anthropic extended thinking)。
+	// 必须 >= 1024 且 < MaxTokens。
+	BudgetTokens int `json:"budget_tokens,omitempty"`
+	// ReasoningEffort 控制推理努力程度(OpenAI o-系列): "low" / "medium" / "high"。
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
 // Request 是一次生成请求。System 便于单独给系统提示(Anthropic 用顶层 system,
 // OpenAI provider 会转成一条 system 消息)。
 type Request struct {
@@ -114,12 +133,23 @@ type Request struct {
 	// ResponseFormat 控制输出格式(json_object / json_schema / text)。
 	// 零值或 Type="" 表示不限制(默认文本);provider 各自翻译,不支持则忽略。
 	ResponseFormat *ResponseFormat
+
+	// Thinking 控制模型的深度推理/思考模式。零值或 Type="" 表示不开启。
+	Thinking *ThinkingConfig
+
+	// SystemCacheControl 标记 system prompt 为缓存断点(Anthropic prompt caching)。
+	// 设为 "ephemeral" 时,provider 在 system prompt 上附加 cache_control。
+	SystemCacheControl string
 }
 
 // Usage 是 token 用量(用于计量/计费)。
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
+	// CacheCreationInputTokens 是写入 prompt cache 的 token 数(Anthropic)。
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	// CacheReadInputTokens 是从 prompt cache 读取的 token 数(Anthropic)。
+	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
 }
 
 // Response 是一次非流式生成的结果。当模型决定调用工具时,ToolCalls 非空(此时 Content 可能为空),
@@ -130,6 +160,9 @@ type Response struct {
 	StopReason string
 	Usage      Usage
 	ToolCalls  []ToolCall
+	// Thinking 是模型的思考过程文本(extended thinking / reasoning)。
+	// 仅当请求启用 Thinking 且模型支持时非空。
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // Chunk 是流式生成的一个增量片段。Delta 是本次新增文本;结束时 Done=true 且可能带最终 Usage;
@@ -143,6 +176,10 @@ type Chunk struct {
 	Usage     *Usage
 	Done      bool
 	Err       error
+	// ThinkingDelta 是模型思考过程的增量文本(仅 thinking 模式下的流式输出)。
+	ThinkingDelta string `json:"thinking_delta,omitempty"`
+	// Thinking 是完整的思考文本(Done 时填充;非流式或流式结束后)。
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // Client 是一个对话补全客户端(由各 provider 实现)。

@@ -36,7 +36,8 @@ func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, _ resolv
 	if serviceName == "" {
 		serviceName = target.URL.Host
 	}
-	r := grpcclient.NewResolver(cc, serviceName, reg)
+	wrapped := grpcclient.WrapWithFilter(cc, target.URL.Query())
+	r := grpcclient.NewResolver(wrapped, serviceName, reg)
 	go r.Start()
 	return r, nil
 }

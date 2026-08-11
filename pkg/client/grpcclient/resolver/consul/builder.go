@@ -25,7 +25,8 @@ func (b *builder) Build(target resolver.Target, cc resolver.ClientConn, _ resolv
 	if err != nil {
 		return nil, fmt.Errorf("consul resolver: %w", err)
 	}
-	r := grpcclient.NewResolver(cc, target.Endpoint(), reg)
+	wrapped := grpcclient.WrapWithFilter(cc, target.URL.Query())
+	r := grpcclient.NewResolver(wrapped, target.Endpoint(), reg)
 	go r.Start()
 	return r, nil
 }

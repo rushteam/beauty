@@ -31,6 +31,22 @@ func (b *discoveryBuilder) Build(_ resolver.Target, cc resolver.ClientConn, _ re
 	return r, nil
 }
 
+// WrapWithFilter 根据 URL 查询参数构建标签过滤器并包装 resolver.ClientConn。
+// 如果 URL 中不含过滤参数，直接返回原始 cc。供各 resolver builder 统一使用。
+func WrapWithFilter(cc resolver.ClientConn, query map[string][]string) resolver.ClientConn {
+	params := make(map[string]string, len(query))
+	for k, v := range query {
+		if len(v) > 0 {
+			params[k] = v[0]
+		}
+	}
+	filter := buildFilterFromParams(params)
+	if filter == nil {
+		return cc
+	}
+	return &filteringClientConn{cc: cc, filter: filter}
+}
+
 // filteringClientConn 在 UpdateState 前对地址列表应用标签过滤。
 // 包装 resolver.ClientConn 而非修改 Resolver，保持 Resolver 通用不变。
 type filteringClientConn struct {

@@ -39,7 +39,7 @@ func (r *Resolver) Close() {
 
 func (r *Resolver) Start() {
 	updateState := func(services []discover.ServiceInfo) {
-		slog.Info("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
+		slog.Debug("grpclient service update", slog.Int("count", len(services)), slog.Any("service", services))
 		if err := r.cc.UpdateState(buildState(services)); err != nil {
 			slog.Error("discovery updateState failed", slog.Any("err", err))
 		}
@@ -77,9 +77,6 @@ func buildState(services []discover.ServiceInfo) resolver.State {
 	addrs := make([]resolver.Address, 0, len(services))
 	for _, s := range services {
 		var attr *grpcattr.Attributes
-		for k, v := range s.Metadata {
-			attr = attr.WithValue(k, v)
-		}
 		if len(s.Metadata) > 0 {
 			attr = attr.WithValue(metadataAttrKey{}, s.Metadata)
 		}

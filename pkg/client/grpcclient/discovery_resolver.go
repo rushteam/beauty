@@ -1,6 +1,8 @@
 package grpcclient
 
 import (
+	"log/slog"
+
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/serviceconfig"
@@ -55,9 +57,17 @@ type filteringClientConn struct {
 }
 
 func (f *filteringClientConn) UpdateState(state resolver.State) error {
-	services := addressesToServiceInfos(state.Addresses)
-	filtered := f.filter.Filter(services)
-	state.Addresses = serviceInfosToAddresses(filtered)
+	filtered := make([]resolver.Address, 0, len(state.Addresses))
+	for _, a := range state.Addresses {
+		if f.filter.Matches(extractMetadata(a)) {
+			filtered = append(filtered, a)
+		}
+	}
+	if len(filtered) == 0 && len(state.Addresses) > 0 {
+		slog.Warn("no addresses match label selector; returning empty (fail-closed)",
+			"selector", f.filter.String(), "total", len(state.Addresses))
+	}
+	state.Addresses = filtered
 	return f.cc.UpdateState(state)
 }
 
@@ -71,28 +81,7 @@ func (f *filteringClientConn) ParseServiceConfig(configJSON string) *serviceconf
 	return f.cc.ParseServiceConfig(configJSON)
 }
 
-// addressesToServiceInfos 从 resolver.Address 切片反构建 ServiceInfo（用于标签过滤）。
-// Metadata 存储在 Attributes 中，buildState 写入时用 string key→string value。
-func addressesToServiceInfos(addrs []resolver.Address) []discover.ServiceInfo {
-	infos := make([]discover.ServiceInfo, len(addrs))
-	for i, a := range addrs {
-		infos[i] = discover.ServiceInfo{
-			Addr:     a.Addr,
-			Metadata: extractMetadata(a),
-		}
-	}
-	return infos
-}
-
-func serviceInfosToAddresses(services []discover.ServiceInfo) []resolver.Address {
-	state := buildState(services)
-	return state.Addresses
-}
-
 // extractMetadata 从 resolver.Address.Attributes 提取 metadata map。
-// buildState 在写入时把每个 metadata kv 作为 Attributes.WithValue(k, v) 存储，
-// 但 grpc/attributes 不支持遍历——所以这里用 ServerName 做 fallback（不完美但实用）。
-// 如果需要完整的 metadata 传递，可通过 Attributes 存整个 map。
 func extractMetadata(a resolver.Address) map[string]string {
 	if a.Attributes == nil {
 		return nil

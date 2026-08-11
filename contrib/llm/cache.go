@@ -113,11 +113,14 @@ func (cc *CacheClient) Stream(ctx context.Context, req Request) (<-chan Chunk, e
 	if resp, ok := cc.s.Get(ctx, key); ok {
 		atomic.AddInt64(&cc.hits, 1)
 		cp := *resp
-		ch := make(chan Chunk, 2)
+		ch := make(chan Chunk, 3)
+		if cp.Thinking != "" {
+			ch <- Chunk{ThinkingDelta: cp.Thinking}
+		}
 		if cp.Content != "" {
 			ch <- Chunk{Delta: cp.Content}
 		}
-		ch <- Chunk{Done: true, ToolCalls: cp.ToolCalls, Usage: &cp.Usage}
+		ch <- Chunk{Done: true, ToolCalls: cp.ToolCalls, Usage: &cp.Usage, Thinking: cp.Thinking}
 		close(ch)
 		return ch, nil
 	}
@@ -135,6 +138,9 @@ func (cc *CacheClient) Stream(ctx context.Context, req Request) (<-chan Chunk, e
 		for chunk := range src {
 			if chunk.Delta != "" {
 				assembled.Content += chunk.Delta
+			}
+			if chunk.ThinkingDelta != "" {
+				assembled.Thinking += chunk.ThinkingDelta
 			}
 			if len(chunk.ToolCalls) > 0 {
 				assembled.ToolCalls = chunk.ToolCalls

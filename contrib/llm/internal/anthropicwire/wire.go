@@ -268,11 +268,10 @@ type StreamDelta struct {
 // 事件类型:message_start / content_block_start / content_block_delta /
 // content_block_stop / message_delta / message_stop。
 type EventAccumulator struct {
-	usage       llm.Usage
-	tools       []*toolAcc
-	blockMap    map[int]*toolAcc
-	thinkingMap map[int]bool // 标记哪些 block index 是 thinking 块
-	thinkingSB  strings.Builder
+	usage      llm.Usage
+	tools      []*toolAcc
+	blockMap   map[int]*toolAcc
+	thinkingSB strings.Builder
 }
 
 type toolAcc struct {
@@ -282,7 +281,7 @@ type toolAcc struct {
 
 // NewEventAccumulator 新建累加器。
 func NewEventAccumulator() *EventAccumulator {
-	return &EventAccumulator{blockMap: map[int]*toolAcc{}, thinkingMap: map[int]bool{}}
+	return &EventAccumulator{blockMap: map[int]*toolAcc{}}
 }
 
 // Feed 处理一个事件 JSON,返回增量结果。无法解析的事件被安静跳过。
@@ -351,7 +350,7 @@ func (a *EventAccumulator) FeedExt(data []byte) StreamDelta {
 			a.tools = append(a.tools, acc)
 			a.blockMap[ev.Index] = acc
 		case "thinking":
-			a.thinkingMap[ev.Index] = true
+			// thinking block 的增量通过 delta.type="thinking_delta" 自动识别，无需额外标记
 		}
 	case "content_block_delta":
 		if ev.Delta == nil {

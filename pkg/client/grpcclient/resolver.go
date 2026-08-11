@@ -70,12 +70,18 @@ func (r *Resolver) Start() {
 	}
 }
 
+// metadataAttrKey 是 Attributes 中存储完整 metadata map 的 key 类型。
+type metadataAttrKey struct{}
+
 func buildState(services []discover.ServiceInfo) resolver.State {
 	addrs := make([]resolver.Address, 0, len(services))
 	for _, s := range services {
 		var attr *grpcattr.Attributes
 		for k, v := range s.Metadata {
 			attr = attr.WithValue(k, v)
+		}
+		if len(s.Metadata) > 0 {
+			attr = attr.WithValue(metadataAttrKey{}, s.Metadata)
 		}
 		addrs = append(addrs, resolver.Address{
 			Addr:       s.Addr,

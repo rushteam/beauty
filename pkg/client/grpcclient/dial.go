@@ -225,14 +225,19 @@ func waitDirectConnReady(ctx context.Context, conn *grpc.ClientConn) error {
 	}
 }
 
-// dialWithDiscovery 服务发现模式
-func dialWithDiscovery(ctx context.Context, target string, cfg *dialConfig) (*grpc.ClientConn, error) {
+// dialWithDiscovery 通过 gRPC 原生 resolver 机制接入服务发现，实现地址动态更新。
+//
+// 旧实现使用 ServiceDiscoveryClient.GetClient() 获取一次性连接，Watch 循环未启动，
+// 上游 Pod 重启/迁移后连接失效。新实现注册 per-connection resolver.Builder，由 gRPC
+// 原生管理 SubConn 池、地址更新和重连。
+//
+// ServiceDiscoveryClient 仍保留用于高级场景（自定义重试、熔断等）。
+func dialWithDiscovery(_ context.Context, target string, cfg *dialConfig) (*grpc.ClientConn, error) {
 	serviceName, registry, params, err := parseTarget(target)
 	if err != nil {
 		return nil, fmt.Errorf("invalid target %s: %w", target, err)
 	}
 
-	// WithRegistry 选项优先级高于 URL 解析
 	if cfg.registry != nil {
 		registry = cfg.registry
 	}
@@ -241,7 +246,27 @@ func dialWithDiscovery(ctx context.Context, target string, cfg *dialConfig) (*gr
 		return nil, fmt.Errorf("no registry for target %s; use WithRegistry() or provide a registry URL (etcd://, nacos://, ...)", target)
 	}
 
-	// 构建标签过滤器
+	filter := buildLabelFilter(cfg, params)
+
+	b := &discoveryBuilder{
+		registry:    registry,
+		serviceName: serviceName,
+		labelFilter: filter,
+	}
+
+	grpcTarget := fmt.Sprintf("%s:///%s", discoveryScheme, serviceName)
+	opts := standardDialOpts()
+	opts = append(opts,
+		grpc.WithResolvers(b),
+		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingPolicy":"%s"}`, cfg.loadBalancer)),
+	)
+	opts = append(opts, cfg.grpcOpts...)
+
+	return grpc.NewClient(grpcTarget, opts...)
+}
+
+// buildLabelFilter 从 dialConfig 和 URL 参数构建标签过滤器。
+func buildLabelFilter(cfg *dialConfig, params map[string]string) *ServiceLabelFilter {
 	if cfg.labelFilter == nil && len(params) > 0 {
 		cfg.labelFilter = buildFilterFromParams(params)
 	}
@@ -254,31 +279,9 @@ func dialWithDiscovery(ctx context.Context, target string, cfg *dialConfig) (*gr
 			WithEnvironmentIn(cfg.environments...).
 			WithVersionIn(cfg.versions...)
 	} else if cfg.labelFilter != nil && len(cfg.versions) > 0 {
-		// labelFilter 已存在（由 WithLabelFilter 设置），追加 version 条件
 		cfg.labelFilter.WithVersionIn(cfg.versions...)
 	}
-
-	var clientOpts []ServiceDiscoveryOption
-	if cfg.labelFilter != nil {
-		clientOpts = append(clientOpts, WithDiscoveryLabelFilter(cfg.labelFilter))
-	}
-	if len(cfg.grpcOpts) > 0 {
-		clientOpts = append(clientOpts, WithDiscoveryDialOptions(cfg.grpcOpts...))
-	}
-	if cfg.loadBalancer != "" {
-		clientOpts = append(clientOpts, WithDiscoveryStrategy(loadBalancerToStrategy(cfg.loadBalancer)))
-	}
-
-	client := NewServiceDiscoveryClient(registry, serviceName, clientOpts...)
-
-	dialCtx := ctx
-	if cfg.timeout > 0 {
-		var cancel context.CancelFunc
-		dialCtx, cancel = context.WithTimeout(ctx, cfg.timeout)
-		defer cancel()
-	}
-
-	return client.GetClient(dialCtx)
+	return cfg.labelFilter
 }
 
 // loadBalancerToStrategy 将字符串策略名映射为 LoadBalanceStrategy

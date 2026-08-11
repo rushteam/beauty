@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	connectrpc.com/grpchealth v1.5.0
-	github.com/rushteam/beauty v0.1.0
+	github.com/rushteam/beauty v0.7.3
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
 )
 

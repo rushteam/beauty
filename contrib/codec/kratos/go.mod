@@ -2,7 +2,7 @@ module github.com/rushteam/beauty/contrib/codec/kratos
 
 go 1.26
 
-require github.com/rushteam/beauty v0.0.0
+require github.com/rushteam/beauty v0.7.3
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

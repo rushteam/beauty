@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
-	github.com/rushteam/beauty v0.2.0
+	github.com/rushteam/beauty v0.7.3
 	github.com/tetratelabs/wazero v1.12.0
 )
 

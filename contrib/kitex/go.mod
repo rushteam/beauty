@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/cloudwego/kitex v0.16.3
-	github.com/rushteam/beauty v0.0.0
+	github.com/rushteam/beauty v0.7.3
 )
 
 require (

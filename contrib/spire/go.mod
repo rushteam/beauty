@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
-	github.com/rushteam/beauty v0.3.6
+	github.com/rushteam/beauty v0.7.3
 	github.com/spiffe/go-spiffe/v2 v2.6.0
 	google.golang.org/grpc v1.82.1
 )

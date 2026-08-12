@@ -3,9 +3,9 @@
 beauty 的 P2P 能力把 WebRTC 从"媒体通话工具"变为**通用 P2P 数据管道**——
 peers 之间建立 DataChannel 直连,数据不经服务器,延迟更低、带宽成本更低。
 
-设计受 [matchbox](https://github.com/johanhelsing/matchbox) 启发,在 beauty 已有的
-WebRTC(pion)、WebSocket(pkg/ws)、QUIC(pkg/quic)、presence(pkg/presence)
-基础上,补齐了**信令编排 + peer 发现 + 拓扑策略 + 双通道抽象**这一层。
+在 beauty 已有的 WebRTC(pion)、WebSocket(pkg/ws)、QUIC(pkg/quic)、
+presence(pkg/presence)基础上,补齐了**信令编排 + peer 发现 + 拓扑策略 + 双通道抽象**
+这一层。
 
 ## 包结构
 

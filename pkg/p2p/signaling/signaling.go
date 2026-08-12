@@ -2,7 +2,7 @@
 // WebRTC 协商消息(offer/answer/candidate),让 peers 能自动发现、配对、建立
 // 直连的 DataChannel——无需业务代码接触底层 ICE/SDP 细节。
 //
-// 设计受 matchbox(https://github.com/johanhelsing/matchbox)启发:
+// 核心特性:
 //   - 极简协议:JSON 信令消息 + 房间维度的 peer 发现
 //   - 拓扑可插拔:通过 pkg/p2p/topology 控制谁与谁建连
 //   - KeepAlive 防断:信令层定期心跳,防止反向代理关闭空闲连接

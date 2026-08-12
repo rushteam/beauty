@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rushteam/beauty/pkg/p2p"
 	"github.com/rushteam/beauty/pkg/p2p/topology"
@@ -196,6 +197,9 @@ func NewServer(opts ...Option) *Server {
 		channels: []ChannelConfig{
 			ReliableChannel("reliable"),
 			UnreliableChannel("unreliable"),
+		},
+		wsOpts: []ws.Option{
+			ws.WithPingInterval(30 * time.Second),
 		},
 	}
 	s.idGen = s.defaultIDGen

@@ -90,10 +90,17 @@ type Network interface {
 	Close() error
 }
 
-// Transport 是对底层传输能力的抽象,用于可插拔实现(WebRTC / QUIC / 测试 mock)。
+// Transport 是对底层传输能力的抽象,用于可插拔实现(WebRTC / QUIC / TCP)。
+// 每个 Transport 既能主动连接远端 peer,也能接受入站连接。
 type Transport interface {
 	io.Closer
 
-	// Connect 主动向目标 peer 发起连接。信令交换由外部驱动。
+	// Connect 主动向目标 peer 发起连接。地址解析由具体实现负责(如通过构造时传入的地址簿)。
 	Connect(ctx context.Context, peerID PeerID) (PeerConn, error)
+
+	// Accept 阻塞等待一个入站的 peer 连接。Transport 关闭后返回错误。
+	Accept(ctx context.Context) (PeerConn, error)
+
+	// Addr 返回本 Transport 的监听地址(可用于告知其他 peer 如何连接本节点)。
+	Addr() string
 }

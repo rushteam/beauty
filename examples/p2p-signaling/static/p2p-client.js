@@ -78,7 +78,7 @@ class P2PClient {
         const env = JSON.parse(ev.data);
         switch (env.event) {
           case 'assign_id': {
-            const payload = JSON.parse(env.data);
+            const payload = env.data;
             this.localId = payload.peer_id;
             if (payload.channels && payload.channels.length > 0) {
               this.channelConfigs = payload.channels;
@@ -88,18 +88,18 @@ class P2PClient {
             break;
           }
           case 'peer_joined': {
-            const { peer_id, initiator } = JSON.parse(env.data);
+            const { peer_id, initiator } = env.data;
             this._createPeer(peer_id, initiator);
             break;
           }
           case 'peer_left': {
-            const { peer_id } = JSON.parse(env.data);
+            const { peer_id } = env.data;
             this._removePeer(peer_id);
             break;
           }
           case 'signal': {
-            const { from, data } = JSON.parse(env.data);
-            this._handleSignal(from, JSON.parse(data));
+            const { from, data } = env.data;
+            this._handleSignal(from, data);
             break;
           }
           case 'keep_alive':
@@ -186,15 +186,12 @@ class P2PClient {
 
   _send(event, data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        event,
-        data: data !== null ? JSON.stringify(data) : undefined,
-      }));
+      this.ws.send(JSON.stringify({ event, data: data !== undefined ? data : undefined }));
     }
   }
 
   _relay(to, data) {
-    this._send('relay', { to, data: JSON.stringify(data) });
+    this._send('relay', { to, data });
   }
 
   _startKeepAlive() {

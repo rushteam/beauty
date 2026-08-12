@@ -28,13 +28,13 @@ Three reasons people pick Beauty:
 | Pillar | What you get |
 |---|---|
 | **Unified lifecycle** | HTTP, gRPC (+ gateway), cron, MQ consumers, and any custom `Service` share one `Start` / graceful shutdown. |
-| **Realtime + media** | WebSocket / SSE / fan-out, game loop + AOI/presence, plus RTMP → HLS / LL-HLS and WebRTC WHIP/WHEP + SFU — as services, not a separate stack. |
+| **Realtime + media** | WebSocket / SSE / fan-out, game loop + AOI/presence, P2P DataChannel (signaling + mesh/star topology + TCP/QUIC/WebRTC transport), plus RTMP → HLS / LL-HLS and WebRTC WHIP/WHEP + SFU — as services, not a separate stack. |
 | **WASM · Agent** | wazero sandboxes for HTTP filters, FaaS handlers, OPA/Rego authz, and LLM agent tools/skills — pure Go, no CGo. |
 
 ## Highlights
 
 - **Unified lifecycle** — one `app.Start(ctx)` for HTTP, gRPC, cron, and anything implementing `Service`; config/discovery/resilience/observability built in.
-- **Realtime + media** — WS/SSE/QUIC, fixed-timestep game loop, spatial AOI & presence; RTMP ingest, HLS / LL-HLS origin, WebRTC WHIP/WHEP + SFU room, multi-stream hub.
+- **Realtime + media** — WS/SSE/QUIC, fixed-timestep game loop, spatial AOI & presence; P2P DataChannel with pluggable transport (TCP/QUIC/WebRTC) and topology (mesh/star/client-server/matchmaking); RTMP ingest, HLS / LL-HLS origin, WebRTC WHIP/WHEP + SFU room, multi-stream hub.
 - **WASM · Agent** — [`contrib/wasm`](contrib/wasm) (middleware / FaaS-lite router), [`contrib/wasmopa`](contrib/wasmopa) (Rego→wasm authz), [`contrib/wasmagent`](contrib/wasmagent) (sandboxed agent tools); LLM / RAG / MCP in [`contrib/llm`](contrib/llm) · [`contrib/vector`](contrib/vector) · [`contrib/mcp`](contrib/mcp). See [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md).
 - **Also included** — config hot reload (nacos/etcd/consul/k8s), service discovery, dlock/leader, rate limit / circuit break / load shedding, transport-agnostic MQ, OpenTelemetry, consistent-hash sharding, and data/search/broker modules in contrib.
 
@@ -177,7 +177,7 @@ See [`docs/grpc-service-discovery.md`](docs/grpc-service-discovery.md),
 | TTL-KV & primitives | `pkg/kvstore` (redis, etcd) → counter / cooldown / idempotency |
 | Concurrency | `pkg/syncx` (Map/ForEach, SingleFlight, Batcher, Debounce/Throttle, Future), `pkg/xgo`, `pkg/safe`, `pkg/chanx`, `pkg/keyedmutex` |
 | Resilience | `pkg/ratelimit`, `pkg/governance/{circuitbreaker,overloadctrl}`, `pkg/backoff` |
-| Realtime | `pkg/ws`, `pkg/sse`, `pkg/stream`, `pkg/quic`, `pkg/gameloop`, `pkg/spatial`, `pkg/presence` |
+| Realtime | `pkg/ws`, `pkg/sse`, `pkg/stream`, `pkg/quic`, `pkg/gameloop`, `pkg/spatial`, `pkg/presence`, `pkg/p2p` (signaling + topology + transport) |
 | Media | `pkg/media/rtmp`, `pkg/hls`, `pkg/media/hlsmux`, `pkg/media/webrtc` (+ `sfu`), `pkg/media` (hub/supervisor/metrics) |
 | WASM / Agent | `contrib/wasm` (middleware + FaaS), `contrib/wasmopa` (OPA/Rego), `contrib/wasmagent` (agent tools/skills); see [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) |
 | Messaging | `pkg/mq`, `pkg/eventbus`, `pkg/webhook`, `pkg/delayqueue`, `pkg/scheduler` |
@@ -220,6 +220,7 @@ independently) — import only what you need; the core dependency graph stays le
 | [`contrib/wasm`](contrib/wasm) | wazero runtime: HTTP middleware, FaaS-lite router, host funcs, pool/cache | `…/contrib/wasm` |
 | [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm policies as `pkg/authz.Enforcer` | `…/contrib/wasmopa` |
 | [`contrib/wasmagent`](contrib/wasmagent) | sandboxed agent tools / skills (`ScriptExecutor` + `agent.Tool`) | `…/contrib/wasmagent` |
+| [`contrib/p2p-webrtc`](contrib/p2p-webrtc) | WebRTC DataChannel transport for `pkg/p2p` (NAT traversal, browser interop via pion/webrtc) | `…/contrib/p2p-webrtc` |
 
 Prefix each path with `github.com/rushteam/beauty`. See [`contrib/README.md`](contrib/README.md).
 
@@ -236,6 +237,7 @@ Configure an exporter once and the media/mq/client layers emit metrics automatic
 - [`docs/k8s-rbac.md`](docs/k8s-rbac.md) — k8s RBAC / ServiceAccount setup guide (leader election + config center).
 - [`docs/cross-service-interop.md`](docs/cross-service-interop.md) — cross-service interop: how non-Beauty services discover and call Beauty gRPC services.
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) — WASM tiers (runtime, agent, OPA, FaaS).
+- [`docs/p2p-transport.md`](docs/p2p-transport.md) — P2P transport selection guide (TCP vs QUIC vs WebRTC).
 - [`examples/`](examples) — runnable demos for most features.
 - [`CHANGELOG.md`](CHANGELOG.md) — notable changes.
 - [`docs/media-validation.md`](docs/media-validation.md) — real-device checklist for the media stack.

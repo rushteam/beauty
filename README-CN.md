@@ -27,13 +27,13 @@ Beauty 有一个很小的核心(`beauty.New(...).Start(ctx)`),把任意多个服
 | 主线 | 你得到什么 |
 |---|---|
 | **统一生命周期** | HTTP、gRPC(含网关)、定时任务、MQ 消费者、任意自定义 `Service`,共用一次 `Start` / 优雅停机。 |
-| **实时 + 媒体** | WebSocket / SSE / 扇出、游戏循环 + AOI/在线;以及 RTMP → HLS / LL-HLS、WebRTC WHIP/WHEP + SFU——都是 Service,不是另一套栈。 |
+| **实时 + 媒体** | WebSocket / SSE / 扇出、游戏循环 + AOI/在线;P2P DataChannel(信令 + mesh/star 拓扑 + TCP/QUIC/WebRTC 传输);以及 RTMP → HLS / LL-HLS、WebRTC WHIP/WHEP + SFU——都是 Service,不是另一套栈。 |
 | **WASM · Agent** | wazero 沙箱跑 HTTP 过滤器、FaaS 函数、OPA/Rego 鉴权、LLM agent 工具/技能——纯 Go、无 CGo。 |
 
 ## 亮点
 
 - **统一生命周期**:一个 `app.Start(ctx)` 管 HTTP、gRPC、定时任务和任意 `Service`;配置/发现/韧性/可观测内建。
-- **实时 + 媒体**:WS/SSE/QUIC、定步长游戏循环、空间 AOI 与在线;RTMP 采集、HLS / LL-HLS origin、WebRTC WHIP/WHEP + SFU、多路流管理。
+- **实时 + 媒体**:WS/SSE/QUIC、定步长游戏循环、空间 AOI 与在线;P2P DataChannel 可插拔传输(TCP/QUIC/WebRTC)与拓扑(mesh/star/选主/凑人匹配);RTMP 采集、HLS / LL-HLS origin、WebRTC WHIP/WHEP + SFU、多路流管理。
 - **WASM · Agent**:[`contrib/wasm`](contrib/wasm)(中间件 / FaaS-lite 路由)、[`contrib/wasmopa`](contrib/wasmopa)(Rego→wasm 鉴权)、[`contrib/wasmagent`](contrib/wasmagent)(沙箱 agent 工具);LLM / RAG / MCP 见 [`contrib/llm`](contrib/llm) · [`contrib/vector`](contrib/vector) · [`contrib/mcp`](contrib/mcp)。路线图:[`docs/wasm-roadmap.md`](docs/wasm-roadmap.md)。
 - **其余能力**:配置热更新(nacos/etcd/consul/k8s)、服务发现、分布式锁/选主、限流/熔断/过载保护、传输无关 MQ、OpenTelemetry、一致性哈希分片,以及 contrib 里的数据/搜索/broker 模块。
 
@@ -173,7 +173,7 @@ conn, err := grpcclient.DialContext(ctx, "nacos://127.0.0.1:8848/helloworld.rpc"
 | TTL-KV 与原语 | `pkg/kvstore`(redis、etcd)→ counter / cooldown / idempotency |
 | 并发 | `pkg/syncx`(Map/ForEach、SingleFlight、Batcher、Debounce/Throttle、Future)、`pkg/xgo`、`pkg/safe`、`pkg/chanx`、`pkg/keyedmutex` |
 | 韧性 | `pkg/ratelimit`、`pkg/governance/{circuitbreaker,overloadctrl}`、`pkg/backoff` |
-| 实时 | `pkg/ws`、`pkg/sse`、`pkg/stream`、`pkg/quic`、`pkg/gameloop`、`pkg/spatial`、`pkg/presence` |
+| 实时 | `pkg/ws`、`pkg/sse`、`pkg/stream`、`pkg/quic`、`pkg/gameloop`、`pkg/spatial`、`pkg/presence`、`pkg/p2p`(信令 + 拓扑 + 传输) |
 | 媒体 | `pkg/media/rtmp`、`pkg/hls`、`pkg/media/hlsmux`、`pkg/media/webrtc`(含 `sfu`)、`pkg/media`(hub/supervisor/metrics) |
 | WASM / Agent | `contrib/wasm`(中间件 + FaaS)、`contrib/wasmopa`(OPA/Rego)、`contrib/wasmagent`(agent 工具/技能);见 [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) |
 | 消息 | `pkg/mq`、`pkg/eventbus`、`pkg/webhook`、`pkg/delayqueue`、`pkg/scheduler` |

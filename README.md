@@ -215,6 +215,7 @@ independently) — import only what you need; the core dependency graph stays le
 | [`contrib/natsjs`](contrib/natsjs) | `pkg/mq` NATS JetStream (persistent, at-least-once) | `…/contrib/natsjs` |
 | [`contrib/kafka`](contrib/kafka) | `pkg/mq` Kafka broker (franz-go + kotel) | `…/contrib/kafka` |
 | [`contrib/llm`](contrib/llm) | provider-agnostic LLM client (chat/stream/embed, OpenAI/Anthropic/Azure/compatible) | `…/contrib/llm` |
+| [`contrib/otelllm`](contrib/otelllm) | AI observability: OTel Trace/Metrics (GenAI semconv) + Agent run-tree Hooks → Jaeger/Tempo/Langfuse/LangSmith | `…/contrib/otelllm` |
 | [`contrib/vector`](contrib/vector) | vector store / RAG semantic search | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client (expose services as AI tools) | `…/contrib/mcp` |
 | [`contrib/wasm`](contrib/wasm) | wazero runtime: HTTP middleware, FaaS-lite router, host funcs, pool/cache | `…/contrib/wasm` |
@@ -233,7 +234,9 @@ Configure an exporter once and the media/mq/client layers emit metrics automatic
 
 ## Documentation
 
-- [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more.
+- [`docs/getting-started.md`](docs/getting-started.md) — **Getting Started** (15-minute tutorial, English).
+- [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more. English translations (`*-en.md`) available for core docs.
+- [`docs/case-study-template.md`](docs/case-study-template.md) — template for documenting production deployments.
 - [`docs/k8s-rbac.md`](docs/k8s-rbac.md) — k8s RBAC / ServiceAccount setup guide (leader election + config center).
 - [`docs/cross-service-interop.md`](docs/cross-service-interop.md) — cross-service interop: how non-Beauty services discover and call Beauty gRPC services.
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) — WASM tiers (runtime, agent, OPA, FaaS).

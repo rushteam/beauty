@@ -55,7 +55,10 @@ func sanitizeID(id string) (string, error) {
 }
 
 // Load 读取会话;不存在返回 (nil, nil)。
-func (s *FileStore) Load(_ context.Context, id string) (*Session, error) {
+func (s *FileStore) Load(ctx context.Context, id string) (*Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	path, err := s.path(id)
 	if err != nil {
 		return nil, err
@@ -78,7 +81,10 @@ func (s *FileStore) Load(_ context.Context, id string) (*Session, error) {
 }
 
 // Save 原子写入(先写临时文件再 rename)。
-func (s *FileStore) Save(_ context.Context, sess *Session) error {
+func (s *FileStore) Save(ctx context.Context, sess *Session) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if sess == nil {
 		return fmt.Errorf("session: nil session")
 	}
@@ -105,7 +111,10 @@ func (s *FileStore) Save(_ context.Context, sess *Session) error {
 }
 
 // Delete 删除会话文件(不存在不报错)。
-func (s *FileStore) Delete(_ context.Context, id string) error {
+func (s *FileStore) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path, err := s.path(id)
 	if err != nil {
 		return err
@@ -118,3 +127,71 @@ func (s *FileStore) Delete(_ context.Context, id string) error {
 	}
 	return nil
 }
+
+func (s *FileStore) eventsPath(id string) (string, error) {
+	safe, err := sanitizeID(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(s.dir, safe+".events.json"), nil
+}
+
+func (s *FileStore) AppendEvents(ctx context.Context, sessionID string, events ...SessionEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := s.eventsPath(sessionID)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var existing []SessionEvent
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &existing)
+	}
+	existing = append(existing, events...)
+	b, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (s *FileStore) LoadEvents(ctx context.Context, sessionID string) ([]SessionEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := s.eventsPath(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var events []SessionEvent
+	if err := json.Unmarshal(b, &events); err != nil {
+		return nil, fmt.Errorf("session: decode events %s: %w", sessionID, err)
+	}
+	return events, nil
+}
+
+var (
+	_ Store      = (*FileStore)(nil)
+	_ EventStore = (*FileStore)(nil)
+)

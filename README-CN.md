@@ -209,6 +209,7 @@ app := beauty.New(beauty.WithService(consumer))
 | [`contrib/natsjs`](contrib/natsjs) | `pkg/mq` 的 NATS JetStream(持久、at-least-once) | `…/contrib/natsjs` |
 | [`contrib/kafka`](contrib/kafka) | `pkg/mq` 的 Kafka broker(franz-go + kotel) | `…/contrib/kafka` |
 | [`contrib/llm`](contrib/llm) | provider 无关 LLM 客户端(对话/流式/embedding,OpenAI/Anthropic/Azure/兼容) | `…/contrib/llm` |
+| [`contrib/otelllm`](contrib/otelllm) | AI 可观测性:OTel Trace/Metrics(GenAI 语义约定) + Agent run-tree Hooks → Jaeger/Tempo/Langfuse/LangSmith | `…/contrib/otelllm` |
 | [`contrib/vector`](contrib/vector) | 向量存储 / RAG 语义检索 | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client(把服务暴露成 AI 工具) | `…/contrib/mcp` |
 | [`contrib/wasm`](contrib/wasm) | wazero 运行时:HTTP 中间件、FaaS-lite 路由、host funcs、池/缓存 | `…/contrib/wasm` |

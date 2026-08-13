@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   summary TEXT NOT NULL DEFAULT '',
   messages BLOB NOT NULL,
   updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_events (
+  id TEXT PRIMARY KEY,
+  events BLOB NOT NULL
 )`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("llmsession: migrate: %w", err)
@@ -86,4 +90,59 @@ ON CONFLICT(id) DO UPDATE SET summary=excluded.summary, messages=excluded.messag
 	return err
 }
 
-var _ session.Store = (*SQLiteStore)(nil)
+// AppendEvents 实现 session.EventStore。
+func (s *SQLiteStore) AppendEvents(ctx context.Context, sessionID string, events ...session.SessionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	for i := range events {
+		if events[i].Timestamp.IsZero() {
+			events[i].Timestamp = now
+		}
+	}
+	raw, err := json.Marshal(events)
+	if err != nil {
+		return err
+	}
+	// 使用 JSON 追加:读取现有 → 合并 → 写回。SQLite 单连接串行化保证安全。
+	var existing []byte
+	_ = s.db.QueryRowContext(ctx, `SELECT events FROM session_events WHERE id=?`, sessionID).Scan(&existing)
+	if len(existing) > 0 {
+		var prev []session.SessionEvent
+		if err := json.Unmarshal(existing, &prev); err == nil {
+			prev = append(prev, events...)
+			raw, err = json.Marshal(prev)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO session_events(id, events) VALUES(?,?)
+ON CONFLICT(id) DO UPDATE SET events=excluded.events
+`, sessionID, raw)
+	return err
+}
+
+// LoadEvents 实现 session.EventStore。
+func (s *SQLiteStore) LoadEvents(ctx context.Context, sessionID string) ([]session.SessionEvent, error) {
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT events FROM session_events WHERE id=?`, sessionID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var events []session.SessionEvent
+	if err := json.Unmarshal(raw, &events); err != nil {
+		return nil, fmt.Errorf("llmsession: decode events: %w", err)
+	}
+	return events, nil
+}
+
+var (
+	_ session.Store      = (*SQLiteStore)(nil)
+	_ session.EventStore = (*SQLiteStore)(nil)
+)

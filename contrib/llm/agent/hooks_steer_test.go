@@ -10,21 +10,20 @@ import (
 	"github.com/rushteam/beauty/contrib/llm/agent"
 )
 
-func TestSteer_InjectBetweenTools(t *testing.T) {
-	steer := agent.NewSteer(4)
+func TestMailbox_Steer_InjectBetweenTools(t *testing.T) {
+	mb := agent.NewMailbox(4)
 	fc := &fakeClient{steps: []*llm.Response{
 		{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{}`)}}},
 		{Content: "after-steer"},
 	}}
 	var secondUsers []string
 	r := &agent.Runner{
-		Client: fc,
-		Tools:  []agent.Tool{echoTool()},
-		Steer:  steer,
+		Client:  fc,
+		Tools:   []agent.Tool{echoTool()},
+		Mailbox: mb,
 		Hooks: agent.Hooks{
-			AfterTool: func(context.Context, int, llm.ToolCall, string) error {
-				// 与 run 同协程:工具结束后立刻插话,下一步 Generate 前会被 drain
-				steer.Enqueue("请改成简短回答")
+			AfterTool: func(_ context.Context, _ int, _ llm.ToolCall, _ *string) error {
+				mb.Steer("请改成简短回答")
 				return nil
 			},
 			BeforeModel: func(_ context.Context, step int, req *llm.Request) error {
@@ -78,11 +77,11 @@ func TestHooks_BeforeAfter(t *testing.T) {
 				log = append(log, "am")
 				return nil
 			},
-			BeforeTool: func(context.Context, int, llm.ToolCall) error {
+			BeforeTool: func(_ context.Context, _ int, _ *llm.ToolCall) (agent.Permission, error) {
 				log = append(log, "bt")
-				return nil
+				return agent.PermitAllow, nil
 			},
-			AfterTool: func(context.Context, int, llm.ToolCall, string) error {
+			AfterTool: func(_ context.Context, _ int, _ llm.ToolCall, _ *string) error {
 				log = append(log, "at")
 				return nil
 			},
@@ -119,11 +118,11 @@ func TestHooks_BeforeModelError(t *testing.T) {
 	}
 }
 
-func TestSteer_EventType(t *testing.T) {
-	steer := agent.NewSteer(2)
-	steer.Enqueue("hi-steer")
+func TestMailbox_Steer_EventType(t *testing.T) {
+	mb := agent.NewMailbox(2)
+	mb.Steer("hi-steer")
 	fc := &fakeClient{steps: []*llm.Response{{Content: "ok"}}}
-	r := &agent.Runner{Client: fc, Steer: steer}
+	r := &agent.Runner{Client: fc, Mailbox: mb}
 	var saw bool
 	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventSteer && ev.Result == "hi-steer" {

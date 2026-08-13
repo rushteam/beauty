@@ -25,23 +25,42 @@ type Session struct {
 	UpdatedAt    time.Time
 }
 
-// Store 持久化会话。Load 对不存在的 id 应返回 (nil, nil) 而非错误。
+// Store 持久化会话快照。Load 对不存在的 id 应返回 (nil, nil) 而非错误。
 type Store interface {
 	Load(ctx context.Context, id string) (*Session, error)
 	Save(ctx context.Context, s *Session) error
 }
 
+// EventStore 持久化 append-only 事件日志(event-sourcing)。
+// 与 Store 正交——只需要快照的场景无需实现此接口;
+// 需要事件溯源(Replay/Fork)时,Store 实现可同时实现 EventStore。
+type EventStore interface {
+	// AppendEvents 追加事件到指定会话的事件日志。
+	AppendEvents(ctx context.Context, sessionID string, events ...SessionEvent) error
+	// LoadEvents 读取指定会话的全部事件(有序)。不存在时返回 (nil, nil)。
+	LoadEvents(ctx context.Context, sessionID string) ([]SessionEvent, error)
+}
+
 // MemoryStore 是并发安全的内存 Store(测试/单机用;生产可在 contrib 实现 sqldb/redis 版)。
 type MemoryStore struct {
-	mu sync.RWMutex
-	m  map[string]*Session
+	mu     sync.RWMutex
+	m      map[string]*Session
+	events map[string][]SessionEvent
 }
 
 // NewMemoryStore 创建内存 Store。
-func NewMemoryStore() *MemoryStore { return &MemoryStore{m: map[string]*Session{}} }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{
+		m:      map[string]*Session{},
+		events: map[string][]SessionEvent{},
+	}
+}
 
 // Load 返回会话的深拷贝(避免调用方与存储共享底层切片)。
-func (s *MemoryStore) Load(_ context.Context, id string) (*Session, error) {
+func (s *MemoryStore) Load(ctx context.Context, id string) (*Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sess, ok := s.m[id]
@@ -52,12 +71,51 @@ func (s *MemoryStore) Load(_ context.Context, id string) (*Session, error) {
 }
 
 // Save 存入会话的深拷贝。
-func (s *MemoryStore) Save(_ context.Context, sess *Session) error {
+func (s *MemoryStore) Save(ctx context.Context, sess *Session) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.m[sess.ID] = cloneSession(sess)
 	return nil
 }
+
+func (s *MemoryStore) AppendEvents(ctx context.Context, sessionID string, events ...SessionEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for i := range events {
+		if events[i].Timestamp.IsZero() {
+			events[i].Timestamp = now
+		}
+	}
+	s.events[sessionID] = append(s.events[sessionID], events...)
+	return nil
+}
+
+func (s *MemoryStore) LoadEvents(ctx context.Context, sessionID string) ([]SessionEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	evts, ok := s.events[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	out := make([]SessionEvent, len(evts))
+	copy(out, evts)
+	return out, nil
+}
+
+var (
+	_ Store      = (*MemoryStore)(nil)
+	_ EventStore = (*MemoryStore)(nil)
+)
 
 func cloneSession(s *Session) *Session {
 	msgs := make([]llm.Message, len(s.Messages))

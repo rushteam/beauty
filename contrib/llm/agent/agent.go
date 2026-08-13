@@ -101,52 +101,155 @@ type Event struct {
 }
 
 // Hooks 是分层观测/拦截点。任一回调返回 error 会中止整个 Run。
+//
+// 生命周期层级:
+//
+//	Turn (整轮)
+//	  BeforeTurn → [step 1..N] → AfterTurn
+//
+//	Step (单步 = 一次模型调用 + 其工具调用)
+//	  BeforeModel → [model call / OnChunk*] → AfterModel
+//	  → BeforeTool → [exec] → AfterTool (每个工具)
+//
+// 全部 Waterfall 语义:
+//   - BeforeModel 接收 *llm.Request,可改写 Messages/System
+//   - BeforeTool 接收 *llm.ToolCall,可改写 Arguments;返回 Permission 可动态拦截
+//   - AfterTool 接收 *string result,可改写工具返回值
+//   - OnChunk 接收 *llm.Chunk,可改写 Delta(如敏感词过滤)
 type Hooks struct {
+	// --- Turn 级别 ---
+
+	// BeforeTurn 在整轮循环开始前调用。可修改 req(如注入系统 prompt、过滤消息)。
+	BeforeTurn func(ctx context.Context, req *llm.Request) error
+	// AfterTurn 在整轮循环结束后调用(无论 Done/Paused/Error)。不返回 error(已不可挽回)。
+	AfterTurn func(ctx context.Context, outcome *RunOutcome)
+
+	// --- Model 级别 ---
+
+	// BeforeModel 在每步模型调用前触发。可改写 req(waterfall:修改 Messages 即改写上下文)。
 	BeforeModel func(ctx context.Context, step int, req *llm.Request) error
-	AfterModel  func(ctx context.Context, step int, resp *llm.Response) error
-	BeforeTool  func(ctx context.Context, step int, tc llm.ToolCall) error
-	AfterTool   func(ctx context.Context, step int, tc llm.ToolCall, result string) error
+	// AfterModel 在每步模型调用后触发。
+	AfterModel func(ctx context.Context, step int, resp *llm.Response) error
+
+	// --- Stream 级别 ---
+
+	// OnChunk 在流式生成的每个 chunk 到达时触发。接收 *llm.Chunk 可改写 Delta(如敏感词过滤)。
+	// 返回 error 中止整个 run。仅流式模式下触发;非流式 Generate 不触发。
+	OnChunk func(ctx context.Context, step int, chunk *llm.Chunk) error
+
+	// --- Tool 级别 ---
+
+	// BeforeTool 在工具执行前触发。接收 *llm.ToolCall 可改写 Arguments(如 PII 脱敏);
+	// 返回 Permission 可动态拦截(PermitDeny=拒绝, PermitAsk=暂停审批, PermitAllow=放行)。
+	BeforeTool func(ctx context.Context, step int, tc *llm.ToolCall) (Permission, error)
+	// AfterTool 在工具执行后触发。接收 *string 可改写工具返回值(如过滤敏感信息)。
+	AfterTool func(ctx context.Context, step int, tc llm.ToolCall, result *string) error
 }
 
-// Steer 是中途插话信箱。
-type Steer struct {
-	ch chan string
+// Mailbox 是 Agent 运行中的统一注入信箱,支持用户消息和系统上下文两种角色。
+//
+//	mb := agent.NewMailbox(8)
+//	mb.Steer("请改成简短回答")          // 注入 user 消息(运行中中途插话)
+//	mb.Inject("用户 VIP 等级:钻石")     // 注入一次性 system 上下文
+//	mb.InjectPersistent("当前库存:低")   // 注入持久 system 上下文(每步都追加)
+type Mailbox struct {
+	ch   chan string // user 消息(原 Steer)
+	mu   sync.Mutex
+	once []string // 一次性 system 上下文
+	keep []string // 持久 system 上下文
 }
 
-// NewSteer 创建插话信箱。buf<=0 时用 8。
-func NewSteer(buf int) *Steer {
+// NewMailbox 创建信箱。buf 控制 user 消息缓冲区大小;<=0 时用 8。
+func NewMailbox(buf int) *Mailbox {
 	if buf < 1 {
 		buf = 8
 	}
-	return &Steer{ch: make(chan string, buf)}
+	return &Mailbox{ch: make(chan string, buf)}
 }
 
-// Enqueue 投入一条用户插话。
-func (s *Steer) Enqueue(msg string) bool {
-	if s == nil || msg == "" {
+// Steer 投入一条用户级中途插话(作为 user 消息注入对话)。
+func (mb *Mailbox) Steer(msg string) bool {
+	if mb == nil || msg == "" {
 		return false
 	}
 	select {
-	case s.ch <- msg:
+	case mb.ch <- msg:
 		return true
 	default:
 		return false
 	}
 }
 
-func (s *Steer) drain() []string {
-	if s == nil {
+// Inject 注入一次性系统上下文(下次模型调用时追加到 system prompt,用后即弃)。
+func (mb *Mailbox) Inject(content string) {
+	if mb == nil || content == "" {
+		return
+	}
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	mb.once = append(mb.once, content)
+}
+
+// InjectPersistent 注入持久系统上下文(每次模型调用都追加到 system prompt)。
+func (mb *Mailbox) InjectPersistent(content string) {
+	if mb == nil || content == "" {
+		return
+	}
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	mb.keep = append(mb.keep, content)
+}
+
+// ClearPersistent 清除所有持久注入。
+func (mb *Mailbox) ClearPersistent() {
+	if mb == nil {
+		return
+	}
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+	mb.keep = nil
+}
+
+func (mb *Mailbox) drainSteer() []string {
+	if mb == nil {
 		return nil
 	}
 	var out []string
 	for {
 		select {
-		case m := <-s.ch:
+		case m := <-mb.ch:
 			out = append(out, m)
 		default:
 			return out
 		}
 	}
+}
+
+func (mb *Mailbox) drainInject() string {
+	if mb == nil {
+		return ""
+	}
+	mb.mu.Lock()
+	defer mb.mu.Unlock()
+
+	total := len(mb.keep) + len(mb.once)
+	if total == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, total)
+	parts = append(parts, mb.keep...)
+	parts = append(parts, mb.once...)
+	mb.once = nil
+
+	var b []byte
+	for i, p := range parts {
+		if i > 0 {
+			b = append(b, '\n')
+		}
+		b = append(b, p...)
+	}
+	return string(b)
 }
 
 // Info 是一个 Agent 的元信息。
@@ -170,6 +273,18 @@ type StreamAgent interface {
 	ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event
 }
 
+// ToolScope 在每步模型调用前过滤可用工具子集(per-agent scoping)。
+type ToolScope interface {
+	Filter(ctx context.Context, step int, tools []Tool) []Tool
+}
+
+// ToolScopeFunc 是 ToolScope 的函数适配器。
+type ToolScopeFunc func(ctx context.Context, step int, tools []Tool) []Tool
+
+func (f ToolScopeFunc) Filter(ctx context.Context, step int, tools []Tool) []Tool {
+	return f(ctx, step, tools)
+}
+
 // Runner 驱动 agent 循环。PermitAsk 工具触发整轮原子暂停,经 Continue 决议后继续。
 type Runner struct {
 	Client   llm.Client
@@ -182,9 +297,12 @@ type Runner struct {
 	ParallelTools  *bool
 	OnStep         func(step int, resp *llm.Response)
 	Hooks          Hooks
-	Steer          *Steer
+	Mailbox        *Mailbox // 统一注入信箱(user 插话 + system 上下文)
 	RepairToolArgs bool
 	Compactor      *Compactor
+
+	// Scope 在每步模型调用前过滤可用工具子集。nil 时使用全部 Tools。
+	Scope ToolScope
 
 	// Store 持久化暂停快照;nil 时用内置 MemoryRunStore(进程内)。
 	Store RunStore
@@ -441,10 +559,25 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		maxSteps = DefaultMaxSteps
 	}
 
-	defs := make([]llm.ToolDef, len(r.Tools))
-	byName := r.toolIndex()
-	for i, t := range r.Tools {
+	// BeforeTurn: 整轮开始前的拦截点(仅首次进入,Continue 不重复触发)。
+	if r.Hooks.BeforeTurn != nil && startStep == 1 && msgs == nil {
+		if err := r.Hooks.BeforeTurn(ctx, &req); err != nil {
+			out := outcomeError(runID, nil, nil, err)
+			r.afterTurn(ctx, &out)
+			return out
+		}
+	}
+
+	// Scope: 按上下文过滤可用工具子集。
+	activeTools := r.Tools
+	if r.Scope != nil {
+		activeTools = r.Scope.Filter(ctx, startStep, r.Tools)
+	}
+	defs := make([]llm.ToolDef, len(activeTools))
+	byName := make(map[string]Tool, len(activeTools))
+	for i, t := range activeTools {
 		defs[i] = t.Def
+		byName[t.Def.Name] = t
 	}
 	req.Tools = defs
 
@@ -465,20 +598,43 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 	var last *llm.Response
 	for step := startStep; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
-			return outcomeError(runID, last, msgs, err)
+			out := outcomeError(runID, last, msgs, err)
+			r.afterTurn(ctx, &out)
+			return out
 		}
 
-		for _, m := range r.Steer.drain() {
+		// Scope 每步重新评估(工具可用性可能随上下文变化)。
+		if r.Scope != nil {
+			activeTools = r.Scope.Filter(ctx, step, r.Tools)
+			defs = make([]llm.ToolDef, len(activeTools))
+			byName = make(map[string]Tool, len(activeTools))
+			for i, t := range activeTools {
+				defs[i] = t.Def
+				byName[t.Def.Name] = t
+			}
+			req.Tools = defs
+		}
+
+		// Mailbox: 用户插话 + 系统上下文注入。
+		for _, m := range r.Mailbox.drainSteer() {
 			msgs = append(msgs, llm.Message{Role: llm.User, Content: m})
 			if emit != nil {
 				emit(Event{Type: EventSteer, Step: step, Result: m, RunID: runID})
 			}
 		}
+		if extra := r.Mailbox.drainInject(); extra != "" {
+			if req.System != "" {
+				req.System += "\n\n"
+			}
+			req.System += extra
+		}
 
 		req.Messages = msgs
 		if r.Hooks.BeforeModel != nil {
 			if err := r.Hooks.BeforeModel(ctx, step, &req); err != nil {
-				return outcomeError(runID, last, msgs, err)
+				out := outcomeError(runID, last, msgs, err)
+				r.afterTurn(ctx, &out)
+				return out
 			}
 			msgs = req.Messages
 		}
@@ -488,7 +644,9 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 
 		resp, err := r.callModel(ctx, req, step, emit)
 		if err != nil {
-			return outcomeError(runID, last, msgs, err)
+			out := outcomeError(runID, last, msgs, err)
+			r.afterTurn(ctx, &out)
+			return out
 		}
 		if r.Planner != nil {
 			resp = r.Planner.ProcessPlanningResponse(step, resp)
@@ -496,7 +654,9 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		last = resp
 		if r.Hooks.AfterModel != nil {
 			if err := r.Hooks.AfterModel(ctx, step, resp); err != nil {
-				return outcomeError(runID, last, msgs, err)
+				out := outcomeError(runID, last, msgs, err)
+				r.afterTurn(ctx, &out)
+				return out
 			}
 		}
 		if r.OnStep != nil {
@@ -508,7 +668,9 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 
 		if len(resp.ToolCalls) == 0 {
 			_ = r.Store.Delete(ctx, runID)
-			return outcomeDone(runID, resp, msgs)
+			out := outcomeDone(runID, resp, msgs)
+			r.afterTurn(ctx, &out)
+			return out
 		}
 
 		msgs = append(msgs, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
@@ -524,9 +686,13 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 				Step:         step,
 			}
 			if err := r.Store.Save(ctx, runID, snap); err != nil {
-				return outcomeError(runID, last, msgs, err)
+				out := outcomeError(runID, last, msgs, err)
+				r.afterTurn(ctx, &out)
+				return out
 			}
-			return outcomePaused(runID, resp, msgs, reqs)
+			out := outcomePaused(runID, resp, msgs, reqs)
+			r.afterTurn(ctx, &out)
+			return out
 		}
 
 		toolMsgs, fatal, nested := r.runTools(ctx, step, byName, resp.ToolCalls, emit)
@@ -536,7 +702,9 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 				msgs = append(msgs, toolMsgs...)
 				return r.pauseNested(ctx, runID, req, msgs, resp, step, np)
 			}
-			return outcomeError(runID, last, msgs, fatal)
+			out := outcomeError(runID, last, msgs, fatal)
+			r.afterTurn(ctx, &out)
+			return out
 		}
 		if nested != nil {
 			msgs = append(msgs, toolMsgs...)
@@ -544,7 +712,15 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		}
 		msgs = append(msgs, toolMsgs...)
 	}
-	return outcomeError(runID, last, msgs, ErrMaxSteps)
+	out := outcomeError(runID, last, msgs, ErrMaxSteps)
+	r.afterTurn(ctx, &out)
+	return out
+}
+
+func (r *Runner) afterTurn(ctx context.Context, out *RunOutcome) {
+	if r.Hooks.AfterTurn != nil {
+		r.Hooks.AfterTurn(ctx, out)
+	}
 }
 
 func (r *Runner) pauseNested(ctx context.Context, runID string, req llm.Request, msgs []llm.Message, resp *llm.Response, step int, np *NestedPauseError) RunOutcome {
@@ -600,7 +776,7 @@ func (r *Runner) askRequirements(byName map[string]Tool, tcs []llm.ToolCall) []R
 }
 
 func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit func(Event)) (*llm.Response, error) {
-	if emit == nil {
+	if emit == nil && r.Hooks.OnChunk == nil {
 		return r.Client.Generate(ctx, req)
 	}
 	ch, err := r.Client.Stream(ctx, req)
@@ -611,12 +787,23 @@ func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit 
 	var toolCalls []llm.ToolCall
 	var usage llm.Usage
 	for c := range ch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if c.Err != nil {
 			return nil, c.Err
 		}
+		// OnChunk: 流式拦截(可改写 Delta,如敏感词过滤)。
+		if r.Hooks.OnChunk != nil {
+			if err := r.Hooks.OnChunk(ctx, step, &c); err != nil {
+				return nil, err
+			}
+		}
 		if c.Delta != "" {
 			content.WriteString(c.Delta)
-			emit(Event{Type: EventToken, Step: step, Result: c.Delta})
+			if emit != nil {
+				emit(Event{Type: EventToken, Step: step, Result: c.Delta})
+			}
 		}
 		if len(c.ToolCalls) > 0 {
 			toolCalls = c.ToolCalls
@@ -624,9 +811,6 @@ func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit 
 		if c.Usage != nil {
 			usage = *c.Usage
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
 	}
 	resp := &llm.Response{Content: content.String(), ToolCalls: toolCalls, Usage: usage, Model: req.Model}
 	if len(req.Tools) > 0 && len(toolCalls) == 0 && content.Len() == 0 {
@@ -690,6 +874,10 @@ func (r *Runner) execToolCalls(ctx context.Context, step int, byName map[string]
 		wg.Add(1)
 		go func(i int, tc llm.ToolCall) {
 			defer wg.Done()
+			if err := ctx.Err(); err != nil {
+				outs[i] = toolOutcome{tc: tc, fatal: err}
+				return
+			}
 			outs[i] = r.execOne(ctx, step, byName, tc, ask, byRes, i, emit)
 		}(i, tc)
 	}
@@ -717,9 +905,22 @@ func (r *Runner) execToolCalls(ctx context.Context, step int, byName map[string]
 }
 
 func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, tc llm.ToolCall, ask map[string]Requirement, byRes map[string]Resolution, idx int, emit func(Event)) toolOutcome {
+	// BeforeTool: 动态 gate + 参数改写(waterfall)。
 	if r.Hooks.BeforeTool != nil {
-		if err := r.Hooks.BeforeTool(ctx, step, tc); err != nil {
+		perm, err := r.Hooks.BeforeTool(ctx, step, &tc)
+		if err != nil {
 			return toolOutcome{tc: tc, fatal: err}
+		}
+		switch perm {
+		case PermitDeny:
+			result := fmt.Sprintf("工具 %q 被策略拒绝(deny)", tc.Name)
+			if emit != nil {
+				emit(Event{Type: EventToolResult, Step: step, ToolCall: &tc, Result: result})
+			}
+			return toolOutcome{tc: tc, result: result}
+		case PermitAsk:
+			result := fmt.Sprintf("工具 %q 需要审批(ask)", tc.Name)
+			return toolOutcome{tc: tc, result: result}
 		}
 	}
 	if emit != nil {
@@ -734,8 +935,9 @@ func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, 
 		tc := tc
 		emit(Event{Type: EventToolResult, Step: step, ToolCall: &tc, Result: result})
 	}
+	// AfterTool: 可改写 result(waterfall)。
 	if r.Hooks.AfterTool != nil {
-		if err := r.Hooks.AfterTool(ctx, step, tc, result); err != nil {
+		if err := r.Hooks.AfterTool(ctx, step, tc, &result); err != nil {
 			return toolOutcome{tc: tc, result: result, fatal: err}
 		}
 	}

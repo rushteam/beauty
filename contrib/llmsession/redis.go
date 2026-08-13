@@ -109,4 +109,66 @@ func (s *RedisStore) Save(ctx context.Context, sess *session.Session) error {
 	return s.rdb.Set(ctx, key, b, s.ttl).Err()
 }
 
-var _ session.Store = (*RedisStore)(nil)
+func (s *RedisStore) eventsKey(id string) (string, error) {
+	safe, err := sanitizeSessionID(id)
+	if err != nil {
+		return "", err
+	}
+	return s.prefix + safe + ":events", nil
+}
+
+// AppendEvents 实现 session.EventStore。
+func (s *RedisStore) AppendEvents(ctx context.Context, sessionID string, events ...session.SessionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	key, err := s.eventsKey(sessionID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for i := range events {
+		if events[i].Timestamp.IsZero() {
+			events[i].Timestamp = now
+		}
+	}
+
+	var existing []session.SessionEvent
+	b, err := s.rdb.Get(ctx, key).Bytes()
+	if err == nil {
+		_ = json.Unmarshal(b, &existing)
+	} else if err != redis.Nil {
+		return err
+	}
+	existing = append(existing, events...)
+	raw, err := json.Marshal(existing)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(ctx, key, raw, s.ttl).Err()
+}
+
+// LoadEvents 实现 session.EventStore。
+func (s *RedisStore) LoadEvents(ctx context.Context, sessionID string) ([]session.SessionEvent, error) {
+	key, err := s.eventsKey(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	b, err := s.rdb.Get(ctx, key).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var events []session.SessionEvent
+	if err := json.Unmarshal(b, &events); err != nil {
+		return nil, fmt.Errorf("llmsession: decode events: %w", err)
+	}
+	return events, nil
+}
+
+var (
+	_ session.Store      = (*RedisStore)(nil)
+	_ session.EventStore = (*RedisStore)(nil)
+)

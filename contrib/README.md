@@ -55,6 +55,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
 | [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
 | [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
+| [`contrib/otelllm`](otelllm) | LLM AI 可观测性:OTel Trace/Metrics 装饰器(GenAI 语义约定)+ Agent run-tree Hooks + 增强版 Metered(含错误上报),可导出到 Jaeger/Tempo/Langfuse/LangSmith | otel/otel-sdk |
 | [`contrib/spire`](spire) | SPIFFE/SPIRE Workload API:X509-SVID mTLS + SPIFFE ID→auth/authz | go-spiffe/v2 |
 
 `contrib/connectrpc` 和 `contrib/kitex` 实现核心 `beauty.Service` 和 `discover.Service` 接口,

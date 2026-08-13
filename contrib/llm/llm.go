@@ -1,11 +1,11 @@
-// Package llm 是 beauty 的 LLM 客户端薄机制:provider 无关的对话/流式/embedding 接口,
-// 外加失败切换、重试、用量计量中间件。作为**独立 Go 模块**发布
+// Package llm 是 beauty 的 LLM 客户端薄机制:provider 无关的对话/流式/embedding/
+// 文生图/图编辑/TTS 接口,外加失败切换、重试、用量计量中间件。作为**独立 Go 模块**发布
 // (github.com/rushteam/beauty/contrib/llm),**纯标准库、零外部依赖**——各家 provider 用
 // HTTP 直连其 REST API,不引重型 SDK,也不 import beauty 核心。
 //
 // 分层:
-//   - 本包:类型(Message/Request/Response/Chunk/Usage)、Client/Embedder 接口、中间件
-//     (Fallback/Retry/Metered);
+//   - 本包:类型(Message/Request/Response/Chunk/Usage)、Client/Embedder/
+//     ImageGenerator/ImageEditor/SpeechSynthesizer 接口、中间件(Fallback/Retry/Metered);
 //   - 子包 llm/openai、llm/anthropic:各 provider 实现(HTTP + SSE 流式),BaseURL 可覆盖
 //     (对接 OpenAI 兼容网关 / 本地模型 / 测试打桩)。
 //

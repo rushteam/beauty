@@ -133,6 +133,112 @@ func TestOpenAI_CompatibleBaseURL(t *testing.T) {
 	}
 }
 
+func TestOpenAI_GenerateImage(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = io.WriteString(w, `{"data":[{"url":"https://example.com/a.png","revised_prompt":"a cat"}]}`)
+	}))
+	defer srv.Close()
+
+	c := openai.New("k", openai.WithBaseURL(srv.URL))
+	resp, err := c.GenerateImage(context.Background(), llm.ImageRequest{
+		Model: "dall-e-3", Prompt: "a cat", Size: "1024x1024",
+	})
+	if err != nil {
+		t.Fatalf("GenerateImage: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/images/generations") {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if !strings.Contains(gotBody, `"prompt":"a cat"`) || !strings.Contains(gotBody, `"model":"dall-e-3"`) {
+		t.Fatalf("body = %s", gotBody)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].URL != "https://example.com/a.png" || resp.Data[0].RevisedPrompt != "a cat" {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestOpenAI_EditImage(t *testing.T) {
+	var gotPath, gotCT string
+	var gotPrompt, gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotCT = r.Header.Get("Content-Type")
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		gotPrompt = r.FormValue("prompt")
+		gotModel = r.FormValue("model")
+		f, _, err := r.FormFile("image")
+		if err != nil {
+			t.Errorf("FormFile image: %v", err)
+		} else {
+			b, _ := io.ReadAll(f)
+			if string(b) != "PNGDATA" {
+				t.Errorf("image bytes = %q", b)
+			}
+			_ = f.Close()
+		}
+		_, _ = io.WriteString(w, `{"data":[{"b64_json":"YWJj"}]}`)
+	}))
+	defer srv.Close()
+
+	c := openai.New("k", openai.WithBaseURL(srv.URL))
+	resp, err := c.EditImage(context.Background(), llm.ImageEditRequest{
+		Model: "dall-e-2", Prompt: "add hat",
+		Image: strings.NewReader("PNGDATA"), ResponseFormat: "b64_json",
+	})
+	if err != nil {
+		t.Fatalf("EditImage: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/images/edits") {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if !strings.HasPrefix(gotCT, "multipart/form-data") {
+		t.Fatalf("Content-Type = %q", gotCT)
+	}
+	if gotPrompt != "add hat" || gotModel != "dall-e-2" {
+		t.Fatalf("prompt=%q model=%q", gotPrompt, gotModel)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].B64JSON != "YWJj" {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestOpenAI_Speech(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("FAKEMP3"))
+	}))
+	defer srv.Close()
+
+	c := openai.New("k", openai.WithBaseURL(srv.URL))
+	audio, err := c.Speech(context.Background(), llm.SpeechRequest{
+		Model: "tts-1", Input: "hello", Voice: "alloy", Speed: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("Speech: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/audio/speech") {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if !strings.Contains(gotBody, `"input":"hello"`) || !strings.Contains(gotBody, `"voice":"alloy"`) {
+		t.Fatalf("body = %s", gotBody)
+	}
+	if string(audio) != "FAKEMP3" {
+		t.Fatalf("audio = %q", audio)
+	}
+}
+
 // ---- Anthropic ----
 
 func TestAnthropic_GenerateAndStream(t *testing.T) {

@@ -591,8 +591,9 @@ openai.New(key, openai.WithBaseURL(openai.BaseURLDeepSeek))  // DeepSeek
 | **Anthropic** | `anthropic.New(key)`(原生 Messages API) |
 | **AWS Bedrock** | `bedrock.New(region)`(自实现 SigV4 + event-stream;一包多家族:Claude / Titan / Llama / Mistral) |
 
-- **`llm/openai`**:`chat/completions` + `embeddings`;`WithBaseURL` 对接兼容厂商,`NewAzure`/`WithAzure`/
-  `WithAPIKeyHeader` 覆盖 Azure 及自定义认证。实现 `llm.Client` + `llm.Embedder`。
+- **`llm/openai`**:`chat/completions` + `embeddings` + `images/generations` + `images/edits` + `audio/speech`;
+  `WithBaseURL` 对接兼容厂商,`NewAzure`/`WithAzure`/`WithAPIKeyHeader` 覆盖 Azure 及自定义认证。
+  实现 `llm.Client` + `llm.Embedder` + `ImageGenerator`/`ImageEditor`/`SpeechSynthesizer`。
 - **`llm/anthropic`**:`/v1/messages`(`x-api-key` + `anthropic-version`)。实现 `llm.Client`。
 - **`llm/bedrock`**:AWS Bedrock Runtime(`/model/{id}/invoke` 与 `/invoke-with-response-stream`)。
   一个 `Client` 按 model id 前缀选家族 codec,覆盖 Anthropic Claude(tools + 多模态 + 流式全能力)、

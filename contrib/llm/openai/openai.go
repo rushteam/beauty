@@ -1,6 +1,8 @@
-// Package openai 是 llm.Client / llm.Embedder 的 OpenAI(及兼容网关)实现,HTTP 直连
-// /v1/chat/completions 与 /v1/embeddings。BaseURL 可覆盖以对接 OpenAI 兼容的服务
-// (本地模型、together、azure 网关、测试打桩)。纯标准库。
+// Package openai 是 llm.Client / llm.Embedder / ImageGenerator / ImageEditor /
+// SpeechSynthesizer 的 OpenAI(及兼容网关)实现,HTTP 直连 /v1/chat/completions、
+// /v1/embeddings、/v1/images/generations、/v1/images/edits、/v1/audio/speech。
+// BaseURL 可覆盖以对接 OpenAI 兼容的服务(本地模型、together、azure 网关、测试打桩)。
+// 纯标准库。
 package openai
 
 import (
@@ -115,16 +117,16 @@ var (
 )
 
 type chatReq struct {
-	Model            string       `json:"model"`
-	Messages         []oaiMessage `json:"messages"`
-	MaxTokens        int          `json:"max_tokens,omitempty"`
-	Temperature      float64      `json:"temperature,omitempty"`
-	Stop             []string     `json:"stop,omitempty"`
-	Stream           bool         `json:"stream,omitempty"`
-	Tools            []oaiTool    `json:"tools,omitempty"`
-	ToolChoice       any          `json:"tool_choice,omitempty"`
-	ResponseFormat   any          `json:"response_format,omitempty"`
-	ReasoningEffort  string       `json:"reasoning_effort,omitempty"`
+	Model           string       `json:"model"`
+	Messages        []oaiMessage `json:"messages"`
+	MaxTokens       int          `json:"max_tokens,omitempty"`
+	Temperature     float64      `json:"temperature,omitempty"`
+	Stop            []string     `json:"stop,omitempty"`
+	Stream          bool         `json:"stream,omitempty"`
+	Tools           []oaiTool    `json:"tools,omitempty"`
+	ToolChoice      any          `json:"tool_choice,omitempty"`
+	ResponseFormat  any          `json:"response_format,omitempty"`
+	ReasoningEffort string       `json:"reasoning_effort,omitempty"`
 }
 
 // oaiMessage 是 OpenAI 的线上消息格式。Content 可能是 string(纯文本)或 []oaiContentPart(多模态)。
@@ -393,7 +395,7 @@ func buildChatReq(req llm.Request, stream bool) chatReq {
 		Model: req.Model, Messages: buildMessages(req),
 		MaxTokens: req.MaxTokens, Temperature: req.Temperature, Stop: req.Stop,
 		Stream: stream,
-		Tools: buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
+		Tools:  buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
 		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 	}
 	if req.Thinking != nil && req.Thinking.ReasoningEffort != "" {

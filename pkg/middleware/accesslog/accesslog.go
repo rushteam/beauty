@@ -13,6 +13,7 @@ import (
 )
 
 // HTTPMiddleware 记录每个 HTTP 请求的 method、path、status、latency 和 request-id。
+// trace_id/span_id 由 logger.TraceHandler 在 slog Handler 层自动注入，无需此处重复输出。
 // 需放在 recovery 之后、业务 handler 之前，确保 panic 被兜住后仍能记录日志。
 func HTTPMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

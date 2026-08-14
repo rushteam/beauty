@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rushteam/beauty/pkg/middleware/auth"
+	"github.com/rushteam/beauty/pkg/middleware/tenant"
 )
 
 // IPKeyExtractor IP 地址键提取器
@@ -304,4 +305,36 @@ func (e *ChainKeyExtractor) Extract(ctx context.Context, metadata map[string]any
 	}
 
 	return "", fmt.Errorf("no key extractors configured")
+}
+
+// TenantKeyExtractor 租户键提取器。
+// 优先从 tenant.FromContext 读取（需 tenant.HTTPMiddleware 在前），
+// fallback 到 Header X-Tenant-ID。
+type TenantKeyExtractor struct {
+	Prefix string
+}
+
+// NewTenantKeyExtractor 创建租户键提取器，默认 prefix 为 "tenant"。
+func NewTenantKeyExtractor() *TenantKeyExtractor {
+	return &TenantKeyExtractor{Prefix: "tenant"}
+}
+
+// Extract 提取租户 ID 作为限流键。
+func (e *TenantKeyExtractor) Extract(ctx context.Context, md map[string]any) (string, error) {
+	id := tenant.FromContext(ctx)
+	if id == "" {
+		if headers, ok := md["headers"].(map[string][]string); ok {
+			if vals := headers["X-Tenant-ID"]; len(vals) > 0 {
+				id = vals[0]
+			}
+		}
+	}
+	if id == "" {
+		return "", fmt.Errorf("could not extract tenant ID")
+	}
+	prefix := e.Prefix
+	if prefix == "" {
+		prefix = "tenant"
+	}
+	return fmt.Sprintf("%s:%s", prefix, id), nil
 }

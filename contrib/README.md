@@ -43,6 +43,8 @@ cd contrib/gorm && go test ./...
 | [`contrib/nats`](nats) | `pkg/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
 | [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
+| [`contrib/rabbitmq`](rabbitmq) | `pkg/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
+| [`contrib/redisstream`](redisstream) | `pkg/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 | [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 多厂商(OpenAI 兼容 / Anthropic / **AWS Bedrock**)+ 薄 **agent 循环**(`llm/agent`,含审批/流式事件/Steer/Hooks + 统一 Agent 接口/**Planner**/**Team 移交**/**Parallel 并发**/**BestOfN**/**VerifyLoop** 编排 + 工具参数 **JSON 容错**/运行内**上下文压缩**/消息合并)+ **会话记忆** + **Agent Skills** | 无(纯 stdlib) |
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |
@@ -63,7 +65,7 @@ cd contrib/gorm && go test ./...
 分别将 Connect 协议和 Kitex Thrift 协议作为与 `grpcserver` 对等的一等公民服务类型(依赖核心)。
 `contrib/codec/kitex` 与 `contrib/codec/gozero`、`contrib/codec/kratos` 同级,提供 Kitex 注册
 格式编解码,实现跨框架服务互通。
-`contrib/nats`、`contrib/natsjs`、`contrib/kafka` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
+`contrib/nats`、`contrib/natsjs`、`contrib/kafka`、`contrib/rabbitmq`、`contrib/redisstream` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
 接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/authz.Enforcer` 接口——这些都 `require
 github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/spire` 对接核心 auth/authz 与
 TLS 钩子(本地联调暂用 `replace`,发布前去掉);`contrib/gorm`、`contrib/sqldb`、

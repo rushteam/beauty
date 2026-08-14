@@ -87,6 +87,16 @@ func WithMetadata(md map[string]string) Option {
 	}
 }
 
+// WithRegionInfo 设置地域信息（region/zone/campus），与 grpcserver.WithRegionInfo 对齐。
+// 用于 LocalityRouter 地域亲和路由和 LabelFilter 标签过滤。
+func WithRegionInfo(region, zone, campus string) Option {
+	return func(s *Server) {
+		s.metadata["region"] = region
+		s.metadata["zone"] = zone
+		s.metadata["campus"] = campus
+	}
+}
+
 // WithMiddleware 添加 HTTP 中间件
 func WithMiddleware(middlewares ...func(http.Handler) http.Handler) Option {
 	return func(s *Server) {

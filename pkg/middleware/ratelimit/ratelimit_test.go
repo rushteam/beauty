@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/rushteam/beauty/pkg/middleware/tenant"
 )
 
 func TestRateLimitMiddleware_Allow(t *testing.T) {
@@ -205,5 +207,86 @@ func TestUserKeyExtractor(t *testing.T) {
 	}
 	if key != "user:123" {
 		t.Errorf("Expected 'user:123', got '%s'", key)
+	}
+}
+
+func TestTenantKeyExtractor_FromContext(t *testing.T) {
+	ext := NewTenantKeyExtractor()
+	ctx := tenant.NewContext(context.Background(), "acme")
+
+	key, err := ext.Extract(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "tenant:acme" {
+		t.Fatalf("want tenant:acme, got %q", key)
+	}
+}
+
+func TestTenantKeyExtractor_FallbackHeader(t *testing.T) {
+	ext := NewTenantKeyExtractor()
+	md := map[string]any{
+		"headers": map[string][]string{
+			"X-Tenant-ID": {"org2"},
+		},
+	}
+	key, err := ext.Extract(context.Background(), md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "tenant:org2" {
+		t.Fatalf("want tenant:org2, got %q", key)
+	}
+}
+
+func TestTenantKeyExtractor_Missing(t *testing.T) {
+	ext := NewTenantKeyExtractor()
+	_, err := ext.Extract(context.Background(), nil)
+	if err == nil {
+		t.Fatal("want error for missing tenant")
+	}
+}
+
+func TestRateOverride_PerKeyQuota(t *testing.T) {
+	rl := NewRateLimitMiddleware(Config{
+		Rate:  100,
+		Burst: 100,
+		RateOverride: func(key string) (float64, int, bool) {
+			if key == "vip" {
+				return 1000, 500, true
+			}
+			return 0, 0, false
+		},
+	})
+
+	vipEntry := rl.getEntry("vip")
+	if vipEntry.limiter.Limit() != 1000 {
+		t.Fatalf("vip rate: want 1000, got %v", vipEntry.limiter.Limit())
+	}
+	if vipEntry.limiter.Burst() != 500 {
+		t.Fatalf("vip burst: want 500, got %d", vipEntry.limiter.Burst())
+	}
+
+	defaultEntry := rl.getEntry("normal")
+	if defaultEntry.limiter.Limit() != 100 {
+		t.Fatalf("default rate: want 100, got %v", defaultEntry.limiter.Limit())
+	}
+	if defaultEntry.limiter.Burst() != 100 {
+		t.Fatalf("default burst: want 100, got %d", defaultEntry.limiter.Burst())
+	}
+}
+
+func TestRateOverride_NilUsesDefault(t *testing.T) {
+	rl := NewRateLimitMiddleware(Config{
+		Rate:  50,
+		Burst: 25,
+	})
+
+	entry := rl.getEntry("any")
+	if entry.limiter.Limit() != 50 {
+		t.Fatalf("rate: want 50, got %v", entry.limiter.Limit())
+	}
+	if entry.limiter.Burst() != 25 {
+		t.Fatalf("burst: want 25, got %d", entry.limiter.Burst())
 	}
 }

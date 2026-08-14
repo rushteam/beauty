@@ -47,6 +47,11 @@ type Config struct {
 	IdleTTL time.Duration
 	// GCInterval GC 扫描间隔，默认 5 分钟。
 	GCInterval time.Duration
+
+	// RateOverride 按 key 查询差异化配额。返回 (rate, burst, true) 表示使用覆盖值，
+	// 返回 false 或未配置时使用默认 Rate/Burst。
+	// 典型场景：per-tenant 差异化限流，从配置/DB 读取各租户配额。
+	RateOverride func(key string) (rate float64, burst int, ok bool)
 }
 
 // limiterEntry 带最后访问时间的限流器条目
@@ -70,6 +75,7 @@ type RateLimitMiddleware struct {
 	defaultKey    string
 	enableMetrics bool
 	onRateLimit   func(ctx context.Context, key string, rate float64)
+	rateOverride  func(key string) (rate float64, burst int, ok bool)
 
 	mutex    sync.RWMutex
 	limiters map[string]*limiterEntry
@@ -127,6 +133,7 @@ func NewRateLimitMiddleware(config Config) *RateLimitMiddleware {
 		defaultKey:    config.DefaultKey,
 		enableMetrics: config.EnableMetrics,
 		onRateLimit:   config.OnRateLimit,
+		rateOverride:  config.RateOverride,
 		limiters:      make(map[string]*limiterEntry),
 		rate:          rate.Limit(config.Rate),
 		burst:         config.Burst,
@@ -236,7 +243,13 @@ func (rl *RateLimitMiddleware) getEntry(key string) *limiterEntry {
 		entry.touch()
 		return entry
 	}
-	entry = &limiterEntry{limiter: rate.NewLimiter(rl.rate, rl.burst)}
+	r, b := rl.rate, rl.burst
+	if rl.rateOverride != nil {
+		if or, ob, ok := rl.rateOverride(key); ok {
+			r, b = rate.Limit(or), ob
+		}
+	}
+	entry = &limiterEntry{limiter: rate.NewLimiter(r, b)}
 	entry.touch()
 	rl.limiters[key] = entry
 	return entry

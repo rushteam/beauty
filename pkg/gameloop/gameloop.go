@@ -30,8 +30,10 @@ import (
 
 // PlayerInput 是某个玩家在某一帧提交的一条输入。
 type PlayerInput[In any] struct {
-	Player string `json:"player"`
-	Input  In     `json:"input"`
+	Player      string    `json:"player"`
+	Input       In        `json:"input"`
+	ClientFrame uint64    `json:"client_frame,omitempty"` // 客户端逻辑帧(延迟补偿)
+	ReceivedAt  time.Time `json:"-"`                      // 服务器收到时刻
 }
 
 // Handler 定义每帧要做什么。OnTick 在 tick goroutine 内被串行调用:
@@ -116,8 +118,16 @@ func New[In any, Out any](rate time.Duration, handler Handler[In, Out], opts ...
 // Push 提交一条玩家输入(线程安全)。它会在下一个 tick 被 OnTick 收到。
 // 连接的读循环里,每收到一条客户端消息就 Push 一次。
 func (r *Room[In, Out]) Push(player string, in In) {
+	r.PushInput(PlayerInput[In]{Player: player, Input: in, ReceivedAt: time.Now()})
+}
+
+// PushInput 提交带 clientFrame/ReceivedAt 的完整输入(延迟补偿场景)。
+func (r *Room[In, Out]) PushInput(in PlayerInput[In]) {
+	if in.ReceivedAt.IsZero() {
+		in.ReceivedAt = time.Now()
+	}
 	r.mu.Lock()
-	r.pending = append(r.pending, PlayerInput[In]{Player: player, Input: in})
+	r.pending = append(r.pending, in)
 	r.mu.Unlock()
 }
 

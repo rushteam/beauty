@@ -390,6 +390,46 @@ func (e *CustomKeyExtractor) Extract(ctx context.Context, metadata map[string]in
 }
 ```
 
+## 多租户限流
+
+配合 `pkg/middleware/tenant` 与 `TenantKeyExtractor` 实现 SaaS 场景下的 per-tenant 配额。
+
+**推荐中间件顺序：** `propagation.HTTPServerMiddleware` → `tenant.HTTPMiddleware()` → `ratelimit.HTTPMiddleware(...)`。
+
+```go
+import (
+    "github.com/rushteam/beauty/pkg/middleware/ratelimit"
+    "github.com/rushteam/beauty/pkg/middleware/tenant"
+    "github.com/rushteam/beauty/pkg/service/propagation"
+)
+
+rl := ratelimit.NewRateLimitMiddleware(ratelimit.Config{
+    Name:  "api-ratelimit",
+    Rate:  100,
+    Burst: 200,
+    KeyExtractor: ratelimit.NewTenantKeyExtractor(),
+    RateOverride: func(key string) (float64, int, bool) {
+        switch key {
+        case "tenant:enterprise":
+            return 1000, 2000, true
+        case "tenant:free":
+            return 10, 20, true
+        }
+        return 0, 0, false
+    },
+})
+
+webserver.WithMiddleware(
+    propagation.HTTPServerMiddleware,
+    tenant.HTTPMiddleware(),
+    ratelimit.HTTPMiddleware(rl),
+)
+```
+
+客户端发送 `X-Tenant-ID`（或 gRPC metadata `x-tenant-id`）。`TenantKeyExtractor` 优先读 `tenant.FromContext`，否则回退 Header。
+
+差异化配额详见 [`docs/idempotency.md`](idempotency.md) 中的幂等键设计；地理路由见 [`docs/geo-routing.md`](geo-routing.md)。
+
 ## 💡 最佳实践
 
 ### 1. 中间件顺序

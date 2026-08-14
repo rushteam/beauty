@@ -44,3 +44,17 @@ func TestViewerTrackOnAck(t *testing.T) {
 		t.Fatalf("gap after ack=3 = %d", vt.Gap())
 	}
 }
+
+func TestJournalCatchUpTruncated(t *testing.T) {
+	j := replicate.NewJournal(3)
+	for i := uint64(1); i <= 10; i++ {
+		j.Record(replicate.Delta{Frame: i})
+	}
+	batch := j.CatchUp(0, 10)
+	if !batch.Truncated {
+		t.Fatal("expected truncated when gap exceeds journal depth")
+	}
+	if len(batch.Deltas) != 3 {
+		t.Fatalf("deltas = %d want 3 (journal depth)", len(batch.Deltas))
+	}
+}

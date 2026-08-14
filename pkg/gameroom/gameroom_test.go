@@ -48,6 +48,21 @@ func TestRoomLifecycle(t *testing.T) {
 	}
 }
 
+func TestDrainEmptyWaitingRoom(t *testing.T) {
+	m := gameroom.New()
+	defer m.Stop()
+	_, err := m.Allocate(gameroom.Spec{ID: "r3", MaxPlayers: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Drain("r3"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Get("r3") != nil {
+		t.Fatal("expected empty waiting room removed after drain")
+	}
+}
+
 func TestScheduleStart(t *testing.T) {
 	m := gameroom.New()
 	defer m.Stop()

@@ -11,9 +11,10 @@ type Ack struct {
 
 // CatchUpBatch 补发 (From, To] 区间内缺失的 Delta(From 不含, To 含)。
 type CatchUpBatch struct {
-	From   uint64  `json:"from"`
-	To     uint64  `json:"to"`
-	Deltas []Delta `json:"deltas"`
+	From      uint64  `json:"from"`
+	To        uint64  `json:"to"`
+	Deltas    []Delta `json:"deltas"`
+	Truncated bool    `json:"truncated,omitempty"` // journal 深度不足,补发不完整
 }
 
 // Journal 保存最近 depth 帧的 Delta(按 viewer 独立),供丢包后 CatchUp。
@@ -31,10 +32,14 @@ func NewJournal(depth int) *Journal {
 	return &Journal{depth: depth}
 }
 
-// Record 追加一帧 Delta;超出 depth 时丢弃最旧帧。
+// Record 追加一帧 Delta;超出 depth 时丢弃最旧帧。同帧重复写入时覆盖最新条目。
 func (j *Journal) Record(d Delta) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if n := len(j.entries); n > 0 && j.entries[n-1].Frame == d.Frame {
+		j.entries[n-1] = d
+		return
+	}
 	j.entries = append(j.entries, d)
 	if len(j.entries) > j.depth {
 		j.entries = j.entries[len(j.entries)-j.depth:]
@@ -46,10 +51,20 @@ func (j *Journal) CatchUp(after, through uint64) CatchUpBatch {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	out := CatchUpBatch{From: after, To: through}
+	if through <= after {
+		return out
+	}
+	want := int(through - after)
 	for _, d := range j.entries {
 		if d.Frame > after && d.Frame <= through {
 			out.Deltas = append(out.Deltas, d)
 		}
+	}
+	if len(out.Deltas) < want {
+		out.Truncated = true
+	}
+	if len(j.entries) > 0 && j.entries[0].Frame > after+1 {
+		out.Truncated = true
 	}
 	return out
 }

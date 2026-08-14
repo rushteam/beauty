@@ -1,14 +1,7 @@
-// statesync-quic demo:把状态同步搬到 QUIC,用一条连接的两种通道分流两类数据。
+// statesync-quic demo:QUIC 双通道 + replicate 增量 + CatchUp/Ack。
 //
-//   - 关键指令走【可靠有序流】:客户端开一条流,先发 Hello{player} 握手,之后持续发
-//     Cmd(移动指令)。丢不得、要顺序,用可靠流(像 TCP 但无跨流队头阻塞)。
-//   - 高频状态走【不可靠数据报】:服务器每帧把该玩家 AOI 视野内的实体打成 View 用
-//     SendDatagram 下发。丢了就丢、不重传、不阻塞后续——正是位置/状态更新想要的。
-//
-// 逻辑与 examples/statesync(WebSocket 版)一致:pkg/gameloop 定步长权威模拟 +
-// pkg/spatial 每帧 AOI 过滤;区别只在传输层换成 pkg/quic 并按可靠性分了两条通道。
-//
-// 自带 3 个进程内 QUIC bot 端到端验证 AOI:alice/bob 相邻互见、carol 远处隔离。
+//   - 可靠流:Hello / Cmd / Ack / CatchUp / resync
+//   - 不可靠数据报:Delta
 //
 // 运行:go run ./examples/statesync-quic
 package main
@@ -20,11 +13,13 @@ import (
 	"log"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/gameloop"
 	"github.com/rushteam/beauty/pkg/quic"
+	"github.com/rushteam/beauty/pkg/replicate"
 	"github.com/rushteam/beauty/pkg/spatial"
 )
 
@@ -36,51 +31,68 @@ const (
 	worldBound = 1000
 )
 
-// Hello 是可靠流上的第一条消息:自报玩家身份(QUIC 没有 URL query,用握手identify)。
 type Hello struct {
 	Player string `json:"player"`
 }
 
-// Cmd 客户端上行的移动指令(可靠流上 Hello 之后的消息流)。
 type Cmd struct {
 	DX float64 `json:"dx"`
 	DY float64 `json:"dy"`
 }
 
-// Entity / View / worldTick / World 同 WebSocket 版(权威模拟 + AOI)。
+type ClientMsg struct {
+	Kind string         `json:"kind"` // cmd | ack | resync
+	Cmd  *Cmd           `json:"cmd,omitempty"`
+	Ack  *replicate.Ack `json:"ack,omitempty"`
+}
+
+type ServerMsg struct {
+	Kind    string                  `json:"kind"`
+	CatchUp *replicate.CatchUpBatch `json:"catchup,omitempty"`
+}
+
 type Entity struct {
 	ID string  `json:"id"`
 	X  float64 `json:"x"`
 	Y  float64 `json:"y"`
 }
 
-type View struct {
-	Frame   uint64   `json:"frame"`
-	Self    Entity   `json:"self"`
-	Visible []Entity `json:"visible"`
-}
-
 type worldTick struct {
-	frame uint64
-	index *spatial.Index[string]
+	frame   uint64
+	index   *spatial.Index[string]
+	dirty   []string
+	removed []string
+	lookup  replicate.Lookup[string]
 }
 
 type World struct {
-	mu  sync.Mutex
-	pos map[string]Entity
+	mu       sync.Mutex
+	pos      map[string]Entity
+	dirty    *replicate.DirtySet[string]
+	versions *replicate.Versions[string]
 }
 
-func newWorld() *World { return &World{pos: make(map[string]Entity)} }
+func newWorld() *World {
+	return &World{
+		pos:      make(map[string]Entity),
+		dirty:    replicate.NewDirtySet[string](),
+		versions: replicate.NewVersions[string](),
+	}
+}
 
 func (w *World) Join(id string, x, y float64) {
 	w.mu.Lock()
 	w.pos[id] = Entity{ID: id, X: x, Y: y}
+	w.dirty.Mark(id)
+	w.versions.Bump(id)
 	w.mu.Unlock()
 }
 
 func (w *World) Leave(id string) {
 	w.mu.Lock()
 	delete(w.pos, id)
+	w.dirty.Remove(id)
+	w.versions.Delete(id)
 	w.mu.Unlock()
 }
 
@@ -95,22 +107,39 @@ func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd]) *worldTic
 		p.X = clamp(p.X+in.Input.DX, 0, worldBound)
 		p.Y = clamp(p.Y+in.Input.DY, 0, worldBound)
 		w.pos[in.Player] = p
+		w.dirty.Mark(in.Player)
+		w.versions.Bump(in.Player)
 	}
 	ix := spatial.New[string](cellSize)
 	for id, p := range w.pos {
 		ix.Add(id, p.X, p.Y)
 	}
-	return &worldTick{frame: frame, index: ix}
+	dirty, removed := w.dirty.Consume()
+	lookup := func(id string) (replicate.EntityState, bool) {
+		p, ok := w.pos[id]
+		if !ok {
+			return replicate.EntityState{}, false
+		}
+		return replicate.EntityState{ID: id, X: p.X, Y: p.Y, Version: w.versions.Get(id)}, true
+	}
+	return &worldTick{frame: frame, index: ix, dirty: dirty, removed: removed, lookup: lookup}
 }
 
 var spawns = map[string]Entity{
 	"alice": {X: 50, Y: 50},
-	"bob":   {X: 120, Y: 120}, // 距 alice ≈99 < 100 → 互相可见
-	"carol": {X: 800, Y: 800}, // 远处 → 谁也看不见
+	"bob":   {X: 120, Y: 120},
+	"carol": {X: 800, Y: 800},
+}
+
+type botResult struct {
+	baseline, catchup bool
+	visible           []string
 }
 
 func main() {
 	world := newWorld()
+	projector := replicate.NewProjector[string](replicate.Config{})
+	tracks := sync.Map{}
 
 	room := gameloop.New(tickRate,
 		gameloop.HandlerFunc[Cmd, *worldTick](func(frame uint64, inputs []gameloop.PlayerInput[Cmd]) []*worldTick {
@@ -120,12 +149,13 @@ func main() {
 	)
 
 	srv := quic.NewServer(addr, func(ctx context.Context, c *quic.Conn) error {
-		// 1) 握手:等客户端开控制流并发 Hello,识别玩家。
 		stream, err := c.AcceptStream(ctx)
 		if err != nil {
 			return err
 		}
 		dec := json.NewDecoder(stream)
+		enc := json.NewEncoder(stream)
+
 		var hello Hello
 		if err := dec.Decode(&hello); err != nil {
 			return err
@@ -138,7 +168,13 @@ func main() {
 		world.Join(player, sp.X, sp.Y)
 		defer world.Leave(player)
 
-		// 2) 状态下行(不可靠数据报):每帧把 AOI 视野内实体发给该玩家。
+		storeTrack := func() *replicate.ViewerTrack {
+			tr, _ := tracks.LoadOrStore(player, replicate.NewViewerTrack(replicate.NewJournal(64)))
+			return tr.(*replicate.ViewerTrack)
+		}
+		storeTrack()
+		defer tracks.Delete(player)
+
 		go func() {
 			ch, unsub := room.Subscribe(ctx)
 			defer unsub()
@@ -154,23 +190,52 @@ func main() {
 					if !ok {
 						continue
 					}
-					near := tk.index.Nearby(px, py, aoiRadius, player)
-					b, err := json.Marshal(View{Frame: tk.frame, Self: Entity{player, px, py}, Visible: toEntities(near)})
-					if err != nil || len(b) > 1000 {
-						continue // 数据报受 MTU 限制;过大应改走可靠流或分片(此处从简跳过)
+					visible := tk.index.Nearby(px, py, aoiRadius, player)
+					delta := projector.Project(tk.frame, player, visible, tk.dirty, tk.removed, tk.lookup)
+					tr, _ := tracks.Load(player)
+					if tr == nil {
+						continue
 					}
-					_ = c.SendDatagram(b) // 不可靠:丢了等下一帧,不重传不阻塞
+					track := tr.(*replicate.ViewerTrack)
+					track.RecordSent(delta)
+					b, err := json.Marshal(delta)
+					if err != nil || len(b) > 900 {
+						continue
+					}
+					_ = c.SendDatagram(b)
 				}
 			}
 		}()
 
-		// 3) 指令上行(可靠有序流):Hello 之后持续读 Cmd 投进房间。
 		for {
-			var cmd Cmd
-			if err := dec.Decode(&cmd); err != nil {
+			var msg ClientMsg
+			if err := dec.Decode(&msg); err != nil {
 				return err
 			}
-			room.Push(player, cmd)
+			switch msg.Kind {
+			case "ack":
+				if msg.Ack == nil {
+					continue
+				}
+				tr, _ := tracks.Load(player)
+				if tr == nil {
+					continue
+				}
+				track := tr.(*replicate.ViewerTrack)
+				batch := track.OnAck(*msg.Ack)
+				if len(batch.Deltas) > 0 || batch.Truncated {
+					_ = enc.Encode(ServerMsg{Kind: "catchup", CatchUp: &batch})
+				}
+			case "resync":
+				projector.DropViewer(player)
+				tracks.Store(player, replicate.NewViewerTrack(replicate.NewJournal(64)))
+			case "", "cmd":
+				cmd := Cmd{}
+				if msg.Cmd != nil {
+					cmd = *msg.Cmd
+				}
+				room.Push(player, cmd)
+			}
 		}
 	}, quic.WithServiceName("statesync-quic"))
 
@@ -183,49 +248,58 @@ func main() {
 	<-srv.Ready()
 
 	players := []string{"alice", "bob", "carol"}
-	botCtx, botCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	botCtx, botCancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
 	defer botCancel()
 
+	results := make([]botResult, len(players))
 	var wg sync.WaitGroup
-	visible := make([][]string, len(players))
 	for i, p := range players {
 		wg.Add(1)
 		go func(i int, p string) {
 			defer wg.Done()
-			v, err := runBot(botCtx, addr, p)
-			if err != nil {
-				log.Printf("bot %s: %v", p, err)
-				return
-			}
-			visible[i] = v
+			results[i] = runBot(botCtx, addr, p)
 		}(i, p)
 	}
 	wg.Wait()
 
-	verifyAOI(players, visible)
+	fmt.Println("──────── QUIC 增量 + CatchUp ────────")
+	allOK := true
+	expected := map[string][]string{"alice": {"bob"}, "bob": {"alice"}, "carol": {}}
+	for i, p := range players {
+		r := results[i]
+		aoiOK := slices.Equal(r.visible, expected[p])
+		ok := r.baseline && r.catchup && aoiOK
+		allOK = allOK && ok
+		mark := "✅"
+		if !ok {
+			mark = "❌"
+		}
+		fmt.Printf("  %-6s baseline=%v catchup=%v AOI=%v %s\n", p, r.baseline, r.catchup, r.visible, mark)
+	}
+	if allOK {
+		fmt.Println("结论: ✅ Delta 走数据报、Ack/CatchUp 走可靠流")
+	}
 
 	cancel()
 	<-appErr
 }
 
-// runBot:QUIC 连接 → 开可靠流发 Hello(+周期 Cmd)→ 收状态数据报,返回最后一帧可视实体。
-func runBot(ctx context.Context, addr, player string) ([]string, error) {
+func runBot(ctx context.Context, addr, player string) botResult {
 	c, err := dialRetry(ctx, addr)
 	if err != nil {
-		return nil, err
+		log.Printf("bot %s: %v", player, err)
+		return botResult{}
 	}
 	defer c.Close("bye")
 
 	stream, err := c.OpenStream(ctx)
 	if err != nil {
-		return nil, err
+		return botResult{}
 	}
+	dec := json.NewDecoder(stream)
 	enc := json.NewEncoder(stream)
-	if err := enc.Encode(Hello{Player: player}); err != nil { // 握手
-		return nil, err
-	}
+	_ = enc.Encode(Hello{Player: player})
 
-	// 周期发零位移 Cmd(演示可靠指令通道;位置不变以便 AOI 结果可预期)。
 	go func() {
 		t := time.NewTicker(150 * time.Millisecond)
 		defer t.Stop()
@@ -234,82 +308,121 @@ func runBot(ctx context.Context, addr, player string) ([]string, error) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = enc.Encode(Cmd{})
+				_ = enc.Encode(ClientMsg{Kind: "cmd", Cmd: &Cmd{}})
 			}
 		}
 	}()
 
-	// 收状态数据报,记录最新一帧的可视集合。
-	var (
-		mu       sync.Mutex
-		lastSeen []string
-		lastAt   uint64
-	)
+	var baseline atomic.Bool
+	var catchup atomic.Bool
+	var lastFrame atomic.Uint64
+	var visibleMu sync.Mutex
+	var visible []string
+
 	go func() {
 		for {
 			b, err := c.ReceiveDatagram(ctx)
 			if err != nil {
 				return
 			}
-			var v View
-			if json.Unmarshal(b, &v) != nil {
+			var d replicate.Delta
+			if json.Unmarshal(b, &d) != nil {
 				continue
 			}
-			ids := make([]string, 0, len(v.Visible))
-			for _, e := range v.Visible {
-				ids = append(ids, e.ID)
+			if d.Baseline {
+				baseline.Store(true)
+				visibleMu.Lock()
+				visible = spawnIDs(&d)
+				visibleMu.Unlock()
 			}
-			slices.Sort(ids)
-			mu.Lock()
-			if v.Frame >= lastAt {
-				lastAt, lastSeen = v.Frame, ids
+			for {
+				cur := lastFrame.Load()
+				if d.Frame <= cur {
+					break
+				}
+				if lastFrame.CompareAndSwap(cur, d.Frame) {
+					break
+				}
 			}
-			mu.Unlock()
 		}
 	}()
 
-	<-ctx.Done()
-	mu.Lock()
-	defer mu.Unlock()
-	return lastSeen, nil
-}
-
-func verifyAOI(players []string, visible [][]string) {
-	expected := map[string][]string{"alice": {"bob"}, "bob": {"alice"}, "carol": {}}
-	fmt.Println("──────── AOI(状态同步 / QUIC)校验 ────────")
-	allOK := true
-	for i, p := range players {
-		got := visible[i]
-		want := expected[p]
-		ok := slices.Equal(got, want)
-		allOK = allOK && ok
-		mark := "✅"
-		if !ok {
-			mark = "❌"
+	catchCh := make(chan struct{}, 1)
+	go func() {
+		for {
+			var msg ServerMsg
+			if err := dec.Decode(&msg); err != nil {
+				return
+			}
+			if msg.Kind != "catchup" || msg.CatchUp == nil {
+				continue
+			}
+			if len(msg.CatchUp.Deltas) > 0 {
+				catchup.Store(true)
+			}
+			for _, d := range msg.CatchUp.Deltas {
+				for {
+					cur := lastFrame.Load()
+					if d.Frame <= cur {
+						break
+					}
+					if lastFrame.CompareAndSwap(cur, d.Frame) {
+						break
+					}
+				}
+			}
+			if msg.CatchUp.Truncated {
+				_ = enc.Encode(ClientMsg{Kind: "resync"})
+			}
+			select {
+			case catchCh <- struct{}{}:
+			default:
+			}
 		}
-		fmt.Printf("  %-6s 视野内: %-16v (期望 %v) %s\n", p, fmtIDs(got), fmtIDs(want), mark)
-	}
-	if allOK {
-		fmt.Println("结论: ✅ 指令走可靠流、状态走数据报,AOI 端到端一致")
-	} else {
-		fmt.Println("结论: ❌ 与预期不符")
-	}
-	fmt.Println("──────────────────────────────────────────")
-}
+	}()
 
-func toEntities(es []spatial.Entity[string]) []Entity {
-	out := make([]Entity, 0, len(es))
-	for _, e := range es {
-		out = append(out, Entity{ID: e.ID, X: e.X, Y: e.Y})
+	deadline := time.After(1200 * time.Millisecond)
+waitBaseline:
+	for {
+		select {
+		case <-ctx.Done():
+			goto done
+		case <-deadline:
+			goto done
+		default:
+			if baseline.Load() && lastFrame.Load() >= 3 {
+				break waitBaseline
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
+
+	if baseline.Load() && lastFrame.Load() >= 3 {
+		_ = enc.Encode(ClientMsg{Kind: "ack", Ack: &replicate.Ack{LastFrame: 1}})
+		select {
+		case <-catchCh:
+		case <-time.After(800 * time.Millisecond):
+		case <-ctx.Done():
+		}
+	}
+
+done:
+	var out botResult
+	out.baseline = baseline.Load()
+	out.catchup = catchup.Load()
+	visibleMu.Lock()
+	out.visible = visible
+	visibleMu.Unlock()
 	return out
 }
 
-func fmtIDs(ids []string) string {
-	if len(ids) == 0 {
-		return "[]"
+func spawnIDs(d *replicate.Delta) []string {
+	ids := make([]string, 0, len(d.Spawn))
+	for _, e := range d.Spawn {
+		ids = append(ids, e.ID)
 	}
-	return fmt.Sprint(ids)
+	slices.Sort(ids)
+	return ids
 }
 
 func dialRetry(ctx context.Context, addr string) (*quic.Conn, error) {

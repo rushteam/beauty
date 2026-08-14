@@ -1035,7 +1035,7 @@ top := ix.KNN(0, 0, 5, 500)          // 最近 5 个
   半径 50)显示 10k 实体时与全表扫描相当(map 开销 ~ 抵消候选缩减),250k 时
   网格 ~10µs、全表 ~171µs(约 17×)。实体少时全表扫描反而更简单;
 - 附近的人/MMO AOI/大地图分区。详见 `examples/spatial`。
-- **增量同步**在 `spatial.Nearby` 出口叠加 `spatial/aoi` diff + `pkg/replicate.Projector`,见 `examples/statesync-delta`。
+- **增量同步**在 `spatial.Nearby` 出口叠加 `spatial/aoi` diff + `pkg/replicate.Projector`,见 `examples/statesync`。
 
 ## 速查:pkg/spatial/aoi + pkg/replicate（AOI 增量同步）
 
@@ -1049,7 +1049,7 @@ batch := track.OnAck(ack) // 可靠通道补 CatchUp
 ```
 
 - `Journal` + `ViewerTrack` + `Ack` / `CatchUpBatch` 支持丢包追帧;
-- 详见 `examples/statesync-delta`、`examples/statesync-quic-delta`;Agones 托管见 `examples/agones-room` + `contrib/agones`。
+- 详见 `examples/statesync`、`examples/statesync-quic`;Agones 托管见 `examples/agones-room` + `examples/matchmaker-room` + `contrib/agones`。
 
 ## 速查:pkg/snapbuf + inputclock + lagcomp（延迟补偿）
 

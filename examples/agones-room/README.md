@@ -61,4 +61,4 @@ spec:
 | `pkg/gameloop` | 定步 tick + 输入扇出 |
 | `contrib/agones` | Ready/Health/Shutdown + WatchContext |
 
-增量同步见 [`statesync-delta`](../statesync-delta)、[`statesync-quic-delta`](../statesync-quic-delta);Agones 模块说明见 [`contrib/agones/README.md`](../../contrib/agones/README.md)。
+增量同步见 [`statesync`](../statesync)、[`statesync-quic`](../statesync-quic);匹配分配见 [`matchmaker-room`](../matchmaker-room)。Agones 模块说明见 [`contrib/agones/README.md`](../../contrib/agones/README.md)。

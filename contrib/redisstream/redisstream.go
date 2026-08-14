@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,10 +146,14 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h mq.Handler, 
 
 func (s *Subscriber) ensureGroup(ctx context.Context, stream, group string) error {
 	err := s.rdb.XGroupCreateMkStream(ctx, stream, group, "0").Err()
-	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+	if err != nil && !isBusyGroup(err) {
 		return fmt.Errorf("redisstream: create group %q on %q: %w", group, stream, err)
 	}
 	return nil
+}
+
+func isBusyGroup(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "BUSYGROUP")
 }
 
 func (s *Subscriber) consumeGroup(ctx context.Context, stream, group string, h mq.Handler) {

@@ -170,12 +170,8 @@ func (m *Manager) Leave(roomID, playerID string) error {
 		return fmt.Errorf("gameroom: unknown room %q", roomID)
 	}
 	delete(rs.players, playerID)
-	if len(rs.players) == 0 && (rs.fsm.Is(PhaseRunning) || rs.fsm.Is(PhaseDraining)) {
-		_, _ = rs.fsm.Fire(EventEmpty)
-		if m.hooks.OnClose != nil {
-			m.hooks.OnClose(roomID)
-		}
-		delete(m.rooms, roomID)
+	if len(rs.players) == 0 {
+		m.closeEmptyRoomLocked(rs, roomID)
 	}
 	return nil
 }
@@ -248,13 +244,30 @@ func (m *Manager) Drain(roomID string) error {
 	if m.hooks.OnDrain != nil {
 		m.hooks.OnDrain(roomID)
 	}
-	if len(rs.players) == 0 {
-		_, _ = rs.fsm.Fire(EventEmpty)
-		if m.hooks.OnClose != nil {
-			m.hooks.OnClose(roomID)
-		}
-	}
+	m.closeEmptyRoomLocked(rs, roomID)
 	return nil
+}
+
+// closeEmptyRoomLocked 在玩家数为 0 时将房间推进到 Closed 并从 Manager 移除。
+// 调用方需已持有 m.mu。
+func (m *Manager) closeEmptyRoomLocked(rs *roomState, roomID string) {
+	if len(rs.players) != 0 {
+		return
+	}
+	if rs.fsm.Is(PhaseClosed) {
+		delete(m.rooms, roomID)
+		return
+	}
+	switch {
+	case rs.fsm.Is(PhaseDraining), rs.fsm.Is(PhaseRunning):
+		_, _ = rs.fsm.Fire(EventEmpty)
+	default:
+		_, _ = rs.fsm.Fire(EventClose)
+	}
+	if m.hooks.OnClose != nil {
+		m.hooks.OnClose(roomID)
+	}
+	delete(m.rooms, roomID)
 }
 
 // Close 强制关闭房间。

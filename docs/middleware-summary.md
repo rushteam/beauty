@@ -81,6 +81,10 @@ webserver.WithRateLimitWait(rateLimitMiddleware)  // 等待通过
 grpcserver.WithRateLimit(rateLimitMiddleware)
 ```
 
+**按租户差异化配额:** 配合 `tenant.HTTPMiddleware()` + `TenantKeyExtractor`,用 `Config.RateOverride` 按 key 返回不同 rate/burst。
+
+**多租户中间件** (`pkg/middleware/tenant`):提取 `X-Tenant-ID` / `x-tenant-id` → `tenant.FromContext(ctx)`。详见 [`metadata-propagation.md`](metadata-propagation.md)。
+
 ### 3. 超时控制中间件 (Timeout Control)
 
 **核心特性：**

@@ -390,6 +390,46 @@ func (e *CustomKeyExtractor) Extract(ctx context.Context, metadata map[string]in
 }
 ```
 
+## Multi-Tenant Rate Limiting
+
+Combine `pkg/middleware/tenant` with `TenantKeyExtractor` for per-tenant quotas in SaaS APIs.
+
+**Recommended middleware order:** `propagation.HTTPServerMiddleware` → `tenant.HTTPMiddleware()` → `ratelimit.HTTPMiddleware(...)`.
+
+```go
+import (
+    "github.com/rushteam/beauty/pkg/middleware/ratelimit"
+    "github.com/rushteam/beauty/pkg/middleware/tenant"
+    "github.com/rushteam/beauty/pkg/service/propagation"
+)
+
+rl := ratelimit.NewRateLimitMiddleware(ratelimit.Config{
+    Name:  "api-ratelimit",
+    Rate:  100,
+    Burst: 200,
+    KeyExtractor: ratelimit.NewTenantKeyExtractor(),
+    RateOverride: func(key string) (float64, int, bool) {
+        switch key {
+        case "tenant:enterprise":
+            return 1000, 2000, true
+        case "tenant:free":
+            return 10, 20, true
+        }
+        return 0, 0, false
+    },
+})
+
+webserver.WithMiddleware(
+    propagation.HTTPServerMiddleware,
+    tenant.HTTPMiddleware(),
+    ratelimit.HTTPMiddleware(rl),
+)
+```
+
+Clients send `X-Tenant-ID` (or gRPC metadata `x-tenant-id`). `TenantKeyExtractor` reads `tenant.FromContext` first, then falls back to headers.
+
+For idempotency key design see [`docs/idempotency.md`](idempotency.md); for geo routing see [`docs/geo-routing.md`](geo-routing.md).
+
 ## Best Practices
 
 ### 1. Middleware Order

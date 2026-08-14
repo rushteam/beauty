@@ -28,6 +28,26 @@ _ = ctrl.Run(ctx) // SDK 实现 Watcher 时自动监听 Shutdown → Drain
 
 测试与本地开发可注入 mock `Lifecycle`/`Watcher`,见 `controller_test.go` 与 [`examples/agones-room`](../../examples/agones-room)。
 
+## GameServer 分配 (Allocator)
+
+匹配服通过 Allocator 从集群领取 GameServer 地址:
+
+```go
+// 本地 mock(地址池)
+alloc := agones.NewPoolAllocator([]string{"127.0.0.1:8130"})
+
+// 生产: agones-allocator gRPC (mTLS)
+tlsCfg, _ := agones.TLSConfigFromFiles(cert, key, ca)
+alloc, _ := agones.NewGRPCAllocator("allocator.agones-system:443",
+    agones.WithAllocatorTLS(tlsCfg),
+    agones.WithAllocatorNamespace("default"),
+)
+result, _ := alloc.Allocate(ctx, agones.AllocationRequest{})
+// result.Address → 客户端 WS 直连
+```
+
+[`examples/matchmaker-room`](../../examples/matchmaker-room) 默认 PoolAllocator;设 `BEAUTY_AGONES_ALLOCATOR=host:443` + `BEAUTY_AGONES_ALLOCATOR_INSECURE=1`(联调) 切换 gRPC。
+
 ## Demo
 
 ```bash

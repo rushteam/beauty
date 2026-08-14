@@ -103,7 +103,7 @@ func (c *Controller) shutdown(ctx context.Context) error {
 		slog.Warn("agones: drain", "err", err)
 	}
 
-	deadline, cancel := context.WithTimeout(ctx, c.ShutdownGrace)
+	deadline, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.ShutdownGrace)
 	defer cancel()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()

@@ -19,6 +19,7 @@ package rabbitmq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -31,13 +32,13 @@ import (
 
 // ===== Publisher =====
 
-// Publisher 实现 mq.Publisher(基于单连接单 channel,confirm 模式可选)。
+// Publisher 实现 mq.Publisher(基于单连接单 channel,confirm 模式可选;断线自动重连一次)。
 type Publisher struct {
-	conn     *amqp.Connection
-	ch       *amqp.Channel
-	exchange string
-	confirm  bool
-	mu       sync.Mutex
+	url  string
+	cfg  publisherConfig
+	conn *amqp.Connection
+	ch   *amqp.Channel
+	mu   sync.Mutex
 }
 
 var _ mq.Publisher = (*Publisher)(nil)
@@ -78,39 +79,74 @@ func NewPublisher(url string, opts ...PublisherOption) (*Publisher, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-
-	conn, err := amqp.Dial(url)
-	if err != nil {
-		return nil, fmt.Errorf("rabbitmq: dial: %w", err)
+	p := &Publisher{url: url, cfg: cfg}
+	if err := p.reconnectLocked(); err != nil {
+		return nil, err
 	}
+	return p, nil
+}
 
-	ch, err := conn.Channel()
+func dialPublisher(url string, cfg publisherConfig) (conn *amqp.Connection, ch *amqp.Channel, err error) {
+	conn, err = amqp.Dial(url)
+	if err != nil {
+		return nil, nil, fmt.Errorf("rabbitmq: dial: %w", err)
+	}
+	ch, err = conn.Channel()
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("rabbitmq: open channel: %w", err)
+		return nil, nil, fmt.Errorf("rabbitmq: open channel: %w", err)
 	}
-
 	if cfg.declareExc && cfg.excType != "" {
 		if err := ch.ExchangeDeclare(cfg.exchange, cfg.excType, true, false, false, false, nil); err != nil {
 			ch.Close()
 			conn.Close()
-			return nil, fmt.Errorf("rabbitmq: declare exchange %q: %w", cfg.exchange, err)
+			return nil, nil, fmt.Errorf("rabbitmq: declare exchange %q: %w", cfg.exchange, err)
 		}
 	}
-
 	if cfg.confirm {
 		if err := ch.Confirm(false); err != nil {
 			ch.Close()
 			conn.Close()
-			return nil, fmt.Errorf("rabbitmq: enable confirm: %w", err)
+			return nil, nil, fmt.Errorf("rabbitmq: enable confirm: %w", err)
 		}
 	}
+	return conn, ch, nil
+}
 
-	return &Publisher{conn: conn, ch: ch, exchange: cfg.exchange, confirm: cfg.confirm}, nil
+func (p *Publisher) reconnectLocked() error {
+	if p.ch != nil {
+		_ = p.ch.Close()
+		p.ch = nil
+	}
+	if p.conn != nil {
+		_ = p.conn.Close()
+		p.conn = nil
+	}
+	conn, ch, err := dialPublisher(p.url, p.cfg)
+	if err != nil {
+		return err
+	}
+	p.conn, p.ch = conn, ch
+	return nil
 }
 
 // Publish 实现 mq.Publisher。routing key 优先取 msg.Key,其次 msg.Topic。
 func (p *Publisher) Publish(ctx context.Context, msg mq.Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.publishLocked(ctx, msg); err != nil {
+		if !isReconnectable(err) {
+			return err
+		}
+		if recErr := p.reconnectLocked(); recErr != nil {
+			return err
+		}
+		return p.publishLocked(ctx, msg)
+	}
+	return nil
+}
+
+func (p *Publisher) publishLocked(ctx context.Context, msg mq.Message) error {
 	routingKey := msg.Topic
 	if msg.Key != "" {
 		routingKey = msg.Key
@@ -132,11 +168,8 @@ func (p *Publisher) Publish(ctx context.Context, msg mq.Message) error {
 		}
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.confirm {
-		dc, err := p.ch.PublishWithDeferredConfirmWithContext(ctx, p.exchange, routingKey, false, false, pub)
+	if p.cfg.confirm {
+		dc, err := p.ch.PublishWithDeferredConfirmWithContext(ctx, p.cfg.exchange, routingKey, false, false, pub)
 		if err != nil {
 			return fmt.Errorf("rabbitmq: publish %s: %w", routingKey, err)
 		}
@@ -150,10 +183,14 @@ func (p *Publisher) Publish(ctx context.Context, msg mq.Message) error {
 		return nil
 	}
 
-	if err := p.ch.PublishWithContext(ctx, p.exchange, routingKey, false, false, pub); err != nil {
+	if err := p.ch.PublishWithContext(ctx, p.cfg.exchange, routingKey, false, false, pub); err != nil {
 		return fmt.Errorf("rabbitmq: publish %s: %w", routingKey, err)
 	}
 	return nil
+}
+
+func isReconnectable(err error) bool {
+	return errors.Is(err, amqp.ErrClosed)
 }
 
 // Close 关闭连接。

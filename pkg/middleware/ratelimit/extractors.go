@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/rushteam/beauty/pkg/metadata"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/tenant"
 )
@@ -323,11 +324,7 @@ func NewTenantKeyExtractor() *TenantKeyExtractor {
 func (e *TenantKeyExtractor) Extract(ctx context.Context, md map[string]any) (string, error) {
 	id := tenant.FromContext(ctx)
 	if id == "" {
-		if headers, ok := md["headers"].(map[string][]string); ok {
-			if vals := headers["X-Tenant-ID"]; len(vals) > 0 {
-				id = vals[0]
-			}
-		}
+		id = tenantIDFromHeaders(md)
 	}
 	if id == "" {
 		return "", fmt.Errorf("could not extract tenant ID")
@@ -337,4 +334,22 @@ func (e *TenantKeyExtractor) Extract(ctx context.Context, md map[string]any) (st
 		prefix = "tenant"
 	}
 	return fmt.Sprintf("%s:%s", prefix, id), nil
+}
+
+func tenantIDFromHeaders(md map[string]any) string {
+	headers, ok := md["headers"].(map[string][]string)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"X-Tenant-ID", metadata.KeyTenantID} {
+		if vals := headers[key]; len(vals) > 0 && vals[0] != "" {
+			return vals[0]
+		}
+	}
+	for k, vals := range headers {
+		if strings.EqualFold(k, "X-Tenant-ID") && len(vals) > 0 && vals[0] != "" {
+			return vals[0]
+		}
+	}
+	return ""
 }

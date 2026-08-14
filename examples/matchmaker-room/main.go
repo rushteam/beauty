@@ -1,70 +1,52 @@
-// matchmaker-room demo:matchmaker 匹配成功后 mock 分配 GameServer 地址。
+// matchmaker-room demo:matchmaker 匹配成功后分配 GameServer 地址。
 //
-// 模拟 matchmaker → Allocator → 客户端连 agones-room 的链路;无需真实 K8s Agones Allocator。
+// 默认 PoolAllocator(mock);设 BEAUTY_AGONES_ALLOCATOR=host:443 使用 gRPC Allocator。
 //
-// 运行:
-//
-//	# 终端 1: 游戏服(可开多个换端口)
-//	go run ./examples/agones-room
-//	# 终端 2: 匹配服
-//	go run ./examples/matchmaker-room
-//
-//	curl "http://127.0.0.1:8288/queue?user=alice&region=eu&skill=1000"
-//	curl "http://127.0.0.1:8288/queue?user=bob&region=eu&skill=1010"
-//	curl http://127.0.0.1:8288/assign?user=alice
+// 运行:go run ./examples/matchmaker-room
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/contrib/agones"
 	"github.com/rushteam/beauty/pkg/matchmaker"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 
-// Allocator 模拟 Agones GameServer 分配(轮询地址池)。
-type Allocator struct {
-	addrs []string
-	idx   atomic.Uint64
-}
-
-func NewAllocator(addrs []string) *Allocator {
-	if len(addrs) == 0 {
-		addrs = []string{"127.0.0.1:8130"}
-	}
-	return &Allocator{addrs: addrs}
-}
-
-func (a *Allocator) Allocate() string {
-	i := a.idx.Add(1)
-	return a.addrs[int(i-1)%len(a.addrs)]
-}
+const listenAddr = "127.0.0.1:8288"
 
 func main() {
-	pool := NewAllocator(strings.Split(os.Getenv("BEAUTY_GAME_ADDRS"), ","))
-	if os.Getenv("BEAUTY_GAME_ADDRS") == "" {
-		pool = NewAllocator([]string{"127.0.0.1:8130"})
+	alloc, closeFn := openAllocator()
+	if closeFn != nil {
+		defer closeFn()
 	}
 
 	var mu sync.Mutex
 	assignments := map[string]string{} // userID → host:port
 
 	m := matchmaker.New(func(ctx context.Context, mm matchmaker.Match) error {
-		addr := pool.Allocate()
+		result, err := alloc.Allocate(ctx, agones.AllocationRequest{
+			Namespace: os.Getenv("BEAUTY_AGONES_NAMESPACE"),
+			Metadata:  map[string]string{"players": fmt.Sprint(len(mm.Tickets))},
+		})
+		if err != nil {
+			return err
+		}
 		mu.Lock()
 		for _, t := range mm.Tickets {
-			assignments[t.Presence.UserID] = addr
+			assignments[t.Presence.UserID] = result.Address
 		}
 		mu.Unlock()
-		println("allocated team to", addr, "players:", len(mm.Tickets))
 		return nil
 	}, matchmaker.WithTickInterval(300*time.Millisecond), matchmaker.WithMaxWaitSec(15))
 	m.Start(context.Background())
@@ -101,16 +83,96 @@ func main() {
 			"ws_url":    "ws://" + addr + "/ws?player=" + user,
 		})
 	})
-	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		n := len(assignments)
-		mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"waiting": m.Count(), "assigned": n})
-	})
 
-	app := beauty.New(beauty.WithWebServer(":8288", mux, webserver.WithServiceName("matchmaker-room")))
-	println("matchmaker-room on :8288")
-	if err := app.Start(context.Background()); err != nil {
-		panic(err)
+	app := beauty.New(beauty.WithWebServer(listenAddr, mux, webserver.WithServiceName("matchmaker-room")))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	appErr := make(chan error, 1)
+	go func() { appErr <- app.Start(ctx) }()
+	time.Sleep(80 * time.Millisecond)
+
+	ok := runSelfTest()
+	fmt.Println("──────── matchmaker-room 自测 ────────")
+	if ok {
+		fmt.Println("结论: ✅ 双人匹配 → 分配 game_addr + ws_url")
+	} else {
+		fmt.Println("结论: ❌ 自测失败")
 	}
+
+	cancel()
+	<-appErr
+	if !ok {
+		os.Exit(1)
+	}
+}
+
+func openAllocator() (agones.Allocator, func()) {
+	if target := os.Getenv("BEAUTY_AGONES_ALLOCATOR"); target != "" {
+		opts := []agones.GRPCOption{agones.WithAllocatorNamespace(envOr("BEAUTY_AGONES_NAMESPACE", "default"))}
+		if os.Getenv("BEAUTY_AGONES_ALLOCATOR_INSECURE") == "1" {
+			opts = append(opts, agones.WithAllocatorInsecure())
+		} else if cert, key, ca := os.Getenv("BEAUTY_AGONES_ALLOCATOR_CERT"), os.Getenv("BEAUTY_AGONES_ALLOCATOR_KEY"), os.Getenv("BEAUTY_AGONES_ALLOCATOR_CA"); cert != "" {
+			tlsCfg, err := agones.TLSConfigFromFiles(cert, key, ca)
+			if err != nil {
+				panic(err)
+			}
+			opts = append(opts, agones.WithAllocatorTLS(tlsCfg))
+		}
+		ga, err := agones.NewGRPCAllocator(target, opts...)
+		if err != nil {
+			panic(err)
+		}
+		return ga, func() { _ = ga.Close() }
+	}
+	addrs := []string{"127.0.0.1:8130"}
+	if v := os.Getenv("BEAUTY_GAME_ADDRS"); v != "" {
+		addrs = strings.Split(v, ",")
+	}
+	return agones.NewPoolAllocator(addrs), nil
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+func runSelfTest() bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	base := "http://" + listenAddr
+
+	queue := func(user string, skill float64) bool {
+		u := fmt.Sprintf("%s/queue?user=%s&region=eu&skill=%g", base, user, skill)
+		resp, err := client.Get(u)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}
+	if !queue("alice", 1000) || !queue("bob", 1010) {
+		return false
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(base + "/assign?user=alice")
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		var out map[string]string
+		if json.Unmarshal(body, &out) != nil {
+			return false
+		}
+		return out["game_addr"] != "" && strings.Contains(out["ws_url"], "alice")
+	}
+	return false
 }

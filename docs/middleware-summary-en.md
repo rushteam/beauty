@@ -85,6 +85,10 @@ webserver.WithRateLimitWait(rateLimitMiddleware)  // wait to pass
 grpcserver.WithRateLimit(rateLimitMiddleware)
 ```
 
+**Per-tenant quotas:** combine `tenant.HTTPMiddleware()` with `TenantKeyExtractor` and `Config.RateOverride` to return different rate/burst per key.
+
+**Multi-tenant middleware** (`pkg/middleware/tenant`): extracts `X-Tenant-ID` / `x-tenant-id` → `tenant.FromContext(ctx)`. See [`metadata-propagation.md`](metadata-propagation.md).
+
 ### 3. Timeout Control Middleware
 
 **Core features:**

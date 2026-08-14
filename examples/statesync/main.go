@@ -1,15 +1,7 @@
-// statesync demo:基于同一个 pkg/gameloop.Room,换个 Handler 就从帧同步切到「状态同步」。
+// statesync demo:权威模拟 + spatial AOI + pkg/replicate 增量同步 + CatchUp/Ack。
 //
-// 与 examples/gameloop(帧同步:下发"输入")的唯一区别在 OnTick 的策略:
-//   - 服务器权威模拟:每帧把玩家输入应用到世界坐标(World.Step),这里算出"结果状态";
-//   - AOI(兴趣区域):每帧建一次 pkg/spatial 网格索引;每个连接在"出口"按自己玩家
-//     的视野半径查询 Nearby,只把可视范围内的实体发给该客户端——下发的是"状态"不是"输入"。
-//
-// 关键设计:Room 每帧只广播一份"权威世界"(*worldTick,内部对象,不直接上线);
-// 每个连接的写循环把它投影成各自的 View(AOI 过滤后、可序列化)再下发。即
-// "内部全量扇出 + 出口按连接过滤"——状态同步 + AOI 的常见做法。
-//
-// 自带 3 个进程内 bot 验证 AOI:alice/bob 相邻(互相可见),carol 远处(谁也看不见它、它也看不见谁)。
+// 协议:ClientMsg{kind:cmd|ack|resync} / ServerMsg{kind:delta|catchup}
+// catchup.truncated=true 时客户端发 resync,服务器 DropViewer 下帧重发 baseline。
 //
 // 运行:go run ./examples/statesync
 package main
@@ -28,70 +20,98 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/gameloop"
+	"github.com/rushteam/beauty/pkg/inputclock"
+	"github.com/rushteam/beauty/pkg/lagcomp"
+	"github.com/rushteam/beauty/pkg/replicate"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"github.com/rushteam/beauty/pkg/snapbuf"
 	"github.com/rushteam/beauty/pkg/spatial"
 	"github.com/rushteam/beauty/pkg/ws"
 )
 
 const (
 	addr       = "127.0.0.1:8124"
-	tickRate   = 50 * time.Millisecond // 20Hz
-	aoiRadius  = 100                   // 视野半径
-	cellSize   = 100                   // spatial 网格单元(≈视野半径量级)
+	tickRate   = 50 * time.Millisecond
+	aoiRadius  = 100
+	cellSize   = 100
 	worldBound = 1000
 )
 
-// Cmd 客户端上行:本帧移动增量。
 type Cmd struct {
-	DX float64 `json:"dx"`
-	DY float64 `json:"dy"`
+	DX          float64 `json:"dx"`
+	DY          float64 `json:"dy"`
+	ClientFrame uint64  `json:"client_frame,omitempty"`
 }
 
-// Entity 一个实体的坐标(下发给客户端,可序列化)。
+type ClientMsg struct {
+	Kind string         `json:"kind"` // cmd | ack | resync
+	Cmd  *Cmd           `json:"cmd,omitempty"`
+	Ack  *replicate.Ack `json:"ack,omitempty"`
+}
+
+type ServerMsg struct {
+	Kind    string                  `json:"kind"` // delta | catchup
+	Delta   *replicate.Delta        `json:"delta,omitempty"`
+	CatchUp *replicate.CatchUpBatch `json:"catchup,omitempty"`
+}
+
 type Entity struct {
 	ID string  `json:"id"`
 	X  float64 `json:"x"`
 	Y  float64 `json:"y"`
 }
 
-// worldTick 是服务器每帧的权威结果——内部扇出用,持有当帧的只读空间索引,不直接上线。
 type worldTick struct {
-	frame uint64
-	index *spatial.Index[string] // 建好后不再变更,可被多个连接并发只读查询
+	frame   uint64
+	index   *spatial.Index[string]
+	dirty   []string
+	removed []string
+	lookup  replicate.Lookup[string]
 }
 
-// View 是每个客户端实际收到的(AOI 过滤后)。
-type View struct {
-	Frame   uint64   `json:"frame"`
-	Self    Entity   `json:"self"`
-	Visible []Entity `json:"visible"`
-}
-
-// World 权威世界:只在 OnTick(tick goroutine)里推进坐标,Join/Leave 来自连接 goroutine,故加锁。
 type World struct {
-	mu  sync.Mutex
-	pos map[string]Entity
+	mu       sync.Mutex
+	pos      map[string]Entity
+	dirty    *replicate.DirtySet[string]
+	versions *replicate.Versions[string]
+	snaps    *snapbuf.Ring[map[string]Entity]
 }
 
-func newWorld() *World { return &World{pos: make(map[string]Entity)} }
+func newWorld() *World {
+	return &World{
+		pos:      make(map[string]Entity),
+		dirty:    replicate.NewDirtySet[string](),
+		versions: replicate.NewVersions[string](),
+		snaps:    snapbuf.New[map[string]Entity](64),
+	}
+}
 
 func (w *World) Join(id string, x, y float64) {
 	w.mu.Lock()
 	w.pos[id] = Entity{ID: id, X: x, Y: y}
+	w.dirty.Mark(id)
+	w.versions.Bump(id)
 	w.mu.Unlock()
 }
 
 func (w *World) Leave(id string) {
 	w.mu.Lock()
 	delete(w.pos, id)
+	w.dirty.Remove(id)
+	w.versions.Delete(id)
 	w.mu.Unlock()
 }
 
-// Step 应用本帧输入(权威模拟),再快照成一个只读空间索引。
-func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd]) *worldTick {
+func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd], clock *inputclock.Clock) *worldTick {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, in := range inputs {
+		if in.ClientFrame > 0 {
+			clock.Record(inputclock.Sample{
+				Player: in.Player, ClientFrame: in.ClientFrame,
+				ServerFrame: frame, ReceivedAt: in.ReceivedAt,
+			})
+		}
 		p, ok := w.pos[in.Player]
 		if !ok {
 			continue
@@ -99,28 +119,53 @@ func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd]) *worldTic
 		p.X = clamp(p.X+in.Input.DX, 0, worldBound)
 		p.Y = clamp(p.Y+in.Input.DY, 0, worldBound)
 		w.pos[in.Player] = p
+		w.dirty.Mark(in.Player)
+		w.versions.Bump(in.Player)
 	}
+	snapCopy := make(map[string]Entity, len(w.pos))
+	for id, p := range w.pos {
+		snapCopy[id] = p
+	}
+	w.snaps.Push(frame, snapCopy)
+
 	ix := spatial.New[string](cellSize)
 	for id, p := range w.pos {
 		ix.Add(id, p.X, p.Y)
 	}
-	return &worldTick{frame: frame, index: ix}
+	dirty, removed := w.dirty.Consume()
+	lookup := func(id string) (replicate.EntityState, bool) {
+		p, ok := w.pos[id]
+		if !ok {
+			return replicate.EntityState{}, false
+		}
+		return replicate.EntityState{
+			ID: id, X: p.X, Y: p.Y, Version: w.versions.Get(id),
+		}, true
+	}
+	return &worldTick{frame: frame, index: ix, dirty: dirty, removed: removed, lookup: lookup}
 }
 
-// spawns 决定每个玩家的出生点(演示用,让 AOI 结果可预期)。
 var spawns = map[string]Entity{
 	"alice": {X: 50, Y: 50},
-	"bob":   {X: 120, Y: 120}, // 距 alice ≈99 < 100 → 互相可见
-	"carol": {X: 800, Y: 800}, // 远处 → 谁也看不见
+	"bob":   {X: 120, Y: 120},
+	"carol": {X: 800, Y: 800},
+}
+
+type botResult struct {
+	baseline, catchup bool
+	visible           []string
 }
 
 func main() {
 	world := newWorld()
+	clock := inputclock.New()
+	projector := replicate.NewProjector[string](replicate.Config{})
+	tracks := sync.Map{}
+	comp := &lagcomp.Compensator[map[string]Entity]{Clock: clock, Ring: world.snaps, Tick: tickRate}
 
-	// 状态同步策略:每帧跑权威模拟,广播一份只读世界快照(供各连接做 AOI 投影)。
 	room := gameloop.New(tickRate,
 		gameloop.HandlerFunc[Cmd, *worldTick](func(frame uint64, inputs []gameloop.PlayerInput[Cmd]) []*worldTick {
-			return []*worldTick{world.Step(frame, inputs)}
+			return []*worldTick{world.Step(frame, inputs, clock)}
 		}),
 		gameloop.WithName("statesync"),
 	)
@@ -135,12 +180,18 @@ func main() {
 		world.Join(player, sp.X, sp.Y)
 		defer world.Leave(player)
 
+		storeTrack := func() *replicate.ViewerTrack {
+			tr, _ := tracks.LoadOrStore(player, replicate.NewViewerTrack(replicate.NewJournal(64)))
+			return tr.(*replicate.ViewerTrack)
+		}
+		storeTrack()
+		defer tracks.Delete(player)
+
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		ch, unsub := room.Subscribe(ctx)
 		defer unsub()
 
-		// 写循环:把每帧权威世界投影成本连接玩家的 AOI 视图后下发。
 		go func() {
 			for {
 				select {
@@ -152,11 +203,17 @@ func main() {
 					}
 					px, py, ok := tk.index.Pos(player)
 					if !ok {
-						continue // 本帧还没纳入(刚 Join 的竞态)
+						continue
 					}
-					near := tk.index.Nearby(px, py, aoiRadius, player) // ← AOI 过滤
-					view := View{Frame: tk.frame, Self: Entity{player, px, py}, Visible: toEntities(near)}
-					if err := c.WriteJSON(ctx, view); err != nil {
+					visible := tk.index.Nearby(px, py, aoiRadius, player)
+					delta := projector.Project(tk.frame, player, visible, tk.dirty, tk.removed, tk.lookup)
+					tr, _ := tracks.Load(player)
+					if tr == nil {
+						continue
+					}
+					track := tr.(*replicate.ViewerTrack)
+					track.RecordSent(delta)
+					if err := c.WriteJSON(ctx, ServerMsg{Kind: "delta", Delta: &delta}); err != nil {
 						cancel()
 						return
 					}
@@ -164,19 +221,50 @@ func main() {
 			}
 		}()
 
-		// 读循环:把移动输入投进房间,等下一 tick 由权威模拟应用。
 		for {
-			var cmd Cmd
-			if err := c.ReadJSON(ctx, &cmd); err != nil {
+			var msg ClientMsg
+			if err := c.ReadJSON(ctx, &msg); err != nil {
 				return err
 			}
-			room.Push(player, cmd)
+			switch msg.Kind {
+			case "ack":
+				if msg.Ack == nil {
+					continue
+				}
+				tr, _ := tracks.Load(player)
+				if tr == nil {
+					continue
+				}
+				track := tr.(*replicate.ViewerTrack)
+				batch := track.OnAck(*msg.Ack)
+				if len(batch.Deltas) > 0 || batch.Truncated {
+					if err := c.WriteJSON(ctx, ServerMsg{Kind: "catchup", CatchUp: &batch}); err != nil {
+						return err
+					}
+				}
+			case "resync":
+				projector.DropViewer(player)
+				tracks.Store(player, replicate.NewViewerTrack(replicate.NewJournal(64)))
+			case "", "cmd":
+				cmd := Cmd{}
+				if msg.Cmd != nil {
+					cmd = *msg.Cmd
+				}
+				room.PushInput(gameloop.PlayerInput[Cmd]{
+					Player: player, Input: cmd, ClientFrame: cmd.ClientFrame,
+				})
+				if cmd.ClientFrame > 0 {
+					_, _, _ = comp.WorldAt(player, cmd.ClientFrame)
+				}
+			default:
+				continue
+			}
 		}
 	}))
 
 	app := beauty.New(
 		beauty.WithService(room),
-		beauty.WithWebServer(addr, mux, webserver.WithServiceName("statesync-demo")),
+		beauty.WithWebServer(addr, mux, webserver.WithServiceName("statesync")),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -185,109 +273,120 @@ func main() {
 	<-room.Ready()
 
 	players := []string{"alice", "bob", "carol"}
-	botCtx, botCancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	botCtx, botCancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
 	defer botCancel()
 
+	results := make([]botResult, len(players))
 	var wg sync.WaitGroup
-	visible := make([]([]string), len(players))
 	for i, p := range players {
 		wg.Add(1)
 		go func(i int, p string) {
 			defer wg.Done()
-			v, err := runBot(botCtx, "ws://"+addr+"/ws", p)
+			r, err := runBot(botCtx, "ws://"+addr+"/ws", p)
 			if err != nil {
 				log.Printf("bot %s: %v", p, err)
 				return
 			}
-			visible[i] = v
+			results[i] = r
 		}(i, p)
 	}
 	wg.Wait()
 
-	verifyAOI(players, visible)
-
-	cancel()
-	<-appErr
-}
-
-// runBot 连上 ws,持续收 View(不移动),返回最后一帧看到的可视实体 ID(排序)。
-func runBot(ctx context.Context, url, player string) ([]string, error) {
-	c, err := dialRetry(ctx, url+"?player="+player)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close(websocket.StatusNormalClosure, "bye")
-
-	var (
-		mu       sync.Mutex
-		lastSeen []string
-		lastAt   uint64
-	)
-	go func() {
-		for {
-			var v View
-			if err := wsjson.Read(ctx, c, &v); err != nil {
-				return
-			}
-			ids := make([]string, 0, len(v.Visible))
-			for _, e := range v.Visible {
-				ids = append(ids, e.ID)
-			}
-			slices.Sort(ids)
-			mu.Lock()
-			if v.Frame >= lastAt {
-				lastAt, lastSeen = v.Frame, ids
-			}
-			mu.Unlock()
-		}
-	}()
-
-	<-ctx.Done()
-	mu.Lock()
-	defer mu.Unlock()
-	return lastSeen, nil
-}
-
-func verifyAOI(players []string, visible [][]string) {
-	expected := map[string][]string{
-		"alice": {"bob"},
-		"bob":   {"alice"},
-		"carol": {},
-	}
-	fmt.Println("──────── AOI(状态同步)校验 ────────")
+	fmt.Println("──────── 状态同步(replicate + CatchUp) ────────")
 	allOK := true
+	expected := map[string][]string{"alice": {"bob"}, "bob": {"alice"}, "carol": {}}
 	for i, p := range players {
-		got := visible[i]
-		want := expected[p]
-		ok := slices.Equal(got, want)
+		r := results[i]
+		aoiOK := slices.Equal(r.visible, expected[p])
+		ok := r.baseline && r.catchup && aoiOK
 		allOK = allOK && ok
 		mark := "✅"
 		if !ok {
 			mark = "❌"
 		}
-		fmt.Printf("  %-6s 视野内: %-16v (期望 %v) %s\n", p, fmtIDs(got), fmtIDs(want), mark)
+		fmt.Printf("  %-6s baseline=%v catchup=%v AOI=%v %s\n", p, r.baseline, r.catchup, r.visible, mark)
 	}
 	if allOK {
-		fmt.Println("结论: ✅ 每个客户端只收到视野内实体(AOI 过滤生效)")
-	} else {
-		fmt.Println("结论: ❌ AOI 结果与预期不符")
+		fmt.Println("结论: ✅ 增量 Delta + Ack/CatchUp + AOI 端到端一致")
 	}
-	fmt.Println("────────────────────────────────────")
+
+	cancel()
+	<-appErr
 }
 
-func toEntities(es []spatial.Entity[string]) []Entity {
-	out := make([]Entity, 0, len(es))
-	for _, e := range es {
-		out = append(out, Entity{ID: e.ID, X: e.X, Y: e.Y})
+func runBot(ctx context.Context, url, player string) (botResult, error) {
+	c, err := dialRetry(ctx, url+"?player="+player)
+	if err != nil {
+		return botResult{}, err
 	}
-	return out
+	defer c.Close(websocket.StatusNormalClosure, "bye")
+
+	var out botResult
+	var lastFrame uint64
+	deadline := time.After(1500 * time.Millisecond)
+
+waitLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			break waitLoop
+		case <-deadline:
+			break waitLoop
+		default:
+		}
+		readCtx, readCancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		var msg ServerMsg
+		err := wsjson.Read(readCtx, c, &msg)
+		readCancel()
+		if err != nil {
+			if out.baseline && lastFrame >= 3 {
+				break waitLoop
+			}
+			continue
+		}
+		if msg.Kind == "delta" && msg.Delta != nil {
+			if msg.Delta.Baseline {
+				out.baseline = true
+				out.visible = spawnIDs(msg.Delta)
+			}
+			if msg.Delta.Frame > lastFrame {
+				lastFrame = msg.Delta.Frame
+			}
+		}
+		if out.baseline && lastFrame >= 3 {
+			break waitLoop
+		}
+	}
+
+	if out.baseline && lastFrame >= 3 {
+		_ = wsjson.Write(ctx, c, ClientMsg{Kind: "ack", Ack: &replicate.Ack{LastFrame: 1}})
+		catchCtx, catchCancel := context.WithTimeout(ctx, 800*time.Millisecond)
+		defer catchCancel()
+		for {
+			var msg ServerMsg
+			if err := wsjson.Read(catchCtx, c, &msg); err != nil {
+				break
+			}
+			if msg.Kind != "catchup" || msg.CatchUp == nil {
+				continue
+			}
+			out.catchup = len(msg.CatchUp.Deltas) > 0
+			if msg.CatchUp.Truncated {
+				_ = wsjson.Write(ctx, c, ClientMsg{Kind: "resync"})
+			}
+			break
+		}
+	}
+	return out, nil
 }
 
-func fmtIDs(ids []string) string {
-	if len(ids) == 0 {
-		return "[]"
+func spawnIDs(d *replicate.Delta) []string {
+	ids := make([]string, 0, len(d.Spawn))
+	for _, e := range d.Spawn {
+		ids = append(ids, e.ID)
 	}
-	return fmt.Sprint(ids)
+	slices.Sort(ids)
+	return ids
 }
 
 func dialRetry(ctx context.Context, url string) (*websocket.Conn, error) {
@@ -307,6 +406,4 @@ func dialRetry(ctx context.Context, url string) (*websocket.Conn, error) {
 	return nil, lastErr
 }
 
-func clamp(v, lo, hi float64) float64 {
-	return min(max(v, lo), hi)
-}
+func clamp(v, lo, hi float64) float64 { return min(max(v, lo), hi) }

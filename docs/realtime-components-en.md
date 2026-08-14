@@ -78,6 +78,13 @@ generics + functional Options, usable independently or combined with the table a
 | **Spatial & Geography** | | | |
 | `pkg/pathfind` | Grid A* pathfinding (obstacles + weights + diagonal) | Tower defense · SLG · click-to-move · monster chase | ✓ |
 | `pkg/spatial` | Grid spatial index (Nearby / KNN) | Nearby people · MMO AOI · large-map partitioning | ✓ |
+| `pkg/spatial/aoi` | AOI visibility set diff (enter/leave/stay) | Incremental sync interest management | — |
+| `pkg/replicate` | DirtySet + Delta projection (baseline/incremental) | State sync egress | — |
+| `pkg/snapbuf` | Ring snapshot buffer | Lag compensation rewind | — |
+| `pkg/inputclock` | Client frame mapping + RTT | Lag compensation | — |
+| `pkg/lagcomp` | Compensated frame query WorldAt | FPS hit detection | — |
+| `pkg/gameroom` | Dedicated room FSM | Waiting→Running→Draining | — |
+| `pkg/gameloop` | Fixed-step tick + input fan-out | Lockstep / state sync skeleton | ✓ |
 | `pkg/geohash` | Lat/lng geocoding (encode/neighbors/cover query/distance) | LBS nearby people/shops (prefix lookup) | ✓ |
 
 > Demos for these primitives are in `examples/<pkg>/main.go`; single-file, directly `go run`.
@@ -1027,6 +1034,52 @@ top := ix.KNN(0, 0, 5, 500)          // nearest 5
   ~same as full scan at 10k entities (map overhead ~ offsets candidate reduction), grid ~10µs vs full ~171µs at 250k (~17×).
   Full scan simpler when entity count is small;
 - Nearby people/MMO AOI/large-map partitioning. See `examples/spatial`.
+- **Incremental sync** layers `spatial/aoi` diff + `pkg/replicate.Projector` on `spatial.Nearby` egress — see `examples/statesync`.
+
+## Quick Reference: pkg/spatial/aoi + pkg/replicate (AOI incremental sync)
+
+`aoi.Set` diffs the previous visibility set into enter/leave/stay; `replicate.Projector` combines DirtySet to produce per-viewer `Delta` (spawn/update/despawn/baseline).
+
+```go
+dirty, removed := dirtySet.Consume()
+delta := projector.Project(frame, viewer, visible, dirty, removed, lookup)
+track.RecordSent(delta) // after unreliable send
+batch := track.OnAck(ack) // reliable CatchUp; check batch.Truncated
+```
+
+- `Journal` + `ViewerTrack` + `Ack` / `CatchUpBatch` recover from loss; client sends `resync` when `truncated=true`;
+- See `examples/statesync`, `examples/statesync-quic`; Agones hosting: `examples/agones-room` + `examples/matchmaker-room` + `contrib/agones`.
+
+## Quick Reference: pkg/snapbuf + inputclock + lagcomp (lag compensation)
+
+| Package | Role |
+|---|---|
+| `snapbuf.Ring` | Recent N-frame world snapshots |
+| `inputclock.Clock` | Maps (player, clientFrame)→serverFrame + RTT |
+| `lagcomp.Compensator` | `WorldAt(shooter, clientFrame)` compensated lookup |
+
+```go
+clock.Record(inputclock.Sample{Player: p, ClientFrame: cf, ServerFrame: frame, ReceivedAt: time.Now()})
+ring.Push(frame, worldSnapshot())
+snap, atFrame, ok := comp.WorldAt(shooter, clientFrame)
+```
+
+- `gameloop.PushInput` carries `ClientFrame`; client prediction/rollback stays in application code.
+
+## Quick Reference: pkg/gameroom + contrib/agones (room orchestration)
+
+`gameroom.Manager` FSM: `Waiting → Ready → Running → Draining → Closed`, with Join/Leave, `ScheduleStart`, `Drain`.
+
+```go
+mgr := gameroom.New(gameroom.WithHooks(gameroom.Hooks{
+    OnRunning: func(ctx context.Context, roomID string) error { /* start tick */ return nil },
+}))
+handle, _ := agones.AllocateRoom(mgr, gameroom.Spec{ID: "gs-1", MaxPlayers: 16})
+ctrl, _ := handle.Attach(agonesSDK)
+_ = ctrl.Run(ctx) // Watcher: Agones Shutdown → Drain → SDK.Shutdown
+```
+
+- One room per Pod on K8s; matchmaker `Allocator` returns address then clients dial WS. See `examples/agones-room`; local match→assign: `examples/matchmaker-room`; gRPC: `contrib/agones` `NewGRPCAllocator`.
 
 ## Quick Reference: pkg/geohash (Lat/Lng Geocoding)
 

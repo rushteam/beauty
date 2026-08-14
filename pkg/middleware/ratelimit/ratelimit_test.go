@@ -239,6 +239,22 @@ func TestTenantKeyExtractor_FallbackHeader(t *testing.T) {
 	}
 }
 
+func TestTenantKeyExtractor_FallbackMetadataHeader(t *testing.T) {
+	ext := NewTenantKeyExtractor()
+	md := map[string]any{
+		"headers": map[string][]string{
+			"x-tenant-id": {"org3"},
+		},
+	}
+	key, err := ext.Extract(context.Background(), md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "tenant:org3" {
+		t.Fatalf("want tenant:org3, got %q", key)
+	}
+}
+
 func TestTenantKeyExtractor_Missing(t *testing.T) {
 	ext := NewTenantKeyExtractor()
 	_, err := ext.Extract(context.Background(), nil)

@@ -108,7 +108,7 @@ func StreamAgentRun(ctx context.Context, w http.ResponseWriter, sa agent.StreamA
 	}
 	frame := checkpoint.Frame{AgentName: name}
 	for ev := range sa.RunStream(ctx, req) {
-		if err := writeAgentEvent(w, fl, store, frame, ev); err != nil {
+		if err := writeAgentEvent(ctx, w, fl, store, frame, ev); err != nil {
 			return err
 		}
 	}
@@ -123,7 +123,7 @@ func StreamAgentContinue(ctx context.Context, w http.ResponseWriter, sa agent.St
 	}
 	frame := checkpoint.Frame{AgentName: name}
 	for ev := range sa.ContinueStream(ctx, runID, resolutions) {
-		if err := writeAgentEvent(w, fl, store, frame, ev); err != nil {
+		if err := writeAgentEvent(ctx, w, fl, store, frame, ev); err != nil {
 			return err
 		}
 	}
@@ -156,7 +156,7 @@ func prepareSSE(w http.ResponseWriter) (http.Flusher, error) {
 	return fl, nil
 }
 
-func writeAgentEvent(w io.Writer, fl http.Flusher, _ agent.RunStore, frame checkpoint.Frame, ev agent.Event) error {
+func writeAgentEvent(ctx context.Context, w io.Writer, fl http.Flusher, store agent.RunStore, frame checkpoint.Frame, ev agent.Event) error {
 	if ev.AgentName != "" {
 		frame.AgentName = ev.AgentName
 	}
@@ -164,6 +164,11 @@ func writeAgentEvent(w io.Writer, fl http.Flusher, _ agent.RunStore, frame check
 		frame.RunID = ev.RunID
 	}
 	ce := agent.AgentEventToCheckpoint(ev, frame)
+	if store != nil && ce.RunID != "" {
+		if log, ok := store.(checkpoint.EventLog); ok {
+			_ = log.AppendEvents(ctx, ce.RunID, ce)
+		}
+	}
 	if err := checkpoint.WriteSSE(w, ce); err != nil {
 		return err
 	}

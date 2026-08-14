@@ -181,8 +181,8 @@ func (p *Projector[ID]) Project(
 	ratio := p.cfg.baselineRatio()
 	changeN := len(enter) + len(leave)
 	baseline := len(visible) > 0 && float64(changeN)/float64(len(visible)) >= ratio
-	if set.Len() == 0 && len(visible) > 0 {
-		baseline = true
+	if set.Len() == 0 {
+		baseline = true // 首连(含 AOI 内无他人)
 	}
 
 	dirtySet := toSet(dirty)

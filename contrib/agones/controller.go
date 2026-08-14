@@ -19,6 +19,11 @@ type Lifecycle interface {
 	Health() error
 }
 
+// Watcher 可选:能监听 GameServer Shutdown 并 cancel context。
+type Watcher interface {
+	WatchContext(ctx context.Context) (context.Context, context.CancelFunc)
+}
+
 // Controller 监听 Agones 信号并驱动 gameroom.Manager。
 type Controller struct {
 	SDK     Lifecycle
@@ -59,9 +64,15 @@ func NewController(sdk Lifecycle, mgr *gameroom.Manager, roomID string, opts ...
 	return c, nil
 }
 
-// Run 标记 GameServer Ready,并在 ctx 取消或 SDK Shutdown 时 Drain 房间。
-// 典型用法:Agones 侧 goroutine 监听 shutdown 后 cancel ctx。
+// Run 标记 GameServer Ready;在 ctx 取消、SDK Shutdown(Watcher)或进程信号时 Drain 房间。
 func (c *Controller) Run(ctx context.Context) error {
+	runCtx := ctx
+	if w, ok := c.SDK.(Watcher); ok {
+		var cancelWatch context.CancelFunc
+		runCtx, cancelWatch = w.WatchContext(ctx)
+		defer cancelWatch()
+	}
+
 	if err := c.SDK.Ready(); err != nil {
 		return fmt.Errorf("agones: ready: %w", err)
 	}
@@ -76,7 +87,7 @@ func (c *Controller) Run(ctx context.Context) error {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-runCtx.Done():
 			return c.shutdown(ctx)
 		case <-ticker.C:
 			if err := c.SDK.Health(); err != nil {

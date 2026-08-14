@@ -74,6 +74,13 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | **空间 & 地理** | | | |
 | `pkg/pathfind` | 网格 A* 寻路(障碍 + 权重 + 对角) | 塔防 · SLG · 点击移动 · 怪物追击 | ✓ |
 | `pkg/spatial` | 网格空间索引(Nearby / KNN) | 附近的人 · MMO AOI · 大地图分区 | ✓ |
+| `pkg/spatial/aoi` | AOI 可见集 diff(enter/leave/stay) | 增量同步兴趣管理 | — |
+| `pkg/replicate` | DirtySet + Delta 投影(baseline/增量) | 状态同步出口 | — |
+| `pkg/snapbuf` | 环形快照缓冲 | 延迟补偿 rewind | — |
+| `pkg/inputclock` | 客户端帧映射 + RTT | 延迟补偿 | — |
+| `pkg/lagcomp` | 补偿帧查询 WorldAt | FPS 命中判定 | — |
+| `pkg/gameroom` | Dedicated 房间 FSM | Waiting→Running→Draining | — |
+| `pkg/gameloop` | 定步 tick + 输入扇出 | lockstep / 状态同步骨架 | ✓ |
 | `pkg/geohash` | 经纬度地理编码(编码/邻居/覆盖查询/距离) | LBS 附近的人/店铺(前缀检索) | ✓ |
 
 > 这批原语的 demo 均在 `examples/<pkg>/main.go`,单文件可直接 `go run`。
@@ -1028,6 +1035,52 @@ top := ix.KNN(0, 0, 5, 500)          // 最近 5 个
   半径 50)显示 10k 实体时与全表扫描相当(map 开销 ~ 抵消候选缩减),250k 时
   网格 ~10µs、全表 ~171µs(约 17×)。实体少时全表扫描反而更简单;
 - 附近的人/MMO AOI/大地图分区。详见 `examples/spatial`。
+- **增量同步**在 `spatial.Nearby` 出口叠加 `spatial/aoi` diff + `pkg/replicate.Projector`,见 `examples/statesync-delta`。
+
+## 速查:pkg/spatial/aoi + pkg/replicate（AOI 增量同步）
+
+`aoi.Set` 对上一帧可见集做 enter/leave/stay diff;`replicate.Projector` 结合 DirtySet 生成 per-viewer `Delta`(spawn/update/despawn/baseline)。
+
+```go
+dirty, removed := dirtySet.Consume()
+delta := projector.Project(frame, viewer, visible, dirty, removed, lookup)
+track.RecordSent(delta) // 不可靠通道发送后
+batch := track.OnAck(ack) // 可靠通道补 CatchUp
+```
+
+- `Journal` + `ViewerTrack` + `Ack` / `CatchUpBatch` 支持丢包追帧;
+- 详见 `examples/statesync-delta`、`examples/statesync-quic-delta`;Agones 托管见 `examples/agones-room` + `contrib/agones`。
+
+## 速查:pkg/snapbuf + inputclock + lagcomp（延迟补偿）
+
+| 包 | 作用 |
+|---|---|
+| `snapbuf.Ring` | 最近 N 帧世界快照 |
+| `inputclock.Clock` | 记录 (player, clientFrame)→serverFrame + RTT |
+| `lagcomp.Compensator` | `WorldAt(shooter, clientFrame)` 查补偿快照 |
+
+```go
+clock.Record(inputclock.Sample{Player: p, ClientFrame: cf, ServerFrame: frame, ReceivedAt: time.Now()})
+ring.Push(frame, worldSnapshot())
+snap, atFrame, ok := comp.WorldAt(shooter, clientFrame) // 命中判定用 snap
+```
+
+- `gameloop.PushInput` 携带 `ClientFrame`;客户端预测/回滚仍在业务侧。
+
+## 速查:pkg/gameroom + contrib/agones（房间编排）
+
+`gameroom.Manager` FSM:`Waiting → Ready → Running → Draining → Closed`,支持 Join/Leave、`ScheduleStart`、`Drain`。
+
+```go
+mgr := gameroom.New(gameroom.WithHooks(gameroom.Hooks{
+    OnRunning: func(ctx context.Context, roomID string) error { /* 开 tick */ return nil },
+}))
+handle, _ := agones.AllocateRoom(mgr, gameroom.Spec{ID: "gs-1", MaxPlayers: 16})
+ctrl, _ := handle.Attach(agonesSDK)
+_ = ctrl.Run(ctx) // Watcher: Agones Shutdown → Drain → SDK.Shutdown
+```
+
+- K8s 上每 Pod 单房;匹配服 Allocator 返回 address 后客户端直连 WS。详见 `examples/agones-room`;本地 mock 匹配→分配见 `examples/matchmaker-room`。
 
 ## 速查:pkg/geohash（经纬度地理编码)
 

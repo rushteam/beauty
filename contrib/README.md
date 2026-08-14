@@ -46,6 +46,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 | [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 多厂商(OpenAI 兼容 / Anthropic / **AWS Bedrock**)+ 薄 **agent 循环**(`llm/agent`,含审批/流式事件/Steer/Hooks + 统一 Agent 接口/**Planner**/**Team 移交**/**Parallel 并发**/**BestOfN**/**VerifyLoop** 编排 + 工具参数 **JSON 容错**/运行内**上下文压缩**/消息合并)+ **会话记忆** + **Agent Skills** | 无(纯 stdlib) |
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |
+| [`contrib/agones`](agones) | Agones GameServer 生命周期 × `pkg/gameroom`(Ready/Drain/Shutdown + WatchContext) | agones.dev/agones |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 | [`contrib/memoryvector`](memoryvector) | 胶水:Embedder + vector → `llm/agent/memory.Store`(语义长期记忆) | llm + vector |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |

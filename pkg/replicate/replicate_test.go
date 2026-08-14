@@ -26,6 +26,11 @@ func TestProjectorDelta(t *testing.T) {
 	if len(d.Update) != 1 || d.Update[0].ID != "a" {
 		t.Fatalf("update=%v", d.Update)
 	}
+
+	d = p.Project(1, "lonely", nil, nil, nil, lookup)
+	if !d.Baseline {
+		t.Fatal("empty AOI first frame should baseline")
+	}
 }
 
 func TestDirtySet(t *testing.T) {

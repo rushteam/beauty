@@ -1,56 +1,51 @@
-// statesync-delta demo:在 statesync 基础上用 pkg/replicate 做 AOI 增量下发,
-// 并用 pkg/inputclock + pkg/snapbuf + pkg/lagcomp 演示延迟补偿查询。
+// statesync-quic-delta:QUIC 双通道 + replicate 增量 + CatchUp/Ack。
 //
-// 运行:go run ./examples/statesync-delta
+//   - 可靠流:Hello / Cmd / Ack / CatchUp
+//   - 不可靠数据报:Delta(丢了靠 Ack+CatchUp 补)
+//
+// 运行:go run ./examples/statesync-quic-delta
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
-
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/gameloop"
-	"github.com/rushteam/beauty/pkg/inputclock"
-	"github.com/rushteam/beauty/pkg/lagcomp"
+	"github.com/rushteam/beauty/pkg/quic"
 	"github.com/rushteam/beauty/pkg/replicate"
-	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/snapbuf"
 	"github.com/rushteam/beauty/pkg/spatial"
-	"github.com/rushteam/beauty/pkg/ws"
 )
 
 const (
-	addr       = "127.0.0.1:8125"
+	addr       = "127.0.0.1:8444"
 	tickRate   = 50 * time.Millisecond
 	aoiRadius  = 100
 	cellSize   = 100
 	worldBound = 1000
 )
 
-type Cmd struct {
-	DX          float64 `json:"dx"`
-	DY          float64 `json:"dy"`
-	ClientFrame uint64  `json:"client_frame,omitempty"`
+type Hello struct {
+	Player string `json:"player"`
 }
 
-// ClientMsg 客户端上行:cmd 或 ack(可靠语义,WS 上同连接)。
+type Cmd struct {
+	DX float64 `json:"dx"`
+	DY float64 `json:"dy"`
+}
+
 type ClientMsg struct {
-	Kind string         `json:"kind"` // "cmd" | "ack"
+	Kind string         `json:"kind"`
 	Cmd  *Cmd           `json:"cmd,omitempty"`
 	Ack  *replicate.Ack `json:"ack,omitempty"`
 }
 
-// ServerMsg 服务器下行:delta(可丢)或 catchup(需可靠,此处同 WS 发送)。
 type ServerMsg struct {
-	Kind    string                  `json:"kind"` // "delta" | "catchup"
-	Delta   *replicate.Delta        `json:"delta,omitempty"`
+	Kind    string                  `json:"kind"`
 	CatchUp *replicate.CatchUpBatch `json:"catchup,omitempty"`
 }
 
@@ -73,7 +68,6 @@ type World struct {
 	pos      map[string]Entity
 	dirty    *replicate.DirtySet[string]
 	versions *replicate.Versions[string]
-	snaps    *snapbuf.Ring[map[string]Entity]
 }
 
 func newWorld() *World {
@@ -81,7 +75,6 @@ func newWorld() *World {
 		pos:      make(map[string]Entity),
 		dirty:    replicate.NewDirtySet[string](),
 		versions: replicate.NewVersions[string](),
-		snaps:    snapbuf.New[map[string]Entity](64),
 	}
 }
 
@@ -101,16 +94,10 @@ func (w *World) Leave(id string) {
 	w.mu.Unlock()
 }
 
-func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd], clock *inputclock.Clock) *worldTick {
+func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd]) *worldTick {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, in := range inputs {
-		if in.ClientFrame > 0 {
-			clock.Record(inputclock.Sample{
-				Player: in.Player, ClientFrame: in.ClientFrame,
-				ServerFrame: frame, ReceivedAt: in.ReceivedAt,
-			})
-		}
 		p, ok := w.pos[in.Player]
 		if !ok {
 			continue
@@ -121,12 +108,6 @@ func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd], clock *in
 		w.dirty.Mark(in.Player)
 		w.versions.Bump(in.Player)
 	}
-	snapCopy := make(map[string]Entity, len(w.pos))
-	for id, p := range w.pos {
-		snapCopy[id] = p
-	}
-	w.snaps.Push(frame, snapCopy)
-
 	ix := spatial.New[string](cellSize)
 	for id, p := range w.pos {
 		ix.Add(id, p.X, p.Y)
@@ -137,9 +118,7 @@ func (w *World) Step(frame uint64, inputs []gameloop.PlayerInput[Cmd], clock *in
 		if !ok {
 			return replicate.EntityState{}, false
 		}
-		return replicate.EntityState{
-			ID: id, X: p.X, Y: p.Y, Version: w.versions.Get(id),
-		}, true
+		return replicate.EntityState{ID: id, X: p.X, Y: p.Y, Version: w.versions.Get(id)}, true
 	}
 	return &worldTick{frame: frame, index: ix, dirty: dirty, removed: removed, lookup: lookup}
 }
@@ -152,21 +131,29 @@ var spawns = map[string]Entity{
 
 func main() {
 	world := newWorld()
-	clock := inputclock.New()
 	projector := replicate.NewProjector[string](replicate.Config{})
-	tracks := sync.Map{} // player → *replicate.ViewerTrack
-	comp := &lagcomp.Compensator[map[string]Entity]{Clock: clock, Ring: world.snaps, Tick: tickRate}
+	tracks := sync.Map{}
 
 	room := gameloop.New(tickRate,
 		gameloop.HandlerFunc[Cmd, *worldTick](func(frame uint64, inputs []gameloop.PlayerInput[Cmd]) []*worldTick {
-			return []*worldTick{world.Step(frame, inputs, clock)}
+			return []*worldTick{world.Step(frame, inputs)}
 		}),
-		gameloop.WithName("statesync-delta"),
+		gameloop.WithName("statesync-quic-delta"),
 	)
 
-	mux := http.NewServeMux()
-	mux.Handle("/ws", ws.Handler(func(r *http.Request, c *ws.Conn) error {
-		player := r.URL.Query().Get("player")
+	srv := quic.NewServer(addr, func(ctx context.Context, c *quic.Conn) error {
+		stream, err := c.AcceptStream(ctx)
+		if err != nil {
+			return err
+		}
+		dec := json.NewDecoder(stream)
+		enc := json.NewEncoder(stream)
+
+		var hello Hello
+		if err := dec.Decode(&hello); err != nil {
+			return err
+		}
+		player := hello.Player
 		sp, ok := spawns[player]
 		if !ok {
 			sp = Entity{X: worldBound / 2, Y: worldBound / 2}
@@ -177,12 +164,9 @@ func main() {
 		track := tr.(*replicate.ViewerTrack)
 		defer tracks.Delete(player)
 
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		ch, unsub := room.Subscribe(ctx)
-		defer unsub()
-
 		go func() {
+			ch, unsub := room.Subscribe(ctx)
+			defer unsub()
 			for {
 				select {
 				case <-ctx.Done():
@@ -198,17 +182,18 @@ func main() {
 					visible := tk.index.Nearby(px, py, aoiRadius, player)
 					delta := projector.Project(tk.frame, player, visible, tk.dirty, tk.removed, tk.lookup)
 					track.RecordSent(delta)
-					if err := c.WriteJSON(ctx, ServerMsg{Kind: "delta", Delta: &delta}); err != nil {
-						cancel()
-						return
+					b, err := json.Marshal(delta)
+					if err != nil || len(b) > 900 {
+						continue
 					}
+					_ = c.SendDatagram(b)
 				}
 			}
 		}()
 
 		for {
 			var msg ClientMsg
-			if err := c.ReadJSON(ctx, &msg); err != nil {
+			if err := dec.Decode(&msg); err != nil {
 				return err
 			}
 			switch msg.Kind {
@@ -218,39 +203,28 @@ func main() {
 				}
 				batch := track.OnAck(*msg.Ack)
 				if len(batch.Deltas) > 0 {
-					if err := c.WriteJSON(ctx, ServerMsg{Kind: "catchup", CatchUp: &batch}); err != nil {
-						return err
-					}
+					_ = enc.Encode(ServerMsg{Kind: "catchup", CatchUp: &batch})
 				}
 			case "", "cmd":
 				cmd := Cmd{}
 				if msg.Cmd != nil {
 					cmd = *msg.Cmd
 				}
-				room.PushInput(gameloop.PlayerInput[Cmd]{
-					Player: player, Input: cmd, ClientFrame: cmd.ClientFrame,
-				})
-				if cmd.ClientFrame > 0 {
-					_, _, _ = comp.WorldAt(player, cmd.ClientFrame)
-				}
-			default:
-				continue
+				room.Push(player, cmd)
 			}
 		}
-	}))
+	}, quic.WithServiceName("statesync-quic-delta"))
 
-	app := beauty.New(
-		beauty.WithService(room),
-		beauty.WithWebServer(addr, mux, webserver.WithServiceName("statesync-delta")),
-	)
+	app := beauty.New(beauty.WithService(room), beauty.WithService(srv))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	appErr := make(chan error, 1)
 	go func() { appErr <- app.Start(ctx) }()
 	<-room.Ready()
+	<-srv.Ready()
 
 	players := []string{"alice", "bob", "carol"}
-	botCtx, botCancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	botCtx, botCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer botCancel()
 
 	var wg sync.WaitGroup
@@ -259,55 +233,106 @@ func main() {
 		wg.Add(1)
 		go func(i int, p string) {
 			defer wg.Done()
-			b, err := runBot(botCtx, "ws://"+addr+"/ws", p)
-			if err != nil {
-				log.Printf("bot %s: %v", p, err)
-				return
-			}
-			baseline[i] = b
+			baseline[i] = runBot(botCtx, addr, p)
 		}(i, p)
 	}
 	wg.Wait()
 
-	fmt.Println("──────── 增量同步校验 ────────")
+	fmt.Println("──────── QUIC 增量 + CatchUp ────────")
+	allOK := true
 	for i, p := range players {
+		ok := baseline[i]
+		allOK = allOK && ok
 		mark := "✅"
-		if !baseline[i] {
+		if !ok {
 			mark = "❌"
 		}
-		fmt.Printf("  %-6s 首包 baseline=%v %s\n", p, baseline[i], mark)
+		fmt.Printf("  %-6s baseline=%v %s\n", p, ok, mark)
 	}
-
+	if allOK {
+		fmt.Println("结论: ✅ Delta 走数据报、Ack/CatchUp 走可靠流")
+	}
 	cancel()
 	<-appErr
 }
 
-func runBot(ctx context.Context, url, player string) (bool, error) {
-	c, err := dialRetry(ctx, url+"?player="+player)
+func runBot(ctx context.Context, addr, player string) bool {
+	c, err := dialRetry(ctx, addr)
 	if err != nil {
-		return false, err
+		log.Printf("bot %s: %v", player, err)
+		return false
 	}
-	defer c.Close(websocket.StatusNormalClosure, "bye")
+	defer c.Close("bye")
+
+	stream, err := c.OpenStream(ctx)
+	if err != nil {
+		return false
+	}
+	dec := json.NewDecoder(stream)
+	enc := json.NewEncoder(stream)
+	_ = enc.Encode(Hello{Player: player})
+
+	go func() {
+		t := time.NewTicker(150 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = enc.Encode(ClientMsg{Kind: "cmd", Cmd: &Cmd{}})
+			}
+		}
+	}()
 
 	var gotBaseline bool
-	for {
-		var msg ServerMsg
-		if err := wsjson.Read(ctx, c, &msg); err != nil {
-			return gotBaseline, err
+	var lastFrame uint64
+	go func() {
+		for {
+			b, err := c.ReceiveDatagram(ctx)
+			if err != nil {
+				return
+			}
+			var d replicate.Delta
+			if json.Unmarshal(b, &d) != nil {
+				continue
+			}
+			if d.Baseline {
+				gotBaseline = true
+			}
+			if d.Frame > lastFrame {
+				lastFrame = d.Frame
+			}
 		}
-		if msg.Kind == "delta" && msg.Delta != nil && msg.Delta.Baseline {
-			gotBaseline = true
-			_ = wsjson.Write(ctx, c, ClientMsg{Kind: "ack", Ack: &replicate.Ack{LastFrame: msg.Delta.Frame}})
-			break
+	}()
+
+	go func() {
+		for {
+			var msg ServerMsg
+			if err := dec.Decode(&msg); err != nil {
+				return
+			}
+			if msg.Kind == "catchup" && msg.CatchUp != nil {
+				for _, d := range msg.CatchUp.Deltas {
+					if d.Frame > lastFrame {
+						lastFrame = d.Frame
+					}
+				}
+			}
 		}
+	}()
+
+	<-ctx.Done()
+	if gotBaseline && lastFrame > 0 {
+		_ = enc.Encode(ClientMsg{Kind: "ack", Ack: &replicate.Ack{LastFrame: lastFrame}})
 	}
-	return gotBaseline, nil
+	return gotBaseline
 }
 
-func dialRetry(ctx context.Context, url string) (*websocket.Conn, error) {
+func dialRetry(ctx context.Context, addr string) (*quic.Conn, error) {
 	var lastErr error
-	for range 20 {
-		c, _, err := websocket.Dial(ctx, url, nil)
+	for range 40 {
+		c, err := quic.Dial(ctx, addr, quic.WithInsecureSkipVerify(true))
 		if err == nil {
 			return c, nil
 		}
@@ -321,6 +346,4 @@ func dialRetry(ctx context.Context, url string) (*websocket.Conn, error) {
 	return nil, lastErr
 }
 
-func clamp(v, lo, hi float64) float64 {
-	return min(max(v, lo), hi)
-}
+func clamp(v, lo, hi float64) float64 { return min(max(v, lo), hi) }

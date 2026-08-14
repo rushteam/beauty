@@ -39,3 +39,4 @@ func (s *SDK) WatchContext(ctx context.Context) (context.Context, context.Cancel
 }
 
 var _ Lifecycle = (*SDK)(nil)
+var _ Watcher = (*SDK)(nil)

@@ -48,10 +48,7 @@ func (s *MemoryCheckpointStore) Delete(ctx context.Context, runID string) error 
 var _ CheckpointStore = (*MemoryCheckpointStore)(nil)
 
 func (r *Runner) checkpointStore() CheckpointStore {
-	if cs, ok := r.Store.(CheckpointStore); ok {
-		return cs
-	}
-	return nil
+	return asCheckpointStore(r.Store)
 }
 
 func (r *Runner) runFrame(ctx context.Context, runID string) checkpoint.Frame {
@@ -97,66 +94,21 @@ func requirementsToUI(reqs []Requirement) []checkpoint.Requirement {
 }
 
 func (r *Runner) saveCheckpoint(ctx context.Context, runID string, snap *RunSnapshot) error {
-	cs := r.checkpointStore()
-	if cs != nil {
-		n, err := cs.EventCount(ctx, runID)
-		if err != nil {
-			return err
-		}
-		snap.EventCount = n
-		snap.Messages = nil
-	}
-	return r.Store.Save(ctx, runID, snap)
-}
-
-func (r *Runner) loadCheckpoint(ctx context.Context, runID string, snap *RunSnapshot) (*RunSnapshot, error) {
-	if snap == nil {
-		return nil, nil
-	}
-	cs := r.checkpointStore()
-	if cs == nil || snap.EventCount <= 0 {
-		return snap, nil
-	}
-	events, err := cs.LoadEvents(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	end := snap.EventCount
-	if end > len(events) {
-		end = len(events)
-	}
-	snap.Messages = checkpoint.ReplayMessages(events[:end])
-	return snap, nil
+	return saveSnapshotWithCheckpoint(ctx, r.Store, runID, snap)
 }
 
 func (r *Runner) loadSnapshot(ctx context.Context, runID string) (*RunSnapshot, error) {
-	snap, err := r.Store.Load(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	return r.loadCheckpoint(ctx, runID, snap)
+	return loadSnapshotFromStore(ctx, r.Store, runID)
 }
 
 // LoadRunTree 从 checkpoint 事件日志构建 sub-agent 编排树(UI 可视化)。
 func (r *Runner) LoadRunTree(ctx context.Context, runID string) (*checkpoint.RunNode, error) {
-	cs := r.checkpointStore()
-	if cs == nil {
-		return nil, nil
-	}
-	events, err := cs.LoadEvents(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	return checkpoint.BuildRunTree(events), nil
+	return LoadRunTreeFromStore(ctx, r.Store, runID)
 }
 
 // LoadUIEvents 读取 run 的全部 UI/checkpoint 事件(HITL 前端回放)。
 func (r *Runner) LoadUIEvents(ctx context.Context, runID string) ([]checkpoint.Event, error) {
-	cs := r.checkpointStore()
-	if cs == nil {
-		return nil, nil
-	}
-	return cs.LoadEvents(ctx, runID)
+	return LoadUIEventsFromStore(ctx, r.Store, runID)
 }
 
 func (r *Runner) emitEvent(ctx context.Context, runID string, emit func(Event), e Event) {
@@ -173,7 +125,7 @@ func (r *Runner) emitEvent(ctx context.Context, runID string, emit func(Event), 
 		return
 	}
 	frame := r.runFrame(ctx, runID)
-	r.appendCheckpoint(ctx, runID, eventToCheckpoint(e, frame))
+	r.appendCheckpoint(ctx, runID, AgentEventToCheckpoint(e, frame))
 	if e.Type == EventStep && e.Response != nil && len(e.Response.ToolCalls) > 0 {
 		r.recordModelCheckpoint(ctx, runID, e.Step, e.Response)
 	}
@@ -186,41 +138,6 @@ func (r *Runner) recordModelCheckpoint(ctx context.Context, runID string, step i
 	ev := checkpoint.NewEvent(checkpoint.TypeModelResponse, runID).WithStep(step)
 	ev.Response = resp
 	r.appendCheckpoint(ctx, runID, ev)
-}
-
-func eventToCheckpoint(e Event, frame checkpoint.Frame) checkpoint.Event {
-	ev := checkpoint.NewEvent("", e.RunID)
-	ev = ev.WithFrame(frame.ParentRunID, frame.AgentName, frame.Depth).WithStep(e.Step)
-	ev.Response = e.Response
-	ev.ToolCall = e.ToolCall
-	ev.Result = e.Result
-	ev.Requirements = requirementsToUI(e.Requirements)
-	if e.Err != nil {
-		ev.Error = e.Err.Error()
-	}
-	switch e.Type {
-	case EventToken:
-		ev.Type = checkpoint.TypeTokenDelta
-		ev.Delta = e.Result
-	case EventSteer:
-		ev.Type = checkpoint.TypeSteerMessage
-		ev.Message = &llm.Message{Role: llm.User, Content: e.Result}
-	case EventStep:
-		ev.Type = checkpoint.TypeRunStep
-	case EventToolStart:
-		ev.Type = checkpoint.TypeToolStart
-	case EventToolResult:
-		ev.Type = checkpoint.TypeToolResult
-	case EventPaused:
-		ev.Type = checkpoint.TypeRunPaused
-	case EventFinal:
-		ev.Type = checkpoint.TypeRunCompleted
-	case EventError:
-		ev.Type = checkpoint.TypeRunError
-	default:
-		ev.Type = checkpoint.TypeRunStep
-	}
-	return ev
 }
 
 func (r *Runner) checkpointPaused(ctx context.Context, runID string, emit func(Event), step int, resp *llm.Response, reqs []Requirement) {

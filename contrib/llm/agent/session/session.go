@@ -149,7 +149,8 @@ func (m *Manager) prepare(ctx context.Context, id string, req llm.Request) (*Ses
 
 // persist 把本轮 user 输入与最终 assistant 回复写入会话并保存。
 // intermediates 包含 agent 循环中的中间消息(assistant tool_calls + tool results)。
-func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Message, intermediates []llm.Message, assistant string) error {
+// runID 非空时若 Store 实现 EventStore 则同步写入会话事件日志。
+func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Message, intermediates []llm.Message, assistant, runID string) error {
 	sess.Messages = append(sess.Messages, newMsgs...)
 	sess.Messages = append(sess.Messages, intermediates...)
 	sess.Messages = append(sess.Messages, llm.Message{Role: llm.Assistant, Content: assistant})
@@ -159,7 +160,19 @@ func (m *Manager) persist(ctx context.Context, sess *Session, newMsgs []llm.Mess
 		}
 	}
 	sess.UpdatedAt = time.Now()
-	return m.Store.Save(ctx, sess)
+	if err := m.Store.Save(ctx, sess); err != nil {
+		return err
+	}
+	if es, ok := m.Store.(EventStore); ok {
+		msgs := append(append([]llm.Message{}, newMsgs...), intermediates...)
+		if assistant != "" {
+			msgs = append(msgs, llm.Message{Role: llm.Assistant, Content: assistant})
+		}
+		if err := RecordMessages(ctx, es, sess.ID, 0, runID, msgs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Run 以会话 id 跑一轮:req.Messages 只放**本轮新输入**。
@@ -178,6 +191,10 @@ func (m *Manager) Run(ctx context.Context, id string, a agent.Agent, req llm.Req
 		if err := m.Store.Save(ctx, sess); err != nil {
 			out.Status = agent.StatusError
 			out.Err = err
+			return out
+		}
+		if es, ok := m.Store.(EventStore); ok {
+			_ = RecordMessages(ctx, es, id, 0, out.RunID, newMsgs)
 		}
 		return out
 	case agent.StatusDone:
@@ -187,7 +204,7 @@ func (m *Manager) Run(ctx context.Context, id string, a agent.Agent, req llm.Req
 			content = out.Response.Content
 		}
 		// 优先用 Outcome.Messages 中相对本轮新增的中间态;否则用 OnStep 捕获。
-		if err := m.persist(ctx, sess, newMsgs, intermediates, content); err != nil {
+		if err := m.persist(ctx, sess, newMsgs, intermediates, content, out.RunID); err != nil {
 			out.Status = agent.StatusError
 			out.Err = err
 		}
@@ -220,7 +237,7 @@ func (m *Manager) Continue(ctx context.Context, id string, a agent.Agent, resolu
 			content = out.Response.Content
 		}
 		// Continue 路径没有本轮 newMsgs;只追加最终 assistant(中间态已在 agent RunStore)。
-		if err := m.persist(ctx, sess, nil, nil, content); err != nil {
+		if err := m.persist(ctx, sess, nil, nil, content, out.RunID); err != nil {
 			out.Status = agent.StatusError
 			out.Err = err
 		}
@@ -279,6 +296,9 @@ func (m *Manager) RunStream(ctx context.Context, id string, r agent.StreamAgent,
 				sess.PendingRunID = ev.RunID
 				sess.UpdatedAt = time.Now()
 				_ = m.Store.Save(ctx, sess)
+				if es, ok := m.Store.(EventStore); ok {
+					_ = RecordMessages(ctx, es, id, 0, ev.RunID, newMsgs)
+				}
 				emit(ev)
 				return
 			case agent.EventStep:
@@ -299,7 +319,7 @@ func (m *Manager) RunStream(ctx context.Context, id string, r agent.StreamAgent,
 			return
 		}
 		sess.PendingRunID = ""
-		if err := m.persist(ctx, sess, newMsgs, intermediates, final.Content); err != nil {
+		if err := m.persist(ctx, sess, newMsgs, intermediates, final.Content, ""); err != nil {
 			emit(agent.Event{Type: agent.EventError, Response: final, Err: err})
 			return
 		}

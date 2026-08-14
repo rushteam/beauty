@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
+	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
 )
 
 // handoffMarker 是成员在终态文本里请求移交的行前缀:HANDOFF: <成员名> <交给该成员的输入>。
@@ -98,6 +99,22 @@ func (tm *Team) ensureStore() {
 	}
 }
 
+func (tm *Team) cp() OrchestratorCheckpoint {
+	return OrchestratorCheckpoint{Store: tm.Store, Name: tm.Name}
+}
+
+// LoadRunTree 从 checkpoint 事件日志构建编排树。
+func (tm *Team) LoadRunTree(ctx context.Context, runID string) (*checkpoint.RunNode, error) {
+	tm.ensureStore()
+	return LoadRunTreeFromStore(ctx, tm.Store, runID)
+}
+
+// LoadUIEvents 读取 run 的全部 checkpoint 事件。
+func (tm *Team) LoadUIEvents(ctx context.Context, runID string) ([]checkpoint.Event, error) {
+	tm.ensureStore()
+	return LoadUIEventsFromStore(ctx, tm.Store, runID)
+}
+
 // Run 从 Entry 起循环直到无 HANDOFF 或 Paused/Error。
 func (tm *Team) Run(ctx context.Context, req llm.Request) RunOutcome {
 	tm.ensureStore()
@@ -110,10 +127,12 @@ func (tm *Team) Run(ctx context.Context, req llm.Request) RunOutcome {
 	}
 	runID := newRunID()
 	tracker := &handoffTracker{cfg: tm.Config}
+	tm.cp().Started(ctx, runID, req)
 	return tm.loop(ctx, runID, req, current, req, tracker, true)
 }
 
 func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, current string, input llm.Request, tracker *handoffTracker, first bool) RunOutcome {
+	cp := tm.cp()
 	prompt := tm.handoffPrompt()
 	var last *llm.Response
 	for {
@@ -136,10 +155,11 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 		if !first {
 			runCtx = WithTrigger(ctx, TriggerTransfer, current)
 		}
+		src := "team:" + current
 		out := member.Run(runCtx, stepReq)
+		cp.Spawned(ctx, runID, out.RunID, src, len(tracker.history))
 		switch out.Status {
 		case StatusPaused:
-			src := "team:" + current
 			reqs := remapRequirements(out.Requirements, src)
 			snap := &RunSnapshot{
 				Kind:          "team",
@@ -150,7 +170,10 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 				Requirements:  reqs,
 				HandoffWindow: append([]string{}, tracker.history...),
 			}
-			_ = tm.Store.Save(ctx, runID, snap)
+			if err := saveSnapshotWithCheckpoint(ctx, tm.Store, runID, snap); err != nil {
+				return outcomeError(runID, out.Response, out.Messages, err)
+			}
+			cp.Paused(ctx, runID, len(tracker.history), out.Response, reqs, out.RunID, src)
 			tm.resumes.Store(runID, teamResume{
 				member: member, childID: out.RunID, current: current,
 				input: input, tracker: tracker, first: first, base: base,
@@ -166,12 +189,14 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 
 		target, handoffInput, ok := parseHandoff(respContent(last))
 		if !ok {
+			cp.Completed(ctx, runID)
 			_ = tm.Store.Delete(ctx, runID)
 			return outcomeDone(runID, last, nil)
 		}
 		if _, exists := tm.Members[target]; !exists {
 			return outcomeError(runID, last, nil, fmt.Errorf("agent: team: member %q tried to hand off to unknown member %q", current, target))
 		}
+		cp.Handoff(ctx, runID, current, target, len(tracker.history))
 		if err := tracker.record(target); err != nil {
 			return outcomeError(runID, last, nil, err)
 		}
@@ -187,6 +212,8 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 // Continue 恢复暂停的成员,再继续移交循环。
 func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
 	tm.ensureStore()
+	cp := tm.cp()
+	cp.Resumed(ctx, runID)
 	rv, ok := tm.resumes.Load(runID)
 	if !ok {
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: team unknown runID %q", runID))
@@ -197,6 +224,19 @@ func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolu
 	case StatusPaused:
 		src := "team:" + tr.current
 		reqs := remapRequirements(out.Requirements, src)
+		snap := &RunSnapshot{
+			Kind:          "team",
+			Request:       tr.base,
+			Member:        tr.current,
+			ChildRunID:    out.RunID,
+			ChildSource:   src,
+			Requirements:  reqs,
+			HandoffWindow: append([]string{}, tr.tracker.history...),
+		}
+		if err := saveSnapshotWithCheckpoint(ctx, tm.Store, runID, snap); err != nil {
+			return outcomeError(runID, out.Response, out.Messages, err)
+		}
+		cp.Paused(ctx, runID, len(tr.tracker.history), out.Response, reqs, out.RunID, src)
 		tm.resumes.Store(runID, teamResume{
 			member: tr.member, childID: out.RunID, current: tr.current,
 			input: tr.input, tracker: tr.tracker, first: tr.first, base: tr.base,
@@ -209,6 +249,7 @@ func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolu
 		last := out.Response
 		target, handoffInput, isHandoff := parseHandoff(respContent(last))
 		if !isHandoff {
+			cp.Completed(ctx, runID)
 			_ = tm.Store.Delete(ctx, runID)
 			return outcomeDone(runID, last, nil)
 		}

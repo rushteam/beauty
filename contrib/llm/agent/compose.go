@@ -157,6 +157,22 @@ func (c *Chain) stepReq(cur llm.Request, i int, prevContent string) llm.Request 
 	return r
 }
 
+func (c *Chain) cp() OrchestratorCheckpoint {
+	return OrchestratorCheckpoint{Store: c.Store, Name: c.Name}
+}
+
+// LoadRunTree 从 checkpoint 事件日志构建编排树。
+func (c *Chain) LoadRunTree(ctx context.Context, runID string) (*checkpoint.RunNode, error) {
+	c.ensureStore()
+	return LoadRunTreeFromStore(ctx, c.Store, runID)
+}
+
+// LoadUIEvents 读取 run 的全部 checkpoint 事件。
+func (c *Chain) LoadUIEvents(ctx context.Context, runID string) ([]checkpoint.Event, error) {
+	c.ensureStore()
+	return LoadUIEventsFromStore(ctx, c.Store, runID)
+}
+
 func (c *Chain) stepSource(i int) string {
 	if c.Steps[i].Name != "" {
 		return "chain:" + c.Steps[i].Name
@@ -173,7 +189,9 @@ func (c *Chain) Run(ctx context.Context, req llm.Request) RunOutcome {
 // Continue 从暂停步恢复。
 func (c *Chain) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
 	c.ensureStore()
-	snap, err := c.Store.Load(ctx, runID)
+	cp := c.cp()
+	cp.Resumed(ctx, runID)
+	snap, err := loadSnapshotFromStore(ctx, c.Store, runID)
 	if err != nil {
 		return outcomeError(runID, nil, nil, err)
 	}
@@ -192,9 +210,10 @@ func (c *Chain) Continue(ctx context.Context, runID string, resolutions []Resolu
 		snap.Requirements = reqs
 		snap.ChildRunID = out.RunID
 		c.resumes.Store(runID, chainResume{agent: cr.agent, childID: out.RunID})
-		if err := c.Store.Save(ctx, runID, snap); err != nil {
+		if err := saveSnapshotWithCheckpoint(ctx, c.Store, runID, snap); err != nil {
 			return outcomeError(runID, out.Response, nil, err)
 		}
+		cp.Paused(ctx, runID, snap.ChainStep, out.Response, reqs, out.RunID, snap.ChildSource)
 		return outcomePaused(runID, out.Response, out.Messages, reqs)
 	case StatusError:
 		return outcomeError(runID, out.Response, out.Messages, out.Err)
@@ -215,6 +234,10 @@ func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, star
 	if len(c.Steps) == 0 {
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: empty chain"))
 	}
+	cp := c.cp()
+	if start == 0 {
+		cp.Started(ctx, runID, req)
+	}
 	var last *llm.Response
 	content := prevContent
 	for i := start; i < len(c.Steps); i++ {
@@ -226,9 +249,10 @@ func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, star
 			return outcomeError(runID, last, nil, fmt.Errorf("agent: chain step %d (%s): nil agent", i, c.Steps[i].Name))
 		}
 		out := a.Run(ctx, c.stepReq(req, i, content))
+		src := c.stepSource(i)
+		cp.Spawned(ctx, runID, out.RunID, src, i)
 		switch out.Status {
 		case StatusPaused:
-			src := c.stepSource(i)
 			reqs := remapRequirements(out.Requirements, src)
 			snap := &RunSnapshot{
 				Kind:         "chain",
@@ -239,9 +263,10 @@ func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, star
 				ChildSource:  src,
 				Requirements: reqs,
 			}
-			if err := c.Store.Save(ctx, runID, snap); err != nil {
+			if err := saveSnapshotWithCheckpoint(ctx, c.Store, runID, snap); err != nil {
 				return outcomeError(runID, out.Response, nil, err)
 			}
+			cp.Paused(ctx, runID, i, out.Response, reqs, out.RunID, src)
 			c.resumes.Store(runID, chainResume{agent: a, childID: out.RunID})
 			return outcomePaused(runID, out.Response, out.Messages, reqs)
 		case StatusError:
@@ -257,6 +282,7 @@ func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, star
 			return outcomeError(runID, out.Response, out.Messages, fmt.Errorf("agent: chain unexpected status %q", out.Status))
 		}
 	}
+	cp.Completed(ctx, runID)
 	_ = c.Store.Delete(ctx, runID)
 	return outcomeDone(runID, last, nil)
 }

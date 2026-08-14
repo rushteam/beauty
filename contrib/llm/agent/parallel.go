@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
+	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
 )
 
 // ==== 并发扇出组合体:Parallel ====
@@ -61,6 +62,22 @@ func (p *Parallel) ensureStore() {
 	}
 }
 
+func (p *Parallel) cp() OrchestratorCheckpoint {
+	return OrchestratorCheckpoint{Store: p.Store, Name: p.Name}
+}
+
+// LoadRunTree 从 checkpoint 事件日志构建编排树。
+func (p *Parallel) LoadRunTree(ctx context.Context, runID string) (*checkpoint.RunNode, error) {
+	p.ensureStore()
+	return LoadRunTreeFromStore(ctx, p.Store, runID)
+}
+
+// LoadUIEvents 读取 run 的全部 checkpoint 事件。
+func (p *Parallel) LoadUIEvents(ctx context.Context, runID string) ([]checkpoint.Event, error) {
+	p.ensureStore()
+	return LoadUIEventsFromStore(ctx, p.Store, runID)
+}
+
 // Run 并发跑所有分支并合并;有 Paused 则暂停。
 func (p *Parallel) Run(ctx context.Context, req llm.Request) RunOutcome {
 	p.ensureStore()
@@ -68,6 +85,7 @@ func (p *Parallel) Run(ctx context.Context, req llm.Request) RunOutcome {
 		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel has no agents"))
 	}
 	runID := newRunID()
+	p.cp().Started(ctx, runID, req)
 	outs := make([]RunOutcome, len(p.Agents))
 	var wg sync.WaitGroup
 	for i := range p.Agents {
@@ -86,6 +104,7 @@ func (p *Parallel) Run(ctx context.Context, req llm.Request) RunOutcome {
 }
 
 func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, outs []RunOutcome) RunOutcome {
+	cp := p.cp()
 	done := make(map[int]RunOutcome)
 	paused := make(map[int]string)
 	var reqs []Requirement
@@ -99,6 +118,7 @@ func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, o
 		case StatusPaused:
 			paused[i] = out.RunID
 			src := fmt.Sprintf("parallel:%d", i)
+			cp.Spawned(ctx, runID, out.RunID, src, i)
 			reqs = append(reqs, remapRequirements(out.Requirements, src)...)
 			if firstPaused == nil {
 				o := out
@@ -131,13 +151,14 @@ func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, o
 			BranchOutcomes: bo,
 			PausedBranches: pb,
 		}
-		if err := p.Store.Save(ctx, runID, snap); err != nil {
+		if err := saveSnapshotWithCheckpoint(ctx, p.Store, runID, snap); err != nil {
 			return outcomeError(runID, nil, nil, err)
 		}
 		resp := (*llm.Response)(nil)
 		if firstPaused != nil {
 			resp = firstPaused.Response
 		}
+		cp.Paused(ctx, runID, 0, resp, reqs, "", "")
 		return outcomePaused(runID, resp, nil, reqs)
 	}
 
@@ -161,6 +182,7 @@ func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, o
 	if err != nil {
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: Parallel combine: %w", err))
 	}
+	cp.Completed(ctx, runID)
 	return outcomeDone(runID, resp, nil)
 }
 
@@ -173,7 +195,9 @@ func (p *Parallel) storeBranch(runID string, i int, a Agent, childID string) {
 // Continue 只恢复仍暂停的分支,齐了再 Combine。
 func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
 	p.ensureStore()
-	snap, err := p.Store.Load(ctx, runID)
+	cp := p.cp()
+	cp.Resumed(ctx, runID)
+	snap, err := loadSnapshotFromStore(ctx, p.Store, runID)
 	if err != nil {
 		return outcomeError(runID, nil, nil, err)
 	}
@@ -205,6 +229,7 @@ func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Res
 		case StatusPaused:
 			paused[i] = out.RunID
 			src := fmt.Sprintf("parallel:%d", i)
+			cp.Spawned(ctx, runID, out.RunID, src, i)
 			reqs = append(reqs, remapRequirements(out.Requirements, src)...)
 			branches.Store(i, parallelBranch{agent: br.agent, childID: out.RunID})
 			if firstPaused == nil {
@@ -226,15 +251,19 @@ func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Res
 		snap.BranchOutcomes = done
 		snap.PausedBranches = pb
 		snap.Requirements = reqs
-		_ = p.Store.Save(ctx, runID, snap)
+		if err := saveSnapshotWithCheckpoint(ctx, p.Store, runID, snap); err != nil {
+			return outcomeError(runID, nil, nil, err)
+		}
 		resp := (*llm.Response)(nil)
 		if firstPaused != nil {
 			resp = firstPaused.Response
 		}
+		cp.Paused(ctx, runID, 0, resp, reqs, "", "")
 		return outcomePaused(runID, resp, nil, reqs)
 	}
 
 	p.resumes.Delete(runID)
+	cp.Completed(ctx, runID)
 	_ = p.Store.Delete(ctx, runID)
 
 	resps := make([]*llm.Response, len(p.Agents))

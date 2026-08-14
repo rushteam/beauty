@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
+	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
 )
 
 // Permission 是工具调用权限三态。
@@ -339,6 +340,12 @@ func (r *Runner) Info() Info {
 func (r *Runner) Run(ctx context.Context, req llm.Request) RunOutcome {
 	r.ensureStore()
 	runID := newRunID()
+	frame := checkpoint.FrameFrom(ctx)
+	frame.RunID = runID
+	if frame.AgentName == "" {
+		frame.AgentName = r.Name
+	}
+	ctx = checkpoint.WithFrame(ctx, frame)
 	return r.runLoop(ctx, runID, req, nil, 1, nil)
 }
 
@@ -348,7 +355,7 @@ func (r *Runner) Continue(ctx context.Context, runID string, resolutions []Resol
 	if runID == "" {
 		return outcomeError("", nil, nil, fmt.Errorf("agent: Continue requires runID"))
 	}
-	snap, err := r.Store.Load(ctx, runID)
+	snap, err := r.loadSnapshot(ctx, runID)
 	if err != nil {
 		return outcomeError(runID, nil, nil, err)
 	}
@@ -358,6 +365,8 @@ func (r *Runner) Continue(ctx context.Context, runID string, resolutions []Resol
 	if snap.Kind != "" && snap.Kind != "runner" {
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: runID %q is kind %q, not runner", runID, snap.Kind))
 	}
+
+	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunResumed, runID))
 
 	// 嵌套子 pause(AgentAsTool):先 Continue 子 run,把结果当 tool result,再继续。
 	if snap.ChildRunID != "" && len(snap.PendingTCs) == 0 {
@@ -406,17 +415,15 @@ func (r *Runner) continueNested(ctx context.Context, runID string, snap *RunSnap
 		reqs := remapRequirements(childOut.Requirements, snap.ChildSource)
 		snap.Requirements = reqs
 		snap.ChildRunID = childOut.RunID
-		if err := r.Store.Save(ctx, runID, snap); err != nil {
+		if err := r.saveCheckpoint(ctx, runID, snap); err != nil {
 			return outcomeError(runID, childOut.Response, snap.Messages, err)
 		}
 		return outcomePaused(runID, childOut.Response, snap.Messages, reqs)
 	case StatusError:
 		return outcomeError(runID, childOut.Response, snap.Messages, childOut.Err)
 	case StatusDone:
-		// 子完成:把终态文本当作工具结果写回,清除嵌套,继续父循环。
 		r.nestedResume.Delete(runID)
 		msgs := cloneMessages(snap.Messages)
-		// 找最后一条 assistant tool_calls,为 ChildSource 对应工具补 result。
 		toolName := strings.TrimPrefix(snap.ChildSource, "tool:")
 		tcID := nestedToolCallID(msgs, toolName)
 		content := ""
@@ -424,6 +431,11 @@ func (r *Runner) continueNested(ctx context.Context, runID string, snap *RunSnap
 			content = childOut.Response.Content
 		}
 		msgs = append(msgs, llm.Message{Role: llm.Tool, ToolCallID: tcID, Content: content})
+		doneEv := checkpoint.NewEvent(checkpoint.TypeAgentCompleted, runID)
+		doneEv.ChildRunID = snap.ChildRunID
+		doneEv.Source = snap.ChildSource
+		doneEv.Result = content
+		r.appendCheckpoint(ctx, runID, doneEv)
 		_ = r.Store.Delete(ctx, runID)
 		req := snap.Request
 		return r.runLoop(ctx, runID, req, msgs, snap.Step+1, nil)
@@ -509,7 +521,7 @@ func (r *Runner) continueWithEmit(ctx context.Context, runID string, resolutions
 	if runID == "" {
 		return outcomeError("", nil, nil, fmt.Errorf("agent: Continue requires runID"))
 	}
-	snap, err := r.Store.Load(ctx, runID)
+	snap, err := r.loadSnapshot(ctx, runID)
 	if err != nil {
 		return outcomeError(runID, nil, nil, err)
 	}
@@ -519,6 +531,7 @@ func (r *Runner) continueWithEmit(ctx context.Context, runID string, resolutions
 	if snap.ChildRunID != "" && len(snap.PendingTCs) == 0 {
 		return r.continueNested(ctx, runID, snap, resolutions)
 	}
+	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunResumed, runID))
 	byRes := map[string]Resolution{}
 	for _, res := range resolutions {
 		byRes[res.ID] = res
@@ -532,7 +545,8 @@ func (r *Runner) continueWithEmit(ctx context.Context, runID string, resolutions
 	req := snap.Request
 	msgs := cloneMessages(snap.Messages)
 	step := snap.Step
-	toolMsgs, fatal, nested := r.execPending(ctx, step, byName, snap.PendingTCs, snap.Requirements, byRes, emit)
+	emitUI := func(e Event) { r.emitEvent(ctx, runID, emit, e) }
+	toolMsgs, fatal, nested := r.execPending(ctx, step, byName, snap.PendingTCs, snap.Requirements, byRes, emitUI)
 	if fatal != nil {
 		return outcomeError(runID, nil, msgs, fatal)
 	}
@@ -595,6 +609,19 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		copy(msgs, req.Messages)
 	}
 
+	if startStep == 1 {
+		r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunStarted, runID).WithStep(startStep))
+		for _, m := range req.Messages {
+			if m.Role != llm.User {
+				continue
+			}
+			ev := checkpoint.NewEvent(checkpoint.TypeUserMessage, runID).WithStep(0)
+			msg := m
+			ev.Message = &msg
+			r.appendCheckpoint(ctx, runID, ev)
+		}
+	}
+
 	var last *llm.Response
 	for step := startStep; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -618,9 +645,7 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		// Mailbox: 用户插话 + 系统上下文注入。
 		for _, m := range r.Mailbox.drainSteer() {
 			msgs = append(msgs, llm.Message{Role: llm.User, Content: m})
-			if emit != nil {
-				emit(Event{Type: EventSteer, Step: step, Result: m, RunID: runID})
-			}
+			r.emitEvent(ctx, runID, emit, Event{Type: EventSteer, Step: step, Result: m, RunID: runID})
 		}
 		if extra := r.Mailbox.drainInject(); extra != "" {
 			if req.System != "" {
@@ -642,7 +667,11 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			req.Messages = r.Compactor.Project(req.Messages)
 		}
 
-		resp, err := r.callModel(ctx, req, step, emit)
+		var modelEmit func(Event)
+		if emit != nil || r.Hooks.OnChunk != nil {
+			modelEmit = func(e Event) { r.emitEvent(ctx, runID, emit, e) }
+		}
+		resp, err := r.callModel(ctx, req, step, modelEmit)
 		if err != nil {
 			out := outcomeError(runID, last, msgs, err)
 			r.afterTurn(ctx, &out)
@@ -662,12 +691,11 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		if r.OnStep != nil {
 			r.OnStep(step, resp)
 		}
-		if emit != nil {
-			emit(Event{Type: EventStep, Step: step, Response: resp, RunID: runID})
-		}
+		r.emitEvent(ctx, runID, emit, Event{Type: EventStep, Step: step, Response: resp, RunID: runID})
 
 		if len(resp.ToolCalls) == 0 {
 			_ = r.Store.Delete(ctx, runID)
+			r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunCompleted, runID).WithStep(step))
 			out := outcomeDone(runID, resp, msgs)
 			r.afterTurn(ctx, &out)
 			return out
@@ -685,7 +713,8 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 				Requirements: reqs,
 				Step:         step,
 			}
-			if err := r.Store.Save(ctx, runID, snap); err != nil {
+			r.checkpointPaused(ctx, runID, nil, step, resp, reqs)
+			if err := r.saveCheckpoint(ctx, runID, snap); err != nil {
 				out := outcomeError(runID, last, msgs, err)
 				r.afterTurn(ctx, &out)
 				return out
@@ -695,7 +724,8 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			return out
 		}
 
-		toolMsgs, fatal, nested := r.runTools(ctx, step, byName, resp.ToolCalls, emit)
+		emitUI := func(e Event) { r.emitEvent(ctx, runID, emit, e) }
+		toolMsgs, fatal, nested := r.runTools(ctx, step, byName, resp.ToolCalls, emitUI)
 		if fatal != nil {
 			var np *NestedPauseError
 			if errors.As(fatal, &np) {
@@ -713,6 +743,7 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		msgs = append(msgs, toolMsgs...)
 	}
 	out := outcomeError(runID, last, msgs, ErrMaxSteps)
+	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunError, runID).WithStep(maxSteps))
 	r.afterTurn(ctx, &out)
 	return out
 }
@@ -737,7 +768,12 @@ func (r *Runner) pauseNested(ctx context.Context, runID string, req llm.Request,
 	if np.Resume != nil {
 		r.nestedResume.Store(runID, np.Resume)
 	}
-	if err := r.Store.Save(ctx, runID, snap); err != nil {
+	spawnEv := checkpoint.NewEvent(checkpoint.TypeAgentSpawned, runID).WithStep(step)
+	spawnEv.ChildRunID = np.Child.RunID
+	spawnEv.Source = np.Source
+	r.appendCheckpoint(ctx, runID, spawnEv)
+	r.checkpointPaused(ctx, runID, nil, step, resp, reqs)
+	if err := r.saveCheckpoint(ctx, runID, snap); err != nil {
 		return outcomeError(runID, resp, msgs, err)
 	}
 	return outcomePaused(runID, resp, msgs, reqs)

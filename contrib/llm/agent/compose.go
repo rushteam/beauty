@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
+	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
 )
 
 // ==== 多 Agent 薄编排:Agent-as-Tool / Chain ====
@@ -64,7 +65,15 @@ func AgentAsTool(name, description string, sub Agent, opts ...AgentToolOption) T
 			System:   cfg.System,
 			Messages: []llm.Message{{Role: llm.User, Content: in.Input}},
 		}
-		out := sub.Run(WithTrigger(ctx, TriggerToolCall, name), req)
+		childCtx := WithTrigger(ctx, TriggerToolCall, name)
+		if parent := checkpoint.FrameFrom(ctx); parent.RunID != "" {
+			childCtx = checkpoint.WithFrame(childCtx, checkpoint.Frame{
+				ParentRunID: parent.RunID,
+				AgentName:   name,
+				Depth:       parent.Depth + 1,
+			})
+		}
+		out := sub.Run(childCtx, req)
 		switch out.Status {
 		case StatusDone:
 			if out.Response != nil {

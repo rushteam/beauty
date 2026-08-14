@@ -22,6 +22,10 @@ type RunStore interface {
 type RunSnapshot struct {
 	Kind string // runner | chain | team | parallel
 
+	// EventCount 是 checkpoint 模式下已写入事件日志的条数。
+	// Load 时 Messages = Replay(events[:EventCount]);非 checkpoint 模式为 0 且 Messages 内联存储。
+	EventCount int
+
 	// runner
 	Request      llm.Request
 	Messages     []llm.Message

@@ -86,6 +86,24 @@ func LevelHandler() http.Handler {
 	})
 }
 
+const (
+	defaultTraceKey = "trace_id"
+	defaultSpanKey  = "span_id"
+)
+
+// TraceHandlerOption 配置 TraceHandler 的可选参数。
+type TraceHandlerOption func(*traceHandler)
+
+// WithTraceKey 自定义 trace ID 字段名，默认 "trace_id"。
+func WithTraceKey(key string) TraceHandlerOption {
+	return func(h *traceHandler) { h.traceKey = key }
+}
+
+// WithSpanKey 自定义 span ID 字段名，默认 "span_id"。
+func WithSpanKey(key string) TraceHandlerOption {
+	return func(h *traceHandler) { h.spanKey = key }
+}
+
 // TraceHandler 包装一个 slog.Handler，在每条日志记录上自动追加当前
 // OpenTelemetry span 的 trace_id / span_id（取自记录的 context）。
 // 仅当 context 中存在有效 span 时才追加，因此需用 *Context 系列方法记录日志：
@@ -93,27 +111,42 @@ func LevelHandler() http.Handler {
 //	base := slog.NewJSONHandler(os.Stdout, opts)
 //	slog.SetDefault(slog.New(logger.NewTraceHandler(base)))
 //	slog.InfoContext(ctx, "handled request") // 自动带上 trace_id/span_id
-func NewTraceHandler(h slog.Handler) slog.Handler {
-	return &traceHandler{Handler: h}
+//
+// 可通过 WithTraceKey / WithSpanKey 自定义字段名：
+//
+//	logger.NewTraceHandler(base, logger.WithTraceKey("traceID"), logger.WithSpanKey("spanID"))
+func NewTraceHandler(h slog.Handler, opts ...TraceHandlerOption) slog.Handler {
+	th := &traceHandler{Handler: h, traceKey: defaultTraceKey, spanKey: defaultSpanKey}
+	for _, o := range opts {
+		o(th)
+	}
+	return th
 }
 
 type traceHandler struct {
 	slog.Handler
+	traceKey string
+	spanKey  string
 }
 
 func (t *traceHandler) Handle(ctx context.Context, r slog.Record) error {
-	if args := traceArgs(ctx); len(args) > 0 {
-		r.Add(args...)
+	span := trace.SpanFromContext(ctx)
+	if span.SpanContext().IsValid() {
+		sc := span.SpanContext()
+		r.AddAttrs(
+			slog.String(t.traceKey, sc.TraceID().String()),
+			slog.String(t.spanKey, sc.SpanID().String()),
+		)
 	}
 	return t.Handler.Handle(ctx, r)
 }
 
 func (t *traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &traceHandler{Handler: t.Handler.WithAttrs(attrs)}
+	return &traceHandler{Handler: t.Handler.WithAttrs(attrs), traceKey: t.traceKey, spanKey: t.spanKey}
 }
 
 func (t *traceHandler) WithGroup(name string) slog.Handler {
-	return &traceHandler{Handler: t.Handler.WithGroup(name)}
+	return &traceHandler{Handler: t.Handler.WithGroup(name), traceKey: t.traceKey, spanKey: t.spanKey}
 }
 
 func traceArgs(ctx context.Context) []any {
@@ -123,8 +156,8 @@ func traceArgs(ctx context.Context) []any {
 	}
 	sc := span.SpanContext()
 	return []any{
-		slog.String("trace_id", sc.TraceID().String()),
-		slog.String("span_id", sc.SpanID().String()),
+		slog.String(defaultTraceKey, sc.TraceID().String()),
+		slog.String(defaultSpanKey, sc.SpanID().String()),
 	}
 }
 

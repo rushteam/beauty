@@ -143,3 +143,120 @@ func (errStore) TTL(context.Context, string) (time.Duration, bool, error) { retu
 func (errStore) Delete(context.Context, string) error                     { return errBoom }
 
 var errBoom = errors.New("store down")
+
+// ---- Guard API (Acquire/Commit/Release) — Store 模式 ----
+
+func TestStoreAcquire_FreshKey(t *testing.T) {
+	st := kvstore.NewMemory()
+	defer st.Stop()
+	s := idempotency.New[int](idempotency.WithStore(st))
+	defer s.Stop()
+
+	cached, err := s.Acquire("k")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cached != nil {
+		t.Fatal("fresh key should return (nil, nil)")
+	}
+	s.Release("k")
+}
+
+func TestStoreAcquire_ReturnsResultAfterCommit(t *testing.T) {
+	st := kvstore.NewMemory()
+	defer st.Stop()
+	s := idempotency.New[int](idempotency.WithStore(st))
+	defer s.Stop()
+
+	_, err := s.Acquire("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Commit("k", 99)
+
+	cached, err := s.Acquire("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached == nil || *cached != 99 {
+		t.Fatalf("after commit, want cached 99, got %v", cached)
+	}
+}
+
+func TestStoreAcquire_ConflictWhileProcessing(t *testing.T) {
+	st := kvstore.NewMemory()
+	defer st.Stop()
+	s := idempotency.New[int](idempotency.WithStore(st))
+	defer s.Stop()
+
+	_, err := s.Acquire("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err2 := s.Acquire("k")
+	if !errors.Is(err2, idempotency.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err2)
+	}
+	s.Release("k")
+}
+
+func TestStoreRelease_AllowsReAcquire(t *testing.T) {
+	st := kvstore.NewMemory()
+	defer st.Stop()
+	s := idempotency.New[int](idempotency.WithStore(st))
+	defer s.Stop()
+
+	_, _ = s.Acquire("k")
+	s.Release("k")
+
+	cached, err := s.Acquire("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached != nil {
+		t.Fatal("after release should re-acquire")
+	}
+	s.Release("k")
+}
+
+func TestStoreAcquire_CrossInstance(t *testing.T) {
+	st := kvstore.NewMemory()
+	defer st.Stop()
+	s1 := idempotency.New[int](idempotency.WithStore(st))
+	defer s1.Stop()
+	s2 := idempotency.New[int](idempotency.WithStore(st))
+	defer s2.Stop()
+
+	// s1 acquire + commit
+	_, err := s1.Acquire("order:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1.Commit("order:1", 777)
+
+	// s2 acquire 应读到已提交结果
+	cached, err := s2.Acquire("order:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached == nil || *cached != 777 {
+		t.Fatalf("cross-instance: want 777, got %v", cached)
+	}
+}
+
+func TestStoreGuard_SharedKeyNamespaceWithDo(t *testing.T) {
+	st := kvstore.NewMemory()
+	defer st.Stop()
+	s := idempotency.New[string](idempotency.WithStore(st))
+	defer s.Stop()
+
+	s.Do("k", func() (string, error) { return "from-do", nil })
+	cached, err := s.Acquire("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached == nil || *cached != "from-do" {
+		t.Fatalf("Acquire should see Do result, got %v", cached)
+	}
+}

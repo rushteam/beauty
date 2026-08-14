@@ -5,10 +5,20 @@
 // 抽卡重复扣钱、充值重复到账、发奖重复发放。给每次操作分配一个幂等 key
 // (订单号 / 请求 ID / txID),用本原语包住执行体,重复 key 不再重复执行。
 //
-// 两条语义合一:
+// 提供两套 API:
+//
+// # Do(key, fn) — 计算包裹式(fn→SETNX,at-least-once)
+//
 //   - 去重(dedup):key 已有完成结果 → 直接返回缓存的结果,不再执行 fn;
 //   - 并发合并(singleflight):同一 key 多个请求同时到达 → 只有一个执行 fn,
 //     其余阻塞等待同一结果,避免"缓存击穿式"重复执行。
+//   - 适用于纯计算/确定性操作。
+//
+// # Acquire/Commit/Release — SETNX-first 守卫式(SETNX→fn,at-most-once)
+//
+//   - Acquire 先用 SETNX 原子占位,确保并发只有一个调用方获得执行权;
+//   - 获得执行权后执行业务逻辑,成功调 Commit 写入结果,失败调 Release 释放占位;
+//   - 适用于有外部副作用的操作(DB 事务、RPC、消息发送),避免重复执行。
 //
 // 结果按 TTL 过期(默认 10 分钟),到点后同 key 可重新执行。fn 返回 error 时
 // 默认不缓存(允许重试);可用 WithCacheErrors 改为连错误一起缓存(适合
@@ -20,12 +30,20 @@ package idempotency
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/kvstore"
 )
+
+// ErrConflict 表示另一个调用方正在处理同一 key(Acquire 占位中,尚未 Commit/Release)。
+// 调用方应稍后重试或直接返回繁忙提示。
+var ErrConflict = errors.New("idempotency: key is being processed by another caller")
+
+// processingPlaceholder 是 store 模式中 Acquire 写入的占位标记。
+var processingPlaceholder = []byte("__processing__")
 
 // entry 一条幂等记录。done 关闭后 result/err 才可读(happens-before 由 channel 保证)。
 type entry[T any] struct {
@@ -324,5 +342,169 @@ func (s *Store[T]) gc() {
 		case <-s.stopCh:
 			return
 		}
+	}
+}
+
+// ---- Guard API: Acquire / Commit / Release ----
+//
+// 适用于有外部副作用的操作(DB 事务、RPC、消息发送)。
+// 与 Do() 的区别:先 SETNX 占位再执行业务逻辑(at-most-once),而非先执行再写结果。
+//
+// 典型用法:
+//
+//	cached, err := store.Acquire("order:1001")
+//	if err != nil {         // ErrConflict 或瞬时错误
+//	    return err
+//	}
+//	if cached != nil {      // 幂等命中,直接返回缓存结果
+//	    return *cached, nil
+//	}
+//	// 获得执行权——执行有副作用的业务逻辑
+//	result, err := doBizLogic()
+//	if err != nil {
+//	    store.Release("order:1001") // 释放占位,允许后续重试
+//	    return err
+//	}
+//	store.Commit("order:1001", result) // 写入最终结果
+//	return result, nil
+
+// Acquire 原子占位:
+//   - 返回 (nil, nil):成功获得执行权,调用方应执行业务逻辑,完成后调 Commit 或 Release;
+//   - 返回 (*T, nil):已有已提交结果(幂等命中),直接使用;
+//   - 返回 (nil, ErrConflict):另一个调用方正在处理中(占位存在但尚未提交)。
+func (s *Store[T]) Acquire(key string) (*T, error) {
+	if s.cfg.store != nil {
+		return s.acquireStore(key)
+	}
+	return s.acquireMemory(key)
+}
+
+// Commit 写入最终结果,替换占位。key 必须先经 Acquire 获得执行权。
+func (s *Store[T]) Commit(key string, value T) {
+	if s.cfg.store != nil {
+		s.commitStore(key, value)
+		return
+	}
+	s.commitMemory(key, value)
+}
+
+// Release 释放占位(业务失败时调用),允许后续请求重新 Acquire。
+func (s *Store[T]) Release(key string) {
+	if s.cfg.store != nil {
+		s.releaseStore(key)
+		return
+	}
+	s.releaseMemory(key)
+}
+
+// ---- 内存模式实现 ----
+
+func (s *Store[T]) acquireMemory(key string) (*T, error) {
+	now := time.Now().UnixNano()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if e, ok := s.items[key]; ok {
+		select {
+		case <-e.done:
+			// 已完成:未过期则复用,已过期则淘汰并允许重新占位。
+			if e.expiry == 0 || now < e.expiry {
+				return &e.result, nil
+			}
+			delete(s.items, key)
+		default:
+			// 占位中(done 未关闭):另一个调用方正在处理。
+			return nil, ErrConflict
+		}
+	}
+	// 占位:创建 entry,done 未关闭表示处理中。
+	s.items[key] = &entry[T]{done: make(chan struct{})}
+	return nil, nil
+}
+
+func (s *Store[T]) commitMemory(key string, value T) {
+	s.mu.Lock()
+	e, ok := s.items[key]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	e.result = value
+	e.expiry = time.Now().Add(s.cfg.ttl).UnixNano()
+	close(e.done)
+}
+
+func (s *Store[T]) releaseMemory(key string) {
+	s.mu.Lock()
+	e, ok := s.items[key]
+	if ok {
+		delete(s.items, key)
+	}
+	s.mu.Unlock()
+	if ok {
+		// 唤醒任何通过 Do() 在等待此 entry 的 goroutine(它们会看到被清理的记录)。
+		select {
+		case <-e.done:
+		default:
+			close(e.done)
+		}
+	}
+}
+
+// ---- Store 模式实现 ----
+
+func (s *Store[T]) acquireStore(key string) (*T, error) {
+	ctx := context.Background()
+	sk := s.storeKey(key)
+
+	// SETNX 占位:写入 placeholder。
+	acquired, err := s.cfg.store.SetNX(ctx, sk, processingPlaceholder, s.cfg.ttl)
+	if err != nil {
+		s.reportErr("setnx", key, err)
+		return nil, fmt.Errorf("idempotency: acquire store error: %w", err)
+	}
+	if acquired {
+		return nil, nil // 成功获得执行权
+	}
+
+	// 占位失败:读取已有值,区分"处理中"和"已提交结果"。
+	b, ok, err := s.cfg.store.Get(ctx, sk)
+	if err != nil {
+		s.reportErr("get", key, err)
+		return nil, fmt.Errorf("idempotency: acquire get error: %w", err)
+	}
+	if !ok {
+		// 键刚好过期/被删,按冲突处理(调用方可立即重试)。
+		return nil, ErrConflict
+	}
+	if string(b) == string(processingPlaceholder) {
+		return nil, ErrConflict
+	}
+	// 已提交的 JSON 结果。
+	var v T
+	if err := json.Unmarshal(b, &v); err != nil {
+		s.reportErr("unmarshal", key, err)
+		return nil, fmt.Errorf("idempotency: unmarshal cached result: %w", err)
+	}
+	return &v, nil
+}
+
+func (s *Store[T]) commitStore(key string, value T) {
+	ctx := context.Background()
+	sk := s.storeKey(key)
+	b, err := json.Marshal(value)
+	if err != nil {
+		s.reportErr("marshal", key, err)
+		return
+	}
+	if err := s.cfg.store.Set(ctx, sk, b, s.cfg.ttl); err != nil {
+		s.reportErr("set", key, err)
+	}
+}
+
+func (s *Store[T]) releaseStore(key string) {
+	ctx := context.Background()
+	if err := s.cfg.store.Delete(ctx, s.storeKey(key)); err != nil {
+		s.reportErr("delete", key, err)
 	}
 }

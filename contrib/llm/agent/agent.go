@@ -15,6 +15,7 @@ import (
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
+	"github.com/rushteam/beauty/contrib/llm/agent/compaction"
 )
 
 // Permission 是工具调用权限三态。
@@ -300,7 +301,8 @@ type Runner struct {
 	Hooks          Hooks
 	Mailbox        *Mailbox // 统一注入信箱(user 插话 + system 上下文)
 	RepairToolArgs bool
-	Compactor      *Compactor
+	Compactor      *Compactor // 便捷别名:ToolResults 压缩;Compaction 优先
+	Compaction     compaction.Strategy
 
 	// Scope 在每步模型调用前过滤可用工具子集。nil 时使用全部 Tools。
 	Scope ToolScope
@@ -663,7 +665,15 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			}
 			msgs = req.Messages
 		}
-		if r.Compactor != nil {
+		if r.Compaction != nil {
+			compact, err := r.Compaction.Compact(ctx, req.Messages)
+			if err != nil {
+				out := outcomeError(runID, last, msgs, err)
+				r.afterTurn(ctx, &out)
+				return out
+			}
+			req.Messages = compact
+		} else if r.Compactor != nil {
 			req.Messages = r.Compactor.Project(req.Messages)
 		}
 

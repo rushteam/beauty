@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -258,5 +259,123 @@ func TestWithLoadFilter_WithStoreFilter(t *testing.T) {
 	// 原有 3 + 新增 1(user), tool 被 StoreFilter 排除
 	if len(all) != 4 {
 		t.Fatalf("WithStoreFilter: stored %d total messages, want 4", len(all))
+	}
+}
+
+func multiToolProvider(n int) agent.ContextProvider {
+	return agent.ContextProviderFunc(func(_ context.Context, _ *llm.Request) ([]llm.Message, []agent.Tool, error) {
+		tools := make([]agent.Tool, n)
+		for i := range n {
+			name := fmtToolName(i)
+			tools[i] = agent.Func(name, "tool "+name, nil, func(_ context.Context, args json.RawMessage) (string, error) {
+				return name + ":" + string(args), nil
+			})
+		}
+		return []llm.Message{{Role: llm.User, Content: "ctx", Source: llm.SourceContext}}, tools, nil
+	})
+}
+
+func fmtToolName(i int) string {
+	return "tool_" + string(rune('a'+i))
+}
+
+func TestWithContextMode_Default(t *testing.T) {
+	inner := multiToolProvider(3)
+	cp := agent.WithContextMode(inner, agent.ContextModeDefault, "rag")
+
+	msgs, tools, err := cp.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if len(tools) != 3 {
+		t.Fatalf("default mode: got %d tools, want 3 (passthrough)", len(tools))
+	}
+}
+
+func TestWithContextMode_Tools(t *testing.T) {
+	inner := multiToolProvider(3)
+	cp := agent.WithContextMode(inner, agent.ContextModeTools, "rag")
+
+	_, tools, err := cp.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 3 {
+		t.Fatalf("tools mode: got %d tools, want 3 (passthrough)", len(tools))
+	}
+}
+
+func TestWithContextMode_Agent_WrapsMultiple(t *testing.T) {
+	inner := multiToolProvider(3)
+	cp := agent.WithContextMode(inner, agent.ContextModeAgent, "rag")
+
+	msgs, tools, err := cp.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if len(tools) != 1 {
+		t.Fatalf("agent mode: got %d tools, want 1 (wrapped)", len(tools))
+	}
+	if tools[0].Def.Name != "query_rag" {
+		t.Errorf("wrapped tool name = %q, want query_rag", tools[0].Def.Name)
+	}
+}
+
+func TestWithContextMode_Agent_SingleTool(t *testing.T) {
+	inner := multiToolProvider(1)
+	cp := agent.WithContextMode(inner, agent.ContextModeAgent, "rag")
+
+	_, tools, err := cp.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("single tool: got %d tools, want 1 (passthrough)", len(tools))
+	}
+	if tools[0].Def.Name != "tool_a" {
+		t.Errorf("tool name = %q, want tool_a (not wrapped)", tools[0].Def.Name)
+	}
+}
+
+func TestWithContextMode_Agent_Dispatch(t *testing.T) {
+	inner := multiToolProvider(2)
+	cp := agent.WithContextMode(inner, agent.ContextModeAgent, "skills")
+
+	_, tools, err := cp.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 {
+		t.Fatal("expected wrapped query tool")
+	}
+
+	queryTool := tools[0]
+	ctx := context.Background()
+
+	result, err := queryTool.Call(ctx, json.RawMessage(`{"tool_name":"tool_a","arguments":{"q":"hello"}}`))
+	if err != nil {
+		t.Fatalf("dispatch tool_a: %v", err)
+	}
+	if result != `tool_a:{"q":"hello"}` {
+		t.Errorf("tool_a result = %q", result)
+	}
+
+	result, err = queryTool.Call(ctx, json.RawMessage(`{"tool_name":"tool_b","arguments":{}}`))
+	if err != nil {
+		t.Fatalf("dispatch tool_b: %v", err)
+	}
+	if result != "tool_b:{}" {
+		t.Errorf("tool_b result = %q", result)
+	}
+
+	_, err = queryTool.Call(ctx, json.RawMessage(`{"tool_name":"missing"}`))
+	if err == nil {
+		t.Fatal("expected error for unknown tool_name")
 	}
 }

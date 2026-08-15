@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -63,6 +65,116 @@ func (f ContextProviderFunc) Invoking(ctx context.Context, req *llm.Request) ([]
 
 func (f ContextProviderFunc) Invoked(ctx context.Context, outcome *RunOutcome) error {
 	return nil
+}
+
+// ContextMode 控制 ContextProvider 向 agent 暴露功能的方式。
+type ContextMode int
+
+const (
+	// ContextModeDefault 默认模式:provider 自行决定,通常直接注入消息和工具。
+	ContextModeDefault ContextMode = iota
+	// ContextModeTools 工具模式:直接暴露 provider 的工具(等同默认行为)。
+	ContextModeTools
+	// ContextModeAgent 子 agent 模式:把 provider 的所有工具包装为单个查询工具,
+	// 防止工具数量爆炸。agent 通过 "query_<provider_name>" 工具与 provider 交互。
+	ContextModeAgent
+)
+
+// ContextProviderConfig 是带模式配置的 ContextProvider 包装。
+type ContextProviderConfig struct {
+	Provider ContextProvider
+	Mode     ContextMode
+	Name     string // 用于 agent 模式下的工具名后缀(如 "rag" → "query_rag")
+}
+
+// WithContextMode 把 ContextProvider 包装为指定模式。
+// agent 模式下,Provider 的所有工具被合并为一个 "query_<name>" 工具,
+// 调用方通过 tool_name + arguments 参数委托给内部工具。
+func WithContextMode(provider ContextProvider, mode ContextMode, name string) ContextProvider {
+	switch mode {
+	case ContextModeAgent:
+		return &agentModeProvider{inner: provider, name: name}
+	default:
+		return provider
+	}
+}
+
+// agentModeProvider 将 ContextProvider 的工具合并为单个 query 工具。
+type agentModeProvider struct {
+	inner ContextProvider
+	name  string
+}
+
+func (p *agentModeProvider) Invoking(ctx context.Context, req *llm.Request) ([]llm.Message, []Tool, error) {
+	msgs, tools, err := p.inner.Invoking(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(tools) <= 1 {
+		return msgs, tools, nil
+	}
+	return msgs, []Tool{p.buildQueryTool(tools)}, nil
+}
+
+func (p *agentModeProvider) Invoked(ctx context.Context, outcome *RunOutcome) error {
+	return p.inner.Invoked(ctx, outcome)
+}
+
+func (p *agentModeProvider) buildQueryTool(tools []Tool) Tool {
+	toolNames := make([]string, len(tools))
+	toolMap := make(map[string]Tool, len(tools))
+	for i, t := range tools {
+		toolNames[i] = t.Def.Name
+		toolMap[t.Def.Name] = t
+	}
+
+	return Tool{
+		Def: llm.ToolDef{
+			Name:        "query_" + p.name,
+			Description: "查询 " + p.name + " 上下文,输入你的问题",
+			Parameters:  buildAgentModeParams(toolNames),
+		},
+		Call: func(ctx context.Context, args json.RawMessage) (string, error) {
+			var payload struct {
+				ToolName  string          `json:"tool_name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			if err := json.Unmarshal(args, &payload); err != nil {
+				return "", err
+			}
+			if payload.ToolName == "" {
+				return "", fmt.Errorf("tool_name is required")
+			}
+			t, ok := toolMap[payload.ToolName]
+			if !ok {
+				return "", fmt.Errorf("unknown tool: %s", payload.ToolName)
+			}
+			if payload.Arguments == nil {
+				payload.Arguments = json.RawMessage("{}")
+			}
+			return t.Call(ctx, payload.Arguments)
+		},
+	}
+}
+
+func buildAgentModeParams(toolNames []string) json.RawMessage {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tool_name": map[string]any{
+				"type":        "string",
+				"description": "要调用的工具名",
+				"enum":        toolNames,
+			},
+			"arguments": map[string]any{
+				"type":        "object",
+				"description": "工具参数",
+			},
+		},
+		"required": []string{"tool_name"},
+	}
+	b, _ := json.Marshal(schema)
+	return b
 }
 
 // RAGContextProvider 是一个通用 RAG 上下文注入器,在每次运行前用查询函数检索相关文档。

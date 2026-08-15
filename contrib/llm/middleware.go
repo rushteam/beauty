@@ -3,9 +3,11 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"math"
 	"math/rand/v2"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -66,6 +68,192 @@ func (f *fallback) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, err
 			}
 		}
 	}
+}
+
+// ErrorKind 分类错误类型,用于 FallbackConfig 路由到不同的降级链。
+type ErrorKind int
+
+const (
+	ErrorGeneral         ErrorKind = iota // 通用错误
+	ErrorRateLimit                        // 速率限制 (429, quota exceeded)
+	ErrorContextOverflow                  // 上下文窗口溢出 (context_length_exceeded)
+)
+
+// ErrorWithKind 允许 provider 返回已分类的错误。
+type ErrorWithKind interface {
+	error
+	ErrorKind() ErrorKind
+}
+
+// ClassifyError 判断错误属于哪种 ErrorKind。
+// 优先通过 ErrorWithKind;否则按错误消息关键词(不区分大小写)匹配。
+func ClassifyError(err error) ErrorKind {
+	if err == nil {
+		return ErrorGeneral
+	}
+	var ek ErrorWithKind
+	if errors.As(err, &ek) {
+		return ek.ErrorKind()
+	}
+	msg := strings.ToLower(err.Error())
+	rateLimitKeys := []string{
+		"rate limit", "rate_limit", "429", "quota", "too many requests", "throttl",
+	}
+	for _, k := range rateLimitKeys {
+		if strings.Contains(msg, k) {
+			return ErrorRateLimit
+		}
+	}
+	contextKeys := []string{
+		"context_length", "context length", "maximum context", "token limit",
+		"too many tokens", "max_tokens", "input too long",
+	}
+	for _, k := range contextKeys {
+		if strings.Contains(msg, k) {
+			return ErrorContextOverflow
+		}
+	}
+	return ErrorGeneral
+}
+
+// FallbackConfig 按错误类型路由到不同的降级 Client 链。
+// 比 Fallback 更精确:速率限制换更大配额的 provider;上下文溢出换更大窗口的模型;
+// 401/403 配置错误不会被错误地降级。
+type FallbackConfig struct {
+	Primary           Client // 主 client(必填)
+	OnRateLimit       []Client
+	OnContextOverflow []Client
+	OnError           []Client // 其他错误时的降级链(兜底)
+	// OnFallback 在发生降级时回调(可选),用于监控/告警。
+	OnFallback func(ctx context.Context, kind ErrorKind, primary, fallback string, err error)
+}
+
+// Build 构建一个实现 Client 接口的降级 client。
+func (cfg FallbackConfig) Build() Client {
+	return &fallbackConfig{cfg: cfg}
+}
+
+type fallbackConfig struct{ cfg FallbackConfig }
+
+func (f *fallbackConfig) chainFor(kind ErrorKind) []Client {
+	switch kind {
+	case ErrorRateLimit:
+		if len(f.cfg.OnRateLimit) > 0 {
+			return f.cfg.OnRateLimit
+		}
+	case ErrorContextOverflow:
+		if len(f.cfg.OnContextOverflow) > 0 {
+			return f.cfg.OnContextOverflow
+		}
+	}
+	return f.cfg.OnError
+}
+
+func clientLabel(c Client) string {
+	if c == nil {
+		return ""
+	}
+	type stringer interface{ String() string }
+	if s, ok := c.(stringer); ok {
+		return s.String()
+	}
+	return fmt.Sprintf("%T", c)
+}
+
+func (f *fallbackConfig) Generate(ctx context.Context, req Request) (*Response, error) {
+	if f.cfg.Primary == nil {
+		return nil, ErrNoClients
+	}
+	resp, err := f.cfg.Primary.Generate(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	kind := ClassifyError(err)
+	chain := f.chainFor(kind)
+	if len(chain) == 0 {
+		return nil, err
+	}
+	lastErr := err
+	primaryName := clientLabel(f.cfg.Primary)
+	for _, c := range chain {
+		if f.cfg.OnFallback != nil {
+			f.cfg.OnFallback(ctx, kind, primaryName, clientLabel(c), err)
+		}
+		resp, tryErr := c.Generate(ctx, req)
+		if tryErr == nil {
+			return resp, nil
+		}
+		lastErr = tryErr
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, lastErr
+}
+
+func (f *fallbackConfig) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		if f.cfg.Primary == nil {
+			yield(Chunk{}, ErrNoClients)
+			return
+		}
+		started, setupErr := f.tryStream(ctx, req, f.cfg.Primary, yield)
+		if started {
+			return
+		}
+		if ctx.Err() != nil {
+			yield(Chunk{}, ctx.Err())
+			return
+		}
+		kind := ClassifyError(setupErr)
+		chain := f.chainFor(kind)
+		if len(chain) == 0 {
+			if setupErr != nil {
+				yield(Chunk{}, setupErr)
+			}
+			return
+		}
+		lastErr := setupErr
+		primaryName := clientLabel(f.cfg.Primary)
+		for _, c := range chain {
+			if f.cfg.OnFallback != nil {
+				f.cfg.OnFallback(ctx, kind, primaryName, clientLabel(c), setupErr)
+			}
+			started, err := f.tryStream(ctx, req, c, yield)
+			if started {
+				return
+			}
+			lastErr = err
+			if ctx.Err() != nil {
+				yield(Chunk{}, ctx.Err())
+				return
+			}
+		}
+		if lastErr != nil {
+			yield(Chunk{}, lastErr)
+		}
+	}
+}
+
+// tryStream 尝试单个 client 的 Stream。started 表示已产出有效 chunk;否则 setupErr 为建流/首包错误(可降级)。
+func (f *fallbackConfig) tryStream(ctx context.Context, req Request, c Client, yield func(Chunk, error) bool) (started bool, setupErr error) {
+	for chunk, err := range c.Stream(ctx, req) {
+		if err != nil {
+			if started {
+				yield(chunk, err)
+				return true, nil
+			}
+			return false, err
+		}
+		started = true
+		if !yield(chunk, nil) {
+			return true, nil
+		}
+	}
+	return started, nil
 }
 
 // Retry 对 Generate/Stream 的**建立阶段**错误重试至多 attempts 次。

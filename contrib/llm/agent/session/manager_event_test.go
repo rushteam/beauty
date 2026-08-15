@@ -1,6 +1,8 @@
 package session_test
 
 import (
+	"context
+	"iter"
 	"context"
 	"testing"
 
@@ -15,7 +17,7 @@ func TestManagerRecordsSessionEvents(t *testing.T) {
 	r := &agent.Runner{
 		Client: &stubClient{content: "reply"},
 	}
-	out := mgr.Run(context.Background(), "s1", r, llm.Request{
+	out := agent.CollectOutcome(mgr.Run(context.Background(), "s1", r, llm.Request{)
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "hello"}},
 	})
@@ -39,7 +41,7 @@ func (c *stubClient) Generate(ctx context.Context, req llm.Request) (*llm.Respon
 	return &llm.Response{Content: c.content}, nil
 }
 
-func (c *stubClient) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
+func (c *stubClient) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
 	ch := make(chan llm.Chunk, 1)
 	ch <- llm.Chunk{Delta: c.content}
 	close(ch)

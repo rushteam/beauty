@@ -1,6 +1,8 @@
 package agent_test
 
 import (
+	"context
+	"iter"
 	"context"
 	"errors"
 	"strings"
@@ -16,8 +18,8 @@ type errClient struct{}
 func (errClient) Generate(context.Context, llm.Request) (*llm.Response, error) {
 	return nil, errors.New("boom")
 }
-func (errClient) Stream(context.Context, llm.Request) (<-chan llm.Chunk, error) {
-	return nil, errors.New("boom")
+func (errClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return unusedStream()
 }
 
 // 默认 ConcatCombiner:按 Agents 顺序拼接各分支 Content。
@@ -26,7 +28,7 @@ func TestParallel_DefaultConcat(t *testing.T) {
 		&agent.Runner{Name: "a", Client: constClient{content: "结果A"}},
 		&agent.Runner{Name: "b", Client: constClient{content: "结果B"}},
 	}}
-	out := p.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +55,7 @@ func TestParallel_CustomCombiner(t *testing.T) {
 			return best, nil
 		},
 	}
-	out := p.Run(context.Background(), llm.Request{})
+	out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +71,7 @@ func TestParallel_PartialFailure(t *testing.T) {
 		&agent.Runner{Client: errClient{}},
 		&agent.Runner{Client: constClient{content: "幸存"}},
 	}}
-	out := p.Run(context.Background(), llm.Request{})
+	out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("部分失败仍应合并成功分支: %v", err)
@@ -85,7 +87,7 @@ func TestParallel_AllFail(t *testing.T) {
 		&agent.Runner{Client: errClient{}},
 		&agent.Runner{Client: errClient{}},
 	}}
-	if out := p.Run(context.Background(), llm.Request{}); out.IsDone() {
+	if out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{}); out.IsDone() {)
 		t.Fatal("全部失败应报错")
 	}
 }
@@ -99,7 +101,7 @@ func TestParallel_RunStream(t *testing.T) {
 
 	var finals []agent.Event
 	tokens := map[string]int{}
-	for ev := range p.RunStream(context.Background(), llm.Request{Model: "m"}) {
+	for ev, err := range p.Run(context.Background(), llm.Request{Model: "m"}) {
 		switch ev.Type {
 		case agent.EventError:
 			t.Fatalf("unexpected error: %v", ev.Err)

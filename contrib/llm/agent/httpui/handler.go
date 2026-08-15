@@ -1,4 +1,4 @@
-// Package httpui 把 StreamAgent 运行事件转为 SSE(checkpoint beauty.agent.v1 schema),供 HITL 前端消费。
+// Package httpui 把 Agent 运行事件转为 SSE(checkpoint beauty.agent.v1 schema),供 HITL 前端消费。
 package httpui
 
 import (
@@ -15,9 +15,9 @@ import (
 
 // Handler 把 agent 流式事件以 SSE 推送给客户端。
 type Handler struct {
-	Agent agent.StreamAgent
+	Agent agent.Agent
 	Name  string
-	Store agent.RunStore // 可选;非 nil 时同时写入 CheckpointStore 事件日志
+	Store agent.RunStore
 }
 
 func (h *Handler) agentName() string {
@@ -41,8 +41,8 @@ type ContinueRequest struct {
 }
 
 // ServeHTTP 路由:
-//   - POST /run       → RunStream SSE
-//   - POST /continue  → ContinueStream SSE
+//   - POST /run       → Run SSE
+//   - POST /continue  → Continue SSE
 //   - GET  /events?run_id= → 回放已持久化 checkpoint 事件(SSE)
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
@@ -100,31 +100,37 @@ func (h *Handler) serveReplay(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// StreamAgentRun 执行 RunStream 并把事件写成 SSE。
-func StreamAgentRun(ctx context.Context, w http.ResponseWriter, sa agent.StreamAgent, name string, store agent.RunStore, req llm.Request) error {
+// StreamAgentRun 执行 Run 并把事件写成 SSE。
+func StreamAgentRun(ctx context.Context, w http.ResponseWriter, a agent.Agent, name string, store agent.RunStore, req llm.Request) error {
 	fl, err := prepareSSE(w)
 	if err != nil {
 		return err
 	}
 	frame := checkpoint.Frame{AgentName: name}
-	for ev := range sa.RunStream(ctx, req) {
-		if err := writeAgentEvent(ctx, w, fl, store, frame, ev); err != nil {
-			return err
+	for ev, err := range a.Run(ctx, req) {
+		if err != nil {
+			return writeAgentEvent(ctx, w, fl, store, frame, agent.Event{Type: agent.EventError, Err: err})
+		}
+		if werr := writeAgentEvent(ctx, w, fl, store, frame, ev); werr != nil {
+			return werr
 		}
 	}
 	return nil
 }
 
-// StreamAgentContinue 执行 ContinueStream 并把事件写成 SSE。
-func StreamAgentContinue(ctx context.Context, w http.ResponseWriter, sa agent.StreamAgent, name string, store agent.RunStore, runID string, resolutions []agent.Resolution) error {
+// StreamAgentContinue 执行 Continue 并把事件写成 SSE。
+func StreamAgentContinue(ctx context.Context, w http.ResponseWriter, a agent.Agent, name string, store agent.RunStore, runID string, resolutions []agent.Resolution) error {
 	fl, err := prepareSSE(w)
 	if err != nil {
 		return err
 	}
 	frame := checkpoint.Frame{AgentName: name}
-	for ev := range sa.ContinueStream(ctx, runID, resolutions) {
-		if err := writeAgentEvent(ctx, w, fl, store, frame, ev); err != nil {
-			return err
+	for ev, err := range a.Continue(ctx, runID, resolutions) {
+		if err != nil {
+			return writeAgentEvent(ctx, w, fl, store, frame, agent.Event{Type: agent.EventError, Err: err})
+		}
+		if werr := writeAgentEvent(ctx, w, fl, store, frame, ev); werr != nil {
+			return werr
 		}
 	}
 	return nil
@@ -166,7 +172,9 @@ func writeAgentEvent(ctx context.Context, w io.Writer, fl http.Flusher, store ag
 	ce := agent.AgentEventToCheckpoint(ev, frame)
 	if store != nil && ce.RunID != "" {
 		if log, ok := store.(checkpoint.EventLog); ok {
-			_ = log.AppendEvents(ctx, ce.RunID, ce)
+			if err := log.AppendEvents(ctx, ce.RunID, ce); err != nil {
+				return fmt.Errorf("httpui: append checkpoint event: %w", err)
+			}
 		}
 	}
 	if err := checkpoint.WriteSSE(w, ce); err != nil {

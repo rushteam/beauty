@@ -5,7 +5,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	allocation "agones.dev/agones/pkg/allocation/go"
@@ -139,9 +142,9 @@ func (a *GRPCAllocator) Allocate(ctx context.Context, req AllocationRequest) (Al
 	if err != nil {
 		return AllocationResult{}, fmt.Errorf("agones: allocate: %w", err)
 	}
-	addr := resp.GetAddress()
+	addr := formatGameServerAddress(resp.GetAddress(), resp.GetPorts())
 	if addr == "" {
-		addr = pickAddress(resp.GetAddresses())
+		addr = formatGameServerAddress(pickAddress(resp.GetAddresses()), resp.GetPorts())
 	}
 	if addr == "" {
 		return AllocationResult{}, fmt.Errorf("agones: empty address in allocation response")
@@ -150,6 +153,37 @@ func (a *GRPCAllocator) Allocate(ctx context.Context, req AllocationRequest) (Al
 		GameServerName: resp.GetGameServerName(),
 		Address:        addr,
 	}, nil
+}
+
+func formatGameServerAddress(host string, ports []*allocation.AllocationResponse_GameServerStatusPort) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+	port := pickGamePort(ports)
+	if port <= 0 {
+		return host
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(port)))
+}
+
+func pickGamePort(ports []*allocation.AllocationResponse_GameServerStatusPort) int32 {
+	for _, pref := range []string{"default", "game", "gameserver"} {
+		for _, p := range ports {
+			if strings.EqualFold(p.GetName(), pref) && p.GetPort() > 0 {
+				return p.GetPort()
+			}
+		}
+	}
+	for _, p := range ports {
+		if p.GetPort() > 0 {
+			return p.GetPort()
+		}
+	}
+	return 0
 }
 
 func pickAddress(addrs []*allocation.AllocationResponse_GameServerStatusAddress) string {

@@ -1,6 +1,8 @@
 package agent_test
 
 import (
+	"context
+	"iter"
 	"context"
 	"errors"
 	"strings"
@@ -25,8 +27,8 @@ func (c *seqClient) Generate(context.Context, llm.Request) (*llm.Response, error
 	c.i++
 	return &llm.Response{Content: out}, nil
 }
-func (c *seqClient) Stream(context.Context, llm.Request) (<-chan llm.Chunk, error) {
-	return nil, errors.New("unused")
+func (c *seqClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return unusedStream()
 }
 
 // 自定义 Selector 应能挑出目标候选(不依赖并发调度顺序:三种输出必然都出现在候选集中)。
@@ -41,7 +43,7 @@ func TestBestOfN_CustomSelector(t *testing.T) {
 		return 0, errors.New("pick-me 未出现在候选中")
 	}
 	b := &agent.BestOfN{Agent: sub, N: 3, Select: sel}
-	out := b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	out := agent.CollectOutcome(b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +57,7 @@ func TestBestOfN_CustomSelector(t *testing.T) {
 func TestBestOfN_DefaultLongest(t *testing.T) {
 	sub := &agent.Runner{Client: &seqClient{outs: []string{"a", "bb", "cccccc"}}}
 	b := &agent.BestOfN{Agent: sub, N: 3}
-	out := b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}})
+	out := agent.CollectOutcome(b.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +71,7 @@ func TestBestOfN_DefaultLongest(t *testing.T) {
 func TestBestOfN_Passthrough(t *testing.T) {
 	sub := &agent.Runner{Client: &fakeClient{steps: []*llm.Response{{Content: "once"}}}}
 	b := &agent.BestOfN{Agent: sub, N: 1}
-	out := b.Run(context.Background(), llm.Request{})
+	out := agent.CollectOutcome(b.Run(context.Background(), llm.Request{}))
 	resp, err := out.Final()
 	if err != nil || resp.Content != "once" {
 		t.Fatalf("resp=%+v err=%v", resp, err)
@@ -94,7 +96,7 @@ func TestVerifyLoop_RetryUntilPass(t *testing.T) {
 			return false, "请加上 good", nil
 		},
 	}
-	out := v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "写点东西"}}})
+	out := agent.CollectOutcome(v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "写点东西"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +126,7 @@ func TestVerifyLoop_MaxRounds(t *testing.T) {
 		MaxRounds: 2,
 		Verify:    func(context.Context, *llm.Response) (bool, string, error) { return false, "nope", nil },
 	}
-	out := v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "go"}}})
+	out := agent.CollectOutcome(v.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "go"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("MaxRounds 应 best-effort 返回, got err %v", err)

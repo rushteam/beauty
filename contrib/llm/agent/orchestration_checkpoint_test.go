@@ -30,7 +30,7 @@ func TestChainCheckpointEvents(t *testing.T) {
 		},
 	}
 
-	out := chain.Run(context.Background(), llm.Request{
+	out := agent.CollectOutcome(chain.Run(context.Background(), llm.Request{)
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "go"}},
 	})
@@ -82,7 +82,7 @@ func TestChainCheckpointPause(t *testing.T) {
 		Steps: []agent.ChainStep{{Name: "ask", Runner: step}},
 	}
 
-	out := chain.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
+	out := agent.CollectOutcome(chain.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}))
 	if !out.IsPaused() {
 		t.Fatalf("expected paused, got %s", out.Status)
 	}

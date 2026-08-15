@@ -1,6 +1,8 @@
 package agent_test
 
 import (
+	"context
+	"iter"
 	"context"
 	"errors"
 	"strings"
@@ -16,8 +18,8 @@ type constClient struct{ content string }
 func (c constClient) Generate(context.Context, llm.Request) (*llm.Response, error) {
 	return &llm.Response{Content: c.content}, nil
 }
-func (c constClient) Stream(context.Context, llm.Request) (<-chan llm.Chunk, error) {
-	return nil, errors.New("unused")
+func (c constClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return unusedStream()
 }
 
 // 正常移交:researcher 交给 writer,writer 给出终态。
@@ -32,7 +34,7 @@ func TestTeam_Handoff(t *testing.T) {
 		Members: map[string]agent.Agent{"researcher": researcher, "writer": writer},
 		Entry:   "researcher",
 	}
-	out := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究主题 X"}}})
+	out := agent.CollectOutcome(tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究主题 X"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +48,7 @@ func TestTeam_Handoff(t *testing.T) {
 func TestTeam_UnknownTarget(t *testing.T) {
 	a := &agent.Runner{Name: "a", Client: &fakeClient{steps: []*llm.Response{{Content: "HANDOFF: ghost hi"}}}}
 	tm := &agent.Team{Members: map[string]agent.Agent{"a": a}, Entry: "a"}
-	out := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "x"}}})
+	out := agent.CollectOutcome(tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "x"}}}))
 	_, err := out.Final()
 	if err == nil || !strings.Contains(err.Error(), "unknown member") {
 		t.Fatalf("want unknown member error, got %v", err)
@@ -69,7 +71,7 @@ func TestTeam_RunStream(t *testing.T) {
 
 	var finals []agent.Event
 	sawResearcherUser, sawWriterTransfer := false, false
-	for ev := range tm.RunStream(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究 X"}}}) {
+	for ev, err := range tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究 X"}}}) {
 		if ev.Type == agent.EventError {
 			t.Fatalf("unexpected error event: %v", ev.Err)
 		}
@@ -110,7 +112,7 @@ func TestTeam_MaxHandoffsGuard(t *testing.T) {
 		Entry:   "a",
 		Config:  agent.HandoffConfig{MaxHandoffs: 3},
 	}
-	out := tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "start"}}})
+	out := agent.CollectOutcome(tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "start"}}}))
 	_, err := out.Final()
 	if err == nil || !strings.Contains(err.Error(), "max handoffs") {
 		t.Fatalf("want max handoffs guard error, got %v", err)

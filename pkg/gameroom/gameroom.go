@@ -236,12 +236,14 @@ func (m *Manager) Drain(roomID string) error {
 	if rs.fsm.Is(PhaseClosed) {
 		return nil
 	}
+	drained := false
 	if rs.fsm.Is(PhaseRunning) {
 		if _, err := rs.fsm.Fire(EventDrain); err != nil {
 			return err
 		}
+		drained = true
 	}
-	if m.hooks.OnDrain != nil {
+	if drained && m.hooks.OnDrain != nil {
 		m.hooks.OnDrain(roomID)
 	}
 	m.closeEmptyRoomLocked(rs, roomID)

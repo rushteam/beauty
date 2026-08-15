@@ -84,7 +84,7 @@ func TestRunner_RepairToolArgs(t *testing.T) {
 		{Content: "done"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{tool}, RepairToolArgs: true}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !json.Valid([]byte(seen)) {
@@ -109,7 +109,7 @@ func TestRunner_RepairToolArgs_Disabled(t *testing.T) {
 		{Content: "done"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{tool}} // RepairToolArgs 默认 false
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if seen != `{'x':1,}` {

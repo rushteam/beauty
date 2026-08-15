@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"testing"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -35,7 +36,7 @@ func TestHooks_BeforeAfterTurn(t *testing.T) {
 		},
 	}
 
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if _, err := out.Final(); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestHooks_BeforeTurnError(t *testing.T) {
 		},
 	}
 
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if !errors.Is(out.Err, want) {
 		t.Fatalf("expected %v, got %v", want, out.Err)
 	}
@@ -83,13 +84,15 @@ func (f *streamFakeClient) Generate(context.Context, llm.Request) (*llm.Response
 	return nil, errors.New("unused")
 }
 
-func (f *streamFakeClient) Stream(_ context.Context, _ llm.Request) (<-chan llm.Chunk, error) {
-	ch := make(chan llm.Chunk, len(f.chunks))
-	for _, c := range f.chunks {
-		ch <- c
+func (f *streamFakeClient) Stream(_ context.Context, _ llm.Request) iter.Seq2[llm.Chunk, error] {
+	chunks := f.chunks
+	return func(yield func(llm.Chunk, error) bool) {
+		for _, c := range chunks {
+			if !yield(c, nil) {
+				return
+			}
+		}
 	}
-	close(ch)
-	return ch, nil
 }
 
 func TestHooks_OnChunk(t *testing.T) {
@@ -97,7 +100,7 @@ func TestHooks_OnChunk(t *testing.T) {
 		chunks: []llm.Chunk{
 			{Delta: "hello "},
 			{Delta: "world"},
-			{Done: true, Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5}},
+			{Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5}},
 		},
 	}
 
@@ -116,7 +119,7 @@ func TestHooks_OnChunk(t *testing.T) {
 	}
 
 	var tokens []string
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m"}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventToken {
 			tokens = append(tokens, ev.Result)
 		}
@@ -136,7 +139,7 @@ func TestHooks_OnChunkError(t *testing.T) {
 	sfc := &streamFakeClient{
 		chunks: []llm.Chunk{
 			{Delta: "hello"},
-			{Done: true},
+			{Usage: &llm.Usage{InputTokens: 1, OutputTokens: 2}},
 		},
 	}
 
@@ -150,7 +153,7 @@ func TestHooks_OnChunkError(t *testing.T) {
 	}
 
 	var errSeen bool
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m"}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventError && ev.Err != nil {
 			errSeen = true
 		}
@@ -184,7 +187,7 @@ func TestHooks_BeforeTool_Deny(t *testing.T) {
 		},
 	}
 
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)

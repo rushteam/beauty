@@ -54,15 +54,12 @@ func (j *Journal) CatchUp(after, through uint64) CatchUpBatch {
 	if through <= after {
 		return out
 	}
-	want := int(through - after)
 	for _, d := range j.entries {
 		if d.Frame > after && d.Frame <= through {
 			out.Deltas = append(out.Deltas, d)
 		}
 	}
-	if len(out.Deltas) < want {
-		out.Truncated = true
-	}
+	// journal 最旧条目晚于 after+1 说明缺口帧已被 depth 截断,无法完整补发。
 	if len(j.entries) > 0 && j.entries[0].Frame > after+1 {
 		out.Truncated = true
 	}

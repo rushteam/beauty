@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 
 	"github.com/rushteam/beauty/contrib/llm"
 )
@@ -105,7 +106,7 @@ func cloneMessages(msgs []llm.Message) []llm.Message {
 type NestedPauseError struct {
 	Child  RunOutcome
 	Source string
-	Resume func(ctx context.Context, resolutions []Resolution) RunOutcome
+	Resume func(ctx context.Context, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error]
 }
 
 func (e *NestedPauseError) Error() string {
@@ -116,3 +117,25 @@ func (e *NestedPauseError) Error() string {
 }
 
 func (e *NestedPauseError) Is(target error) bool { return target == ErrPaused }
+
+// CollectOutcome 消费 iter.Seq2[Event, error] 并收集为 RunOutcome(同步调用方使用)。
+func CollectOutcome(seq iter.Seq2[Event, error]) RunOutcome {
+	var last *llm.Response
+	var msgs []llm.Message
+	for ev, err := range seq {
+		if err != nil {
+			return outcomeError("", last, msgs, err)
+		}
+		switch ev.Type {
+		case EventFinal:
+			return outcomeDone(ev.RunID, ev.Response, msgs)
+		case EventPaused:
+			return outcomePaused(ev.RunID, ev.Response, msgs, ev.Requirements)
+		case EventError:
+			return outcomeError(ev.RunID, ev.Response, msgs, ev.Err)
+		case EventStep:
+			last = ev.Response
+		}
+	}
+	return outcomeDone("", last, msgs)
+}

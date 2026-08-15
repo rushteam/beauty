@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -73,7 +74,7 @@ func AgentAsTool(name, description string, sub Agent, opts ...AgentToolOption) T
 				Depth:       parent.Depth + 1,
 			})
 		}
-		out := sub.Run(childCtx, req)
+		out := CollectOutcome(sub.Run(childCtx, req))
 		switch out.Status {
 		case StatusDone:
 			if out.Response != nil {
@@ -85,8 +86,8 @@ func AgentAsTool(name, description string, sub Agent, opts ...AgentToolOption) T
 			return "", &NestedPauseError{
 				Child:  out,
 				Source: source,
-				Resume: func(ctx context.Context, resolutions []Resolution) RunOutcome {
-					return sub.Continue(ctx, childID, resolutions)
+				Resume: func(ctx context.Context, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+					return sub.Continue(ctx, childID, resolutions, opts...)
 				},
 			}
 		default:
@@ -134,7 +135,7 @@ type Chain struct {
 	resumes sync.Map // runID → chainResume
 }
 
-var _ StreamAgent = (*Chain)(nil)
+var _ Agent = (*Chain)(nil)
 
 func (c *Chain) ensureStore() {
 	if c.Store == nil {
@@ -180,15 +181,39 @@ func (c *Chain) stepSource(i int) string {
 	return fmt.Sprintf("chain:%d", i)
 }
 
-// Run 顺序执行各步。
-func (c *Chain) Run(ctx context.Context, req llm.Request) RunOutcome {
-	c.ensureStore()
-	return c.runFrom(ctx, newRunID(), req, 0, "")
+// Run 顺序执行各步,返回事件流。
+func (c *Chain) Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		c.ensureStore()
+		out := c.runFrom(ctx, newRunID(), req, 0, "", yield, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: c.Name}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements, AgentName: c.Name}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err, AgentName: c.Name}, out.Err)
+		}
+	}
 }
 
 // Continue 从暂停步恢复。
-func (c *Chain) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
-	c.ensureStore()
+func (c *Chain) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		c.ensureStore()
+		out := c.continueSync(ctx, runID, resolutions, yield, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: c.Name}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements, AgentName: c.Name}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err, AgentName: c.Name}, out.Err)
+		}
+	}
+}
+
+func (c *Chain) continueSync(ctx context.Context, runID string, resolutions []Resolution, emit func(Event, error) bool, opts ...Option) RunOutcome {
 	cp := c.cp()
 	cp.Resumed(ctx, runID)
 	snap, err := loadSnapshotFromStore(ctx, c.Store, runID)
@@ -203,7 +228,10 @@ func (c *Chain) Continue(ctx context.Context, runID string, resolutions []Resolu
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: chain resume lost for %q", runID))
 	}
 	cr := v.(chainResume)
-	out := cr.agent.Continue(ctx, cr.childID, resolutions)
+	out := collectMemberContinue(ctx, cr.agent, cr.childID, resolutions, func(e Event) {
+		e.AgentName = c.Name
+		emit(e, nil)
+	}, opts...)
 	switch out.Status {
 	case StatusPaused:
 		reqs := remapRequirements(out.Requirements, snap.ChildSource)
@@ -224,13 +252,13 @@ func (c *Chain) Continue(ctx context.Context, runID string, resolutions []Resolu
 			content = out.Response.Content
 		}
 		_ = c.Store.Delete(ctx, runID)
-		return c.runFrom(ctx, runID, snap.Request, snap.ChainStep+1, content)
+		return c.runFrom(ctx, runID, snap.Request, snap.ChainStep+1, content, emit, opts...)
 	default:
 		return outcomeError(runID, out.Response, out.Messages, fmt.Errorf("agent: chain unexpected status %q", out.Status))
 	}
 }
 
-func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, start int, prevContent string) RunOutcome {
+func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, start int, prevContent string, emit func(Event, error) bool, opts ...Option) RunOutcome {
 	if len(c.Steps) == 0 {
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: empty chain"))
 	}
@@ -248,7 +276,10 @@ func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, star
 		if a == nil {
 			return outcomeError(runID, last, nil, fmt.Errorf("agent: chain step %d (%s): nil agent", i, c.Steps[i].Name))
 		}
-		out := a.Run(ctx, c.stepReq(req, i, content))
+		out := collectMemberRun(ctx, a, c.stepReq(req, i, content), func(e Event) {
+			e.AgentName = c.Name
+			emit(e, nil)
+		}, opts...)
 		src := c.stepSource(i)
 		cp.Spawned(ctx, runID, out.RunID, src, i)
 		switch out.Status {
@@ -285,43 +316,6 @@ func (c *Chain) runFrom(ctx context.Context, runID string, req llm.Request, star
 	cp.Completed(ctx, runID)
 	_ = c.Store.Delete(ctx, runID)
 	return outcomeDone(runID, last, nil)
-}
-
-// RunStream 前 n-1 步同步,最后一步流式;Paused 时发 EventPaused。
-func (c *Chain) RunStream(ctx context.Context, req llm.Request) <-chan Event {
-	return streamAgentOutcome(c.Name, func(emit func(Event)) RunOutcome {
-		return c.Run(ctx, req)
-	})
-}
-
-// ContinueStream 是 Continue 的流式版。
-func (c *Chain) ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event {
-	return streamAgentOutcome(c.Name, func(emit func(Event)) RunOutcome {
-		return c.Continue(ctx, runID, resolutions)
-	})
-}
-
-func streamAgentOutcome(name string, fn func(emit func(Event)) RunOutcome) <-chan Event {
-	ch := make(chan Event, 32)
-	go func() {
-		defer close(ch)
-		emit := func(e Event) {
-			if e.AgentName == "" {
-				e.AgentName = name
-			}
-			ch <- e
-		}
-		out := fn(emit)
-		switch out.Status {
-		case StatusDone:
-			emit(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID})
-		case StatusPaused:
-			emit(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements})
-		default:
-			emit(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err})
-		}
-	}()
-	return ch
 }
 
 // Info 实现 Agent。

@@ -1,6 +1,6 @@
 // Package agent 是 beauty 在 contrib/llm 之上的薄 agent 循环:模型↔工具循环,直到终态、
-// 步数上限或 PermitAsk 原子暂停。Run/Continue 返回统一 RunOutcome(done|paused|error);
-// 审批不进 Runner 核心(产品路径显式 Continue;阻塞审批用外置 SyncHITL)。
+// 步数上限或 PermitAsk 原子暂停。Run/Continue 返回 iter.Seq2[Event, error];CollectOutcome
+// 可收束为 RunOutcome。审批不进 Runner 核心(产品路径显式 Continue;阻塞审批用外置 SyncHITL)。
 //
 // Runner / Chain / Team / Parallel / BestOfN / VerifyLoop 实现同一 Agent 契约,可互相嵌套。
 package agent
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 	"sync"
 
@@ -30,15 +31,11 @@ const (
 	PermitDeny
 )
 
-// Tool 是一个可被模型调用的工具。
-//
-// Permission 控制是否可执行;Approval=true 等价于 Permission=PermitAsk
-// (仅当 Permission 仍为默认 Allow 时生效)。
+// Tool 是一个可被模型调用的工具。Permission 控制是否可执行。
 type Tool struct {
 	Def        llm.ToolDef
 	Call       func(ctx context.Context, args json.RawMessage) (string, error)
 	Permission Permission
-	Approval   bool // deprecated: use Permission=PermitAsk
 }
 
 // Func 是构造 Tool 的便捷函数(默认 PermitAllow)。
@@ -72,7 +69,7 @@ func triggerFrom(ctx context.Context) (TriggerType, string) {
 	return TriggerUser, ""
 }
 
-// EventType 标识 RunStream 中的事件种类。
+// EventType 标识 Run 事件流中的事件种类。
 type EventType string
 
 const (
@@ -86,7 +83,7 @@ const (
 	EventError      EventType = "error"
 )
 
-// Event 是 RunStream / ContinueStream 推送的一条事件。
+// Event 是 Run / Continue 产出的一条事件。
 type Event struct {
 	Type         EventType
 	Step         int
@@ -261,18 +258,11 @@ type Info struct {
 	Tools       []llm.ToolDef
 }
 
-// Agent 是可被统一编排的最小契约:Run/Continue 返回 RunOutcome。
+// Agent 是可被统一编排的最小契约:Run/Continue 返回事件流。
 type Agent interface {
-	Run(ctx context.Context, req llm.Request) RunOutcome
-	Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome
+	Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error]
+	Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error]
 	Info() Info
-}
-
-// StreamAgent 额外支持流式事件。
-type StreamAgent interface {
-	Agent
-	RunStream(ctx context.Context, req llm.Request) <-chan Event
-	ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event
 }
 
 // ToolScope 在每步模型调用前过滤可用工具子集(per-agent scoping)。
@@ -297,11 +287,9 @@ type Runner struct {
 	Description    string
 	Planner        Planner
 	ParallelTools  *bool
-	OnStep         func(step int, resp *llm.Response)
 	Hooks          Hooks
 	Mailbox        *Mailbox // 统一注入信箱(user 插话 + system 上下文)
 	RepairToolArgs bool
-	Compactor      *Compactor // 便捷别名:ToolResults 压缩;Compaction 优先
 	Compaction     compaction.Strategy
 
 	// Scope 在每步模型调用前过滤可用工具子集。nil 时使用全部 Tools。
@@ -310,15 +298,30 @@ type Runner struct {
 	// Store 持久化暂停快照;nil 时用内置 MemoryRunStore(进程内)。
 	Store RunStore
 
+	// ---- 新增:双层中间件 + History/Context Provider ----
+
+	// Middlewares 是 Agent 级中间件链。在 History/Context 注入之后、核心循环前后生效。
+	// 与 llm.Client 装饰器(Provider 级)分层互补。
+	Middlewares []AgentMiddleware
+
+	// HistoryProv 在运行前加载历史消息,成功后持久化。nil 时不管理历史。
+	HistoryProv HistoryProvider
+
+	// ContextProvs 在运行前注入上下文消息和临时工具。nil 时不注入额外上下文。
+	ContextProvs []ContextProvider
+
+	// SessionID 用于 HistoryProvider 的 session 标识。空串时回退到 Name。
+	SessionID string
+
 	// nestedResume 保存 AgentAsTool 等冒泡暂停时的子 Continue 回调(进程内,不入 Store)。
-	nestedResume sync.Map // runID → func(ctx, []Resolution) RunOutcome
+	nestedResume sync.Map // runID → func(ctx, []Resolution, ...Option) iter.Seq2[Event, error]
 
 	// storeOnce 保护 Store 的懒初始化:同一个 *Runner 可被 BestOfN/Parallel 等并发复用,
 	// 多个 goroutine 可能同时首次调用 Run/Continue,若不加同步会在 Store 字段上产生数据竞争。
 	storeOnce sync.Once
 }
 
-var _ StreamAgent = (*Runner)(nil)
+var _ Agent = (*Runner)(nil)
 
 // ensureStore 在首次 Run 时初始化默认 Store。并发安全(见 storeOnce 注释)。
 func (r *Runner) ensureStore() {
@@ -338,80 +341,14 @@ func (r *Runner) Info() Info {
 	return Info{Name: r.Name, Description: r.Description, Tools: defs}
 }
 
-// Run 启动工具循环,返回 Done / Paused / Error。
-func (r *Runner) Run(ctx context.Context, req llm.Request) RunOutcome {
-	r.ensureStore()
-	runID := newRunID()
-	frame := checkpoint.FrameFrom(ctx)
-	frame.RunID = runID
-	if frame.AgentName == "" {
-		frame.AgentName = r.Name
-	}
-	ctx = checkpoint.WithFrame(ctx, frame)
-	return r.runLoop(ctx, runID, req, nil, 1, nil)
-}
-
-// Continue 恢复暂停的 run:先按 resolutions 执行 pending tool_calls,再继续循环。
-func (r *Runner) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
-	r.ensureStore()
-	if runID == "" {
-		return outcomeError("", nil, nil, fmt.Errorf("agent: Continue requires runID"))
-	}
-	snap, err := r.loadSnapshot(ctx, runID)
-	if err != nil {
-		return outcomeError(runID, nil, nil, err)
-	}
-	if snap == nil {
-		return outcomeError(runID, nil, nil, fmt.Errorf("agent: unknown runID %q", runID))
-	}
-	if snap.Kind != "" && snap.Kind != "runner" {
-		return outcomeError(runID, nil, nil, fmt.Errorf("agent: runID %q is kind %q, not runner", runID, snap.Kind))
-	}
-
-	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunResumed, runID))
-
-	// 嵌套子 pause(AgentAsTool):先 Continue 子 run,把结果当 tool result,再继续。
-	if snap.ChildRunID != "" && len(snap.PendingTCs) == 0 {
-		return r.continueNested(ctx, runID, snap, resolutions)
-	}
-
-	byRes := map[string]Resolution{}
-	for _, res := range resolutions {
-		byRes[res.ID] = res
-	}
-	for _, req := range snap.Requirements {
-		if _, ok := byRes[req.ID]; !ok {
-			return outcomeError(runID, nil, snap.Messages, fmt.Errorf("agent: missing resolution for %q", req.ID))
-		}
-	}
-
-	byName := r.toolIndex()
-	req := snap.Request
-	msgs := cloneMessages(snap.Messages)
-	step := snap.Step
-
-	toolMsgs, fatal, nested := r.execPending(ctx, step, byName, snap.PendingTCs, snap.Requirements, byRes, nil)
-	if fatal != nil {
-		return outcomeError(runID, nil, msgs, fatal)
-	}
-	if nested != nil {
-		// 执行 Allow 工具时又冒出嵌套 pause:保存进度后返回。
-		msgs = append(msgs, toolMsgs...)
-		return r.pauseNested(ctx, runID, req, msgs, nil, step, nested)
-	}
-	msgs = append(msgs, toolMsgs...)
-	_ = r.Store.Delete(ctx, runID)
-	return r.runLoop(ctx, runID, req, msgs, step+1, nil)
-}
-
 func (r *Runner) continueNested(ctx context.Context, runID string, snap *RunSnapshot, resolutions []Resolution) RunOutcome {
 	v, ok := r.nestedResume.Load(runID)
 	if !ok {
 		return outcomeError(runID, nil, snap.Messages, fmt.Errorf("agent: nested resume lost for run %q (child=%s)", runID, snap.ChildRunID))
 	}
-	resume := v.(func(context.Context, []Resolution) RunOutcome)
+	resume := v.(func(context.Context, []Resolution, ...Option) iter.Seq2[Event, error])
 	childRes := filterResolutions(resolutions, snap.ChildSource)
-	childOut := resume(ctx, childRes)
+	childOut := CollectOutcome(resume(ctx, childRes))
 	switch childOut.Status {
 	case StatusPaused:
 		reqs := remapRequirements(childOut.Requirements, snap.ChildSource)
@@ -440,7 +377,11 @@ func (r *Runner) continueNested(ctx context.Context, runID string, snap *RunSnap
 		r.appendCheckpoint(ctx, runID, doneEv)
 		_ = r.Store.Delete(ctx, runID)
 		req := snap.Request
-		return r.runLoop(ctx, runID, req, msgs, snap.Step+1, nil)
+		maxSteps := r.MaxSteps
+		if maxSteps <= 0 {
+			maxSteps = DefaultMaxSteps
+		}
+		return r.runLoop(ctx, runID, req, msgs, snap.Step+1, nil, r.Tools, maxSteps)
 	default:
 		return outcomeError(runID, childOut.Response, snap.Messages, fmt.Errorf("agent: unexpected child status %q", childOut.Status))
 	}
@@ -475,287 +416,6 @@ func nestedToolCallID(msgs []llm.Message, toolName string) string {
 		}
 	}
 	return ""
-}
-
-// RunStream 异步跑循环并推送事件;Paused 时发 EventPaused 后关闭 channel。
-func (r *Runner) RunStream(ctx context.Context, req llm.Request) <-chan Event {
-	return r.streamOutcome(ctx, func(emit func(Event)) RunOutcome {
-		r.ensureStore()
-		runID := newRunID()
-		return r.runLoop(ctx, runID, req, nil, 1, emit)
-	})
-}
-
-// ContinueStream 是 Continue 的流式版。
-func (r *Runner) ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event {
-	return r.streamOutcome(ctx, func(emit func(Event)) RunOutcome {
-		// 复用 Continue 逻辑但需要 emit——抽 runContinueWithEmit
-		return r.continueWithEmit(ctx, runID, resolutions, emit)
-	})
-}
-
-func (r *Runner) streamOutcome(ctx context.Context, fn func(emit func(Event)) RunOutcome) <-chan Event {
-	ch := make(chan Event, 32)
-	go func() {
-		defer close(ch)
-		tt, tid := triggerFrom(ctx)
-		emit := func(e Event) {
-			e.AgentName = r.Name
-			e.TriggerType = tt
-			e.TriggerID = tid
-			ch <- e
-		}
-		out := fn(emit)
-		switch out.Status {
-		case StatusDone:
-			emit(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID})
-		case StatusPaused:
-			emit(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements})
-		default:
-			emit(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err})
-		}
-	}()
-	return ch
-}
-
-func (r *Runner) continueWithEmit(ctx context.Context, runID string, resolutions []Resolution, emit func(Event)) RunOutcome {
-	r.ensureStore()
-	if runID == "" {
-		return outcomeError("", nil, nil, fmt.Errorf("agent: Continue requires runID"))
-	}
-	snap, err := r.loadSnapshot(ctx, runID)
-	if err != nil {
-		return outcomeError(runID, nil, nil, err)
-	}
-	if snap == nil {
-		return outcomeError(runID, nil, nil, fmt.Errorf("agent: unknown runID %q", runID))
-	}
-	if snap.ChildRunID != "" && len(snap.PendingTCs) == 0 {
-		return r.continueNested(ctx, runID, snap, resolutions)
-	}
-	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunResumed, runID))
-	byRes := map[string]Resolution{}
-	for _, res := range resolutions {
-		byRes[res.ID] = res
-	}
-	for _, req := range snap.Requirements {
-		if _, ok := byRes[req.ID]; !ok {
-			return outcomeError(runID, nil, snap.Messages, fmt.Errorf("agent: missing resolution for %q", req.ID))
-		}
-	}
-	byName := r.toolIndex()
-	req := snap.Request
-	msgs := cloneMessages(snap.Messages)
-	step := snap.Step
-	emitUI := func(e Event) { r.emitEvent(ctx, runID, emit, e) }
-	toolMsgs, fatal, nested := r.execPending(ctx, step, byName, snap.PendingTCs, snap.Requirements, byRes, emitUI)
-	if fatal != nil {
-		return outcomeError(runID, nil, msgs, fatal)
-	}
-	if nested != nil {
-		msgs = append(msgs, toolMsgs...)
-		return r.pauseNested(ctx, runID, req, msgs, nil, step, nested)
-	}
-	msgs = append(msgs, toolMsgs...)
-	_ = r.Store.Delete(ctx, runID)
-	return r.runLoop(ctx, runID, req, msgs, step+1, emit)
-}
-
-func (r *Runner) toolIndex() map[string]Tool {
-	byName := make(map[string]Tool, len(r.Tools))
-	for _, t := range r.Tools {
-		byName[t.Def.Name] = t
-	}
-	return byName
-}
-
-func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msgs []llm.Message, startStep int, emit func(Event)) RunOutcome {
-	maxSteps := r.MaxSteps
-	if maxSteps <= 0 {
-		maxSteps = DefaultMaxSteps
-	}
-
-	// BeforeTurn: 整轮开始前的拦截点(仅首次进入,Continue 不重复触发)。
-	if r.Hooks.BeforeTurn != nil && startStep == 1 && msgs == nil {
-		if err := r.Hooks.BeforeTurn(ctx, &req); err != nil {
-			out := outcomeError(runID, nil, nil, err)
-			r.afterTurn(ctx, &out)
-			return out
-		}
-	}
-
-	// Scope: 按上下文过滤可用工具子集。
-	activeTools := r.Tools
-	if r.Scope != nil {
-		activeTools = r.Scope.Filter(ctx, startStep, r.Tools)
-	}
-	defs := make([]llm.ToolDef, len(activeTools))
-	byName := make(map[string]Tool, len(activeTools))
-	for i, t := range activeTools {
-		defs[i] = t.Def
-		byName[t.Def.Name] = t
-	}
-	req.Tools = defs
-
-	if r.Planner != nil && startStep == 1 && msgs == nil {
-		if instr := r.Planner.BuildPlanningInstruction(&req); instr != "" {
-			if req.System != "" {
-				req.System += "\n\n"
-			}
-			req.System += instr
-		}
-	}
-
-	if msgs == nil {
-		msgs = make([]llm.Message, len(req.Messages))
-		copy(msgs, req.Messages)
-	}
-
-	if startStep == 1 {
-		r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunStarted, runID).WithStep(startStep))
-		for _, m := range req.Messages {
-			if m.Role != llm.User {
-				continue
-			}
-			ev := checkpoint.NewEvent(checkpoint.TypeUserMessage, runID).WithStep(0)
-			msg := m
-			ev.Message = &msg
-			r.appendCheckpoint(ctx, runID, ev)
-		}
-	}
-
-	var last *llm.Response
-	for step := startStep; step <= maxSteps; step++ {
-		if err := ctx.Err(); err != nil {
-			out := outcomeError(runID, last, msgs, err)
-			r.afterTurn(ctx, &out)
-			return out
-		}
-
-		// Scope 每步重新评估(工具可用性可能随上下文变化)。
-		if r.Scope != nil {
-			activeTools = r.Scope.Filter(ctx, step, r.Tools)
-			defs = make([]llm.ToolDef, len(activeTools))
-			byName = make(map[string]Tool, len(activeTools))
-			for i, t := range activeTools {
-				defs[i] = t.Def
-				byName[t.Def.Name] = t
-			}
-			req.Tools = defs
-		}
-
-		// Mailbox: 用户插话 + 系统上下文注入。
-		for _, m := range r.Mailbox.drainSteer() {
-			msgs = append(msgs, llm.Message{Role: llm.User, Content: m})
-			r.emitEvent(ctx, runID, emit, Event{Type: EventSteer, Step: step, Result: m, RunID: runID})
-		}
-		if extra := r.Mailbox.drainInject(); extra != "" {
-			if req.System != "" {
-				req.System += "\n\n"
-			}
-			req.System += extra
-		}
-
-		req.Messages = msgs
-		if r.Hooks.BeforeModel != nil {
-			if err := r.Hooks.BeforeModel(ctx, step, &req); err != nil {
-				out := outcomeError(runID, last, msgs, err)
-				r.afterTurn(ctx, &out)
-				return out
-			}
-			msgs = req.Messages
-		}
-		if r.Compaction != nil {
-			compact, err := r.Compaction.Compact(ctx, req.Messages)
-			if err != nil {
-				out := outcomeError(runID, last, msgs, err)
-				r.afterTurn(ctx, &out)
-				return out
-			}
-			req.Messages = compact
-		} else if r.Compactor != nil {
-			req.Messages = r.Compactor.Project(req.Messages)
-		}
-
-		var modelEmit func(Event)
-		if emit != nil || r.Hooks.OnChunk != nil {
-			modelEmit = func(e Event) { r.emitEvent(ctx, runID, emit, e) }
-		}
-		resp, err := r.callModel(ctx, req, step, modelEmit)
-		if err != nil {
-			out := outcomeError(runID, last, msgs, err)
-			r.afterTurn(ctx, &out)
-			return out
-		}
-		if r.Planner != nil {
-			resp = r.Planner.ProcessPlanningResponse(step, resp)
-		}
-		last = resp
-		if r.Hooks.AfterModel != nil {
-			if err := r.Hooks.AfterModel(ctx, step, resp); err != nil {
-				out := outcomeError(runID, last, msgs, err)
-				r.afterTurn(ctx, &out)
-				return out
-			}
-		}
-		if r.OnStep != nil {
-			r.OnStep(step, resp)
-		}
-		r.emitEvent(ctx, runID, emit, Event{Type: EventStep, Step: step, Response: resp, RunID: runID})
-
-		if len(resp.ToolCalls) == 0 {
-			_ = r.Store.Delete(ctx, runID)
-			r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunCompleted, runID).WithStep(step))
-			out := outcomeDone(runID, resp, msgs)
-			r.afterTurn(ctx, &out)
-			return out
-		}
-
-		msgs = append(msgs, llm.Message{Role: llm.Assistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
-
-		// 原子暂停:任一轮含 PermitAsk → 整轮不执行任何工具。
-		if reqs := r.askRequirements(byName, resp.ToolCalls); len(reqs) > 0 {
-			snap := &RunSnapshot{
-				Kind:         "runner",
-				Request:      req,
-				Messages:     cloneMessages(msgs),
-				PendingTCs:   append([]llm.ToolCall{}, resp.ToolCalls...),
-				Requirements: reqs,
-				Step:         step,
-			}
-			r.checkpointPaused(ctx, runID, nil, step, resp, reqs)
-			if err := r.saveCheckpoint(ctx, runID, snap); err != nil {
-				out := outcomeError(runID, last, msgs, err)
-				r.afterTurn(ctx, &out)
-				return out
-			}
-			out := outcomePaused(runID, resp, msgs, reqs)
-			r.afterTurn(ctx, &out)
-			return out
-		}
-
-		emitUI := func(e Event) { r.emitEvent(ctx, runID, emit, e) }
-		toolMsgs, fatal, nested := r.runTools(ctx, step, byName, resp.ToolCalls, emitUI)
-		if fatal != nil {
-			var np *NestedPauseError
-			if errors.As(fatal, &np) {
-				msgs = append(msgs, toolMsgs...)
-				return r.pauseNested(ctx, runID, req, msgs, resp, step, np)
-			}
-			out := outcomeError(runID, last, msgs, fatal)
-			r.afterTurn(ctx, &out)
-			return out
-		}
-		if nested != nil {
-			msgs = append(msgs, toolMsgs...)
-			return r.pauseNested(ctx, runID, req, msgs, resp, step, nested)
-		}
-		msgs = append(msgs, toolMsgs...)
-	}
-	out := outcomeError(runID, last, msgs, ErrMaxSteps)
-	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunError, runID).WithStep(maxSteps))
-	r.afterTurn(ctx, &out)
-	return out
 }
 
 func (r *Runner) afterTurn(ctx context.Context, out *RunOutcome) {
@@ -819,50 +479,6 @@ func (r *Runner) askRequirements(byName map[string]Tool, tcs []llm.ToolCall) []R
 		}
 	}
 	return reqs
-}
-
-func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit func(Event)) (*llm.Response, error) {
-	if emit == nil && r.Hooks.OnChunk == nil {
-		return r.Client.Generate(ctx, req)
-	}
-	ch, err := r.Client.Stream(ctx, req)
-	if err != nil {
-		return r.Client.Generate(ctx, req)
-	}
-	var content strings.Builder
-	var toolCalls []llm.ToolCall
-	var usage llm.Usage
-	for c := range ch {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if c.Err != nil {
-			return nil, c.Err
-		}
-		// OnChunk: 流式拦截(可改写 Delta,如敏感词过滤)。
-		if r.Hooks.OnChunk != nil {
-			if err := r.Hooks.OnChunk(ctx, step, &c); err != nil {
-				return nil, err
-			}
-		}
-		if c.Delta != "" {
-			content.WriteString(c.Delta)
-			if emit != nil {
-				emit(Event{Type: EventToken, Step: step, Result: c.Delta})
-			}
-		}
-		if len(c.ToolCalls) > 0 {
-			toolCalls = c.ToolCalls
-		}
-		if c.Usage != nil {
-			usage = *c.Usage
-		}
-	}
-	resp := &llm.Response{Content: content.String(), ToolCalls: toolCalls, Usage: usage, Model: req.Model}
-	if len(req.Tools) > 0 && len(toolCalls) == 0 && content.Len() == 0 {
-		return r.Client.Generate(ctx, req)
-	}
-	return resp, nil
 }
 
 type toolOutcome struct {
@@ -991,13 +607,7 @@ func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, 
 }
 
 func (t Tool) effectivePerm() Permission {
-	if t.Permission != PermitAllow {
-		return t.Permission
-	}
-	if t.Approval {
-		return PermitAsk
-	}
-	return PermitAllow
+	return t.Permission
 }
 
 func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.ToolCall, ask map[string]Requirement, byRes map[string]Resolution, idx int) (result string, fatal error) {

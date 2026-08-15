@@ -66,8 +66,8 @@ func (cc *fakeClientConn) UpdateState(state resolver.State) error {
 	return nil
 }
 
-func (cc *fakeClientConn) ReportError(error)                                   {}
-func (cc *fakeClientConn) NewAddress([]resolver.Address)                       {}
+func (cc *fakeClientConn) ReportError(error)                                    {}
+func (cc *fakeClientConn) NewAddress([]resolver.Address)                        {}
 func (cc *fakeClientConn) ParseServiceConfig(string) *serviceconfig.ParseResult { return nil }
 
 func (cc *fakeClientConn) lastState() resolver.State {

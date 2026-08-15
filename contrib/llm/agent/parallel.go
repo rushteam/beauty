@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"iter"
 	"strings"
 	"sync"
 
@@ -51,10 +52,7 @@ type parallelBranch struct {
 	childID string
 }
 
-var (
-	_ Agent       = (*Parallel)(nil)
-	_ StreamAgent = (*Parallel)(nil)
-)
+var _ Agent = (*Parallel)(nil)
 
 func (p *Parallel) ensureStore() {
 	if p.Store == nil {
@@ -66,41 +64,51 @@ func (p *Parallel) cp() OrchestratorCheckpoint {
 	return OrchestratorCheckpoint{Store: p.Store, Name: p.Name}
 }
 
-// LoadRunTree 从 checkpoint 事件日志构建编排树。
 func (p *Parallel) LoadRunTree(ctx context.Context, runID string) (*checkpoint.RunNode, error) {
 	p.ensureStore()
 	return LoadRunTreeFromStore(ctx, p.Store, runID)
 }
 
-// LoadUIEvents 读取 run 的全部 checkpoint 事件。
 func (p *Parallel) LoadUIEvents(ctx context.Context, runID string) ([]checkpoint.Event, error) {
 	p.ensureStore()
 	return LoadUIEventsFromStore(ctx, p.Store, runID)
 }
 
-// Run 并发跑所有分支并合并;有 Paused 则暂停。
-func (p *Parallel) Run(ctx context.Context, req llm.Request) RunOutcome {
-	p.ensureStore()
-	if len(p.Agents) == 0 {
-		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel has no agents"))
+func (p *Parallel) Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		p.ensureStore()
+		if len(p.Agents) == 0 {
+			yield(Event{Type: EventError, AgentName: p.Name, Err: fmt.Errorf("agent: Parallel has no agents")}, fmt.Errorf("agent: Parallel has no agents"))
+			return
+		}
+		runID := newRunID()
+		p.cp().Started(ctx, runID, req)
+
+		outs := make([]RunOutcome, len(p.Agents))
+		var wg sync.WaitGroup
+		for i := range p.Agents {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				if p.Agents[i] == nil {
+					outs[i] = outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch %d nil", i))
+					return
+				}
+				outs[i] = p.streamBranch(ctx, p.Agents[i], req, yield, opts...)
+			}(i)
+		}
+		wg.Wait()
+
+		out := p.collect(ctx, runID, req, outs)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, AgentName: p.Name, Response: out.Response, RunID: out.RunID}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}, nil)
+		default:
+			yield(Event{Type: EventError, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Err: out.Err}, out.Err)
+		}
 	}
-	runID := newRunID()
-	p.cp().Started(ctx, runID, req)
-	outs := make([]RunOutcome, len(p.Agents))
-	var wg sync.WaitGroup
-	for i := range p.Agents {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			if p.Agents[i] == nil {
-				outs[i] = outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch %d nil", i))
-				return
-			}
-			outs[i] = p.Agents[i].Run(ctx, req)
-		}(i)
-	}
-	wg.Wait()
-	return p.collect(ctx, runID, req, outs)
 }
 
 func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, outs []RunOutcome) RunOutcome {
@@ -173,7 +181,6 @@ func (p *Parallel) collect(ctx context.Context, runID string, req llm.Request, o
 	for i, out := range done {
 		resps[i] = out.Response
 	}
-	// 失败分支保持 nil
 	comb := p.Combine
 	if comb == nil {
 		comb = ConcatCombiner
@@ -192,8 +199,21 @@ func (p *Parallel) storeBranch(runID string, i int, a Agent, childID string) {
 	m.Store(i, parallelBranch{agent: a, childID: childID})
 }
 
-// Continue 只恢复仍暂停的分支,齐了再 Combine。
-func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
+func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		out := p.continueSync(ctx, runID, resolutions, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, AgentName: p.Name, Response: out.Response, RunID: out.RunID}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}, nil)
+		default:
+			yield(Event{Type: EventError, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Err: out.Err}, out.Err)
+		}
+	}
+}
+
+func (p *Parallel) continueSync(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) RunOutcome {
 	p.ensureStore()
 	cp := p.cp()
 	cp.Resumed(ctx, runID)
@@ -221,7 +241,7 @@ func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Res
 	branches.Range(func(k, val any) bool {
 		i := k.(int)
 		br := val.(parallelBranch)
-		out := br.agent.Continue(ctx, br.childID, resolutions)
+		out := collectMemberContinue(ctx, br.agent, br.childID, resolutions, nil, opts...)
 		switch out.Status {
 		case StatusDone:
 			done[i] = out
@@ -237,7 +257,6 @@ func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Res
 				firstPaused = &o
 			}
 		default:
-			// 记为失败:从 paused 去掉
 			branches.Delete(i)
 		}
 		return true
@@ -288,85 +307,32 @@ func (p *Parallel) Continue(ctx context.Context, runID string, resolutions []Res
 	return outcomeDone(runID, resp, nil)
 }
 
-// RunStream 并发透传各分支中间事件;对外仅一条合并后的 EventFinal(或 Paused/Error)。
-func (p *Parallel) RunStream(ctx context.Context, req llm.Request) <-chan Event {
-	ch := make(chan Event, 32)
-	go func() {
-		defer close(ch)
-		p.ensureStore()
-		if len(p.Agents) == 0 {
-			ch <- Event{Type: EventError, AgentName: p.Name, Err: fmt.Errorf("agent: Parallel has no agents")}
-			return
-		}
-		runID := newRunID()
-		outs := make([]RunOutcome, len(p.Agents))
-		var wg sync.WaitGroup
-		for i := range p.Agents {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				outs[i] = p.streamBranch(ctx, p.Agents[i], req, ch)
-			}(i)
-		}
-		wg.Wait()
-		out := p.collect(ctx, runID, req, outs)
-		switch out.Status {
-		case StatusDone:
-			ch <- Event{Type: EventFinal, AgentName: p.Name, Response: out.Response, RunID: out.RunID}
-		case StatusPaused:
-			ch <- Event{Type: EventPaused, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}
-		default:
-			ch <- Event{Type: EventError, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Err: out.Err}
-		}
-	}()
-	return ch
-}
-
-func (p *Parallel) streamBranch(ctx context.Context, a Agent, req llm.Request, ch chan<- Event) RunOutcome {
+func (p *Parallel) streamBranch(ctx context.Context, a Agent, req llm.Request, yield func(Event, error) bool, opts ...Option) RunOutcome {
 	if a == nil {
 		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel nil branch"))
 	}
-	if sa, ok := a.(StreamAgent); ok {
-		var fev Event
-		for ev := range sa.RunStream(ctx, req) {
-			switch ev.Type {
-			case EventFinal:
-				fev = ev
-			case EventPaused:
-				return outcomePaused(ev.RunID, ev.Response, nil, ev.Requirements)
-			case EventError:
-				return outcomeError(ev.RunID, ev.Response, nil, ev.Err)
-			default:
-				ch <- ev
-			}
+	var final RunOutcome
+	for ev, err := range a.Run(ctx, req, opts...) {
+		if err != nil {
+			return outcomeError(ev.RunID, ev.Response, nil, err)
 		}
-		if fev.Response != nil {
-			return outcomeDone(fev.RunID, fev.Response, nil)
-		}
-		return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch produced no final"))
-	}
-	return a.Run(ctx, req)
-}
-
-// ContinueStream 是 Continue 的流式版。
-func (p *Parallel) ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event {
-	ch := make(chan Event, 32)
-	go func() {
-		defer close(ch)
-		out := p.Continue(ctx, runID, resolutions)
-		switch out.Status {
-		case StatusDone:
-			ch <- Event{Type: EventFinal, AgentName: p.Name, Response: out.Response, RunID: out.RunID}
-		case StatusPaused:
-			ch <- Event{Type: EventPaused, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}
+		switch ev.Type {
+		case EventFinal:
+			final = outcomeDone(ev.RunID, ev.Response, nil)
+		case EventPaused:
+			return outcomePaused(ev.RunID, ev.Response, nil, ev.Requirements)
+		case EventError:
+			return outcomeError(ev.RunID, ev.Response, nil, ev.Err)
 		default:
-			ch <- Event{Type: EventError, AgentName: p.Name, Response: out.Response, RunID: out.RunID, Err: out.Err}
+			yield(ev, nil)
 		}
-	}()
-	return ch
+	}
+	if final.Status == StatusDone {
+		return final
+	}
+	return outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch produced no final"))
 }
 
-// Info 实现 Agent。
 func (p *Parallel) Info() Info {
 	var tools []llm.ToolDef
 	for _, a := range p.Agents {

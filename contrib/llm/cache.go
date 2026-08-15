@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"iter"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,8 +61,8 @@ type CacheClient struct {
 // Cache 为 Client 加响应缓存。相同请求(model/messages/tools/system/temperature/response_format)
 // 返回缓存的 Response,避免重复调用 API(省钱/降延迟)。
 //
-// Stream 场景:缓存命中时回放为单 Chunk(Delta=全文内容 + ToolCalls + Done=true);
-// 未命中时正常流式,Done 后写入缓存。
+// Stream 场景:缓存命中时回放为若干 Chunk(Delta=全文内容 + ToolCalls + Usage);
+// 未命中时正常流式,迭代结束后写入缓存。
 //
 // 默认仅缓存 temperature=0 的请求(确定性回复);自定义用 WithCacheFilter。
 func Cache(c Client, store CacheStore, opts ...CacheOption) *CacheClient {
@@ -105,37 +106,45 @@ func (cc *CacheClient) Generate(ctx context.Context, req Request) (*Response, er
 	return resp, nil
 }
 
-func (cc *CacheClient) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	if !cc.cfg.filter(req) {
-		return cc.c.Stream(ctx, req)
-	}
-	key := cc.cfg.keyFn(req)
-	if resp, ok := cc.s.Get(ctx, key); ok {
-		atomic.AddInt64(&cc.hits, 1)
-		cp := *resp
-		ch := make(chan Chunk, 3)
-		if cp.Thinking != "" {
-			ch <- Chunk{ThinkingDelta: cp.Thinking}
+func (cc *CacheClient) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		if !cc.cfg.filter(req) {
+			for chunk, err := range cc.c.Stream(ctx, req) {
+				if !yield(chunk, err) {
+					return
+				}
+				if err != nil {
+					return
+				}
+			}
+			return
 		}
-		if cp.Content != "" {
-			ch <- Chunk{Delta: cp.Content}
+		key := cc.cfg.keyFn(req)
+		if resp, ok := cc.s.Get(ctx, key); ok {
+			atomic.AddInt64(&cc.hits, 1)
+			cp := *resp
+			if cp.Thinking != "" {
+				if !yield(Chunk{ThinkingDelta: cp.Thinking}, nil) {
+					return
+				}
+			}
+			if cp.Content != "" {
+				if !yield(Chunk{Delta: cp.Content}, nil) {
+					return
+				}
+			}
+			yield(Chunk{ToolCalls: cp.ToolCalls, Usage: &cp.Usage, Thinking: cp.Thinking}, nil)
+			return
 		}
-		ch <- Chunk{Done: true, ToolCalls: cp.ToolCalls, Usage: &cp.Usage, Thinking: cp.Thinking}
-		close(ch)
-		return ch, nil
-	}
-	atomic.AddInt64(&cc.miss, 1)
+		atomic.AddInt64(&cc.miss, 1)
 
-	src, err := cc.c.Stream(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	out := make(chan Chunk)
-	go func() {
-		defer close(out)
 		var assembled Response
 		assembled.Model = req.Model
-		for chunk := range src {
+		for chunk, err := range cc.c.Stream(ctx, req) {
+			if err != nil {
+				yield(chunk, err)
+				return
+			}
 			if chunk.Delta != "" {
 				assembled.Content += chunk.Delta
 			}
@@ -148,14 +157,12 @@ func (cc *CacheClient) Stream(ctx context.Context, req Request) (<-chan Chunk, e
 			if chunk.Usage != nil {
 				assembled.Usage = *chunk.Usage
 			}
-			out <- chunk
-			if chunk.Err != nil {
+			if !yield(chunk, nil) {
 				return
 			}
 		}
 		cc.s.Set(ctx, key, &assembled, cc.cfg.ttl)
-	}()
-	return out, nil
+	}
 }
 
 func defaultCacheKey(req Request) string {

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"iter"
 	"regexp"
 	"strings"
 )
@@ -51,11 +52,21 @@ func (g *guard) Generate(ctx context.Context, req Request) (*Response, error) {
 	return g.c.Generate(ctx, req)
 }
 
-func (g *guard) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	if err := g.run(ctx, req); err != nil {
-		return nil, err
+func (g *guard) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		if err := g.run(ctx, req); err != nil {
+			yield(Chunk{}, err)
+			return
+		}
+		for chunk, err := range g.c.Stream(ctx, req) {
+			if !yield(chunk, err) {
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
 	}
-	return g.c.Stream(ctx, req)
 }
 
 // inputText 汇总请求里"用户可控"的文本(System 与工具结果不算,以免误伤系统提示/工具返回)。
@@ -158,7 +169,7 @@ func MaxInputLen(n int) Check {
 type OutputCheck func(ctx context.Context, content string) error
 
 // GuardOutput 包一层 client:Generate/Stream 结束后检查模型输出,任一 OutputCheck 命中则
-// 返回错误(Generate 返 error;Stream 的终态 Chunk 会带 Err)。与 Guard(输入)对称使用。
+// 返回错误(Generate 返 error;Stream 通过迭代器的 error 值返回)。与 Guard(输入)对称使用。
 func GuardOutput(c Client, checks ...OutputCheck) Client {
 	return &outputGuard{c: c, checks: checks}
 }
@@ -188,29 +199,25 @@ func (g *outputGuard) Generate(ctx context.Context, req Request) (*Response, err
 	return resp, nil
 }
 
-func (g *outputGuard) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	src, err := g.c.Stream(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	out := make(chan Chunk)
-	go func() {
-		defer close(out)
+func (g *outputGuard) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
 		var buf strings.Builder
-		for ch := range src {
-			if ch.Delta != "" {
-				buf.WriteString(ch.Delta)
+		for chunk, err := range g.c.Stream(ctx, req) {
+			if err != nil {
+				yield(chunk, err)
+				return
 			}
-			if ch.Done {
-				if err := g.runChecks(ctx, buf.String()); err != nil {
-					out <- Chunk{Err: err}
-					return
-				}
+			if chunk.Delta != "" {
+				buf.WriteString(chunk.Delta)
 			}
-			out <- ch
+			if !yield(chunk, nil) {
+				return
+			}
 		}
-	}()
-	return out, nil
+		if err := g.runChecks(ctx, buf.String()); err != nil {
+			yield(Chunk{}, err)
+		}
+	}
 }
 
 // Toxic 拦截模型输出中的敏感/有害内容(大小写不敏感子串匹配)。

@@ -55,7 +55,7 @@ func TestExpandString_File(t *testing.T) {
 func TestExpand_Struct(t *testing.T) {
 	t.Setenv("BEAUTY_DB_PASS", "p@ss")
 	type cfg struct {
-		DSN string
+		DSN    string
 		Nested struct {
 			Token string
 		}

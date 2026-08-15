@@ -73,10 +73,10 @@ func TestMergeConsecutive_EmptyContent(t *testing.T) {
 func TestMergeMessagesHook(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "done"}}}
 	r := &agent.Runner{Client: fc, Hooks: agent.Hooks{BeforeModel: agent.MergeMessagesHook("\n\n")}}
-	_, err := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{
+	_, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{)
 		{Role: llm.User, Content: "一"},
 		{Role: llm.User, Content: "二"},
-	}}).Final()
+	}})).Final()
 	if err != nil {
 		t.Fatal(err)
 	}

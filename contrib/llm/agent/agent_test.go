@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"testing"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -26,8 +27,8 @@ func (f *fakeClient) Generate(_ context.Context, req llm.Request) (*llm.Response
 	return r, nil
 }
 
-func (f *fakeClient) Stream(context.Context, llm.Request) (<-chan llm.Chunk, error) {
-	return nil, errors.New("unused")
+func (f *fakeClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return unusedStream()
 }
 
 func echoTool() agent.Tool {
@@ -44,7 +45,7 @@ func TestRunner_ToolLoop(t *testing.T) {
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}}
 
-	out := r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -79,7 +80,7 @@ func TestRunner_UnknownTool(t *testing.T) {
 		{Content: "recovered"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -103,7 +104,7 @@ func TestRunner_ToolError(t *testing.T) {
 		{Content: "ok"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{failing}}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	last := fc.lastReq.Messages
@@ -117,7 +118,7 @@ func TestRunner_MaxSteps(t *testing.T) {
 	loop := &llm.Response{ToolCalls: []llm.ToolCall{{ID: "c", Name: "echo"}}}
 	fc := &fakeClient{steps: []*llm.Response{loop, loop, loop}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}, MaxSteps: 3}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	resp, err := out.Final()
 	if !errors.Is(err, agent.ErrMaxSteps) {
 		t.Fatalf("应返回 ErrMaxSteps, got %v", err)
@@ -135,7 +136,7 @@ func TestRunner_NoToolAndImmutability(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "hi"}}}
 	r := &agent.Runner{Client: fc}
 	in := []llm.Message{{Role: llm.User, Content: "yo"}}
-	out := r.Run(context.Background(), llm.Request{Model: "m", Messages: in})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m", Messages: in}))
 	resp, err := out.Final()
 	if err != nil || resp.Content != "hi" {
 		t.Fatalf("resp=%+v err=%v", resp, err)

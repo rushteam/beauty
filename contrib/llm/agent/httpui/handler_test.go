@@ -3,6 +3,7 @@ package httpui_test
 import (
 	"bufio"
 	"context"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,30 +21,15 @@ type stubAgent struct {
 
 func (s stubAgent) Info() agent.Info { return agent.Info{Name: s.name} }
 
-func (s stubAgent) Run(ctx context.Context, req llm.Request) agent.RunOutcome {
-	return agent.RunOutcome{
-		Status:   agent.StatusDone,
-		RunID:    "run-test",
-		Response: &llm.Response{Content: "ok"},
+func (s stubAgent) Run(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		yield(agent.Event{Type: agent.EventStep, RunID: "run-test", Response: &llm.Response{Content: "hi"}}, nil)
+		yield(agent.Event{Type: agent.EventFinal, RunID: "run-test", Response: &llm.Response{Content: "ok"}}, nil)
 	}
 }
 
-func (s stubAgent) Continue(ctx context.Context, runID string, resolutions []agent.Resolution) agent.RunOutcome {
-	return s.Run(ctx, llm.Request{})
-}
-
-func (s stubAgent) RunStream(ctx context.Context, req llm.Request) <-chan agent.Event {
-	ch := make(chan agent.Event, 2)
-	go func() {
-		defer close(ch)
-		ch <- agent.Event{Type: agent.EventStep, RunID: "run-test", Response: &llm.Response{Content: "hi"}}
-		ch <- agent.Event{Type: agent.EventFinal, RunID: "run-test", Response: &llm.Response{Content: "ok"}}
-	}()
-	return ch
-}
-
-func (s stubAgent) ContinueStream(ctx context.Context, runID string, resolutions []agent.Resolution) <-chan agent.Event {
-	return s.RunStream(ctx, llm.Request{})
+func (s stubAgent) Continue(_ context.Context, _ string, _ []agent.Resolution, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return s.Run(context.Background(), llm.Request{})
 }
 
 func TestHandlerRunSSE(t *testing.T) {

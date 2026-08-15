@@ -400,7 +400,7 @@ Combine `pkg/middleware/tenant` with `TenantKeyExtractor` for per-tenant quotas 
 import (
     "github.com/rushteam/beauty/pkg/middleware/ratelimit"
     "github.com/rushteam/beauty/pkg/middleware/tenant"
-    "github.com/rushteam/beauty/pkg/service/propagation"
+    "github.com/rushteam/beauty/pkg/metadata/propagation"
 )
 
 rl := ratelimit.NewRateLimitMiddleware(ratelimit.Config{

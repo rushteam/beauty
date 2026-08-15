@@ -48,6 +48,30 @@ func TestRoomLifecycle(t *testing.T) {
 	}
 }
 
+func TestDrainWaitingWithPlayersSkipsOnDrain(t *testing.T) {
+	var drainCalled bool
+	m := gameroom.New(gameroom.WithHooks(gameroom.Hooks{
+		OnDrain: func(string) { drainCalled = true },
+	}))
+	defer m.Stop()
+	_, err := m.Allocate(gameroom.Spec{ID: "r4", MaxPlayers: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Join("r4", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Drain("r4"); err != nil {
+		t.Fatal(err)
+	}
+	if drainCalled {
+		t.Fatal("OnDrain should not fire for non-running room")
+	}
+	if m.Get("r4") == nil {
+		t.Fatal("room with players should remain")
+	}
+}
+
 func TestDrainEmptyWaitingRoom(t *testing.T) {
 	m := gameroom.New()
 	defer m.Stop()

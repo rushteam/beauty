@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"iter"
 	"sort"
 	"strings"
 	"sync"
@@ -88,10 +89,7 @@ type teamResume struct {
 	base    llm.Request
 }
 
-var (
-	_ Agent       = (*Team)(nil)
-	_ StreamAgent = (*Team)(nil)
-)
+var _ Agent = (*Team)(nil)
 
 func (tm *Team) ensureStore() {
 	if tm.Store == nil {
@@ -103,35 +101,44 @@ func (tm *Team) cp() OrchestratorCheckpoint {
 	return OrchestratorCheckpoint{Store: tm.Store, Name: tm.Name}
 }
 
-// LoadRunTree 从 checkpoint 事件日志构建编排树。
 func (tm *Team) LoadRunTree(ctx context.Context, runID string) (*checkpoint.RunNode, error) {
 	tm.ensureStore()
 	return LoadRunTreeFromStore(ctx, tm.Store, runID)
 }
 
-// LoadUIEvents 读取 run 的全部 checkpoint 事件。
 func (tm *Team) LoadUIEvents(ctx context.Context, runID string) ([]checkpoint.Event, error) {
 	tm.ensureStore()
 	return LoadUIEventsFromStore(ctx, tm.Store, runID)
 }
 
-// Run 从 Entry 起循环直到无 HANDOFF 或 Paused/Error。
-func (tm *Team) Run(ctx context.Context, req llm.Request) RunOutcome {
-	tm.ensureStore()
-	if len(tm.Members) == 0 {
-		return outcomeError("", nil, nil, fmt.Errorf("agent: team has no members"))
+func (tm *Team) Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		tm.ensureStore()
+		if len(tm.Members) == 0 {
+			yield(Event{Type: EventError, Err: fmt.Errorf("agent: team has no members"), AgentName: tm.Name}, fmt.Errorf("agent: team has no members"))
+			return
+		}
+		current := tm.Entry
+		if current == "" {
+			yield(Event{Type: EventError, Err: fmt.Errorf("agent: team entry is empty"), AgentName: tm.Name}, fmt.Errorf("agent: team entry is empty"))
+			return
+		}
+		runID := newRunID()
+		tracker := &handoffTracker{cfg: tm.Config}
+		tm.cp().Started(ctx, runID, req)
+		out := tm.loop(ctx, runID, req, current, req, tracker, true, yield, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: tm.Name}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements, AgentName: tm.Name}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err, AgentName: tm.Name}, out.Err)
+		}
 	}
-	current := tm.Entry
-	if current == "" {
-		return outcomeError("", nil, nil, fmt.Errorf("agent: team entry is empty"))
-	}
-	runID := newRunID()
-	tracker := &handoffTracker{cfg: tm.Config}
-	tm.cp().Started(ctx, runID, req)
-	return tm.loop(ctx, runID, req, current, req, tracker, true)
 }
 
-func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, current string, input llm.Request, tracker *handoffTracker, first bool) RunOutcome {
+func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, current string, input llm.Request, tracker *handoffTracker, first bool, yield func(Event, error) bool, opts ...Option) RunOutcome {
 	cp := tm.cp()
 	prompt := tm.handoffPrompt()
 	var last *llm.Response
@@ -156,7 +163,8 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 			runCtx = WithTrigger(ctx, TriggerTransfer, current)
 		}
 		src := "team:" + current
-		out := member.Run(runCtx, stepReq)
+
+		out := tm.runMember(runCtx, member, current, stepReq, yield, opts...)
 		cp.Spawned(ctx, runID, out.RunID, src, len(tracker.history))
 		switch out.Status {
 		case StatusPaused:
@@ -209,8 +217,53 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 	}
 }
 
-// Continue 恢复暂停的成员,再继续移交循环。
-func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
+func (tm *Team) runMember(ctx context.Context, member Agent, name string, req llm.Request, yield func(Event, error) bool, opts ...Option) RunOutcome {
+	display := memberDisplayName(member, name)
+	tt, tid := triggerFrom(ctx)
+	var final RunOutcome
+	for ev, err := range member.Run(ctx, req, opts...) {
+		if err != nil {
+			return outcomeError("", nil, nil, err)
+		}
+		if ev.AgentName == "" {
+			ev.AgentName = display
+		}
+		ev.TriggerType = tt
+		ev.TriggerID = tid
+		switch ev.Type {
+		case EventFinal:
+			final = outcomeDone(ev.RunID, ev.Response, nil)
+		case EventPaused:
+			return outcomePaused(ev.RunID, ev.Response, nil, ev.Requirements)
+		case EventError:
+			return outcomeError(ev.RunID, ev.Response, nil, ev.Err)
+		default:
+			if !yield(ev, nil) {
+				return outcomeError(ev.RunID, ev.Response, nil, ctx.Err())
+			}
+		}
+	}
+	if final.Status == StatusDone {
+		return final
+	}
+	return outcomeError("", nil, nil, fmt.Errorf("agent: team member %q ended without final", name))
+}
+
+func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		out := tm.continueSync(ctx, runID, resolutions, yield, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: tm.Name}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements, AgentName: tm.Name}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err, AgentName: tm.Name}, out.Err)
+		}
+	}
+}
+
+func (tm *Team) continueSync(ctx context.Context, runID string, resolutions []Resolution, yield func(Event, error) bool, opts ...Option) RunOutcome {
 	tm.ensureStore()
 	cp := tm.cp()
 	cp.Resumed(ctx, runID)
@@ -219,7 +272,10 @@ func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolu
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: team unknown runID %q", runID))
 	}
 	tr := rv.(teamResume)
-	out := tr.member.Continue(ctx, tr.childID, resolutions)
+	out := collectMemberContinue(ctx, tr.member, tr.childID, resolutions, func(e Event) {
+		e.AgentName = memberDisplayName(tr.member, tr.current)
+		yield(e, nil)
+	}, opts...)
 	switch out.Status {
 	case StatusPaused:
 		src := "team:" + tr.current
@@ -263,126 +319,9 @@ func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolu
 			handoffInput = firstUserContent(tr.input)
 		}
 		input := llm.Request{Model: tr.base.Model, Messages: []llm.Message{{Role: llm.User, Content: handoffInput}}}
-		return tm.loop(ctx, runID, tr.base, target, input, tr.tracker, false)
+		return tm.loop(ctx, runID, tr.base, target, input, tr.tracker, false, yield, opts...)
 	default:
 		return outcomeError(runID, out.Response, out.Messages, fmt.Errorf("agent: team unexpected status %q", out.Status))
-	}
-}
-
-// RunStream 流式跑团队:透传成员中间事件;中间成员 final 内吞用于解析 HANDOFF;
-// 仅最终成员的 EventFinal 外发。Paused 时发 EventPaused。
-func (tm *Team) RunStream(ctx context.Context, req llm.Request) <-chan Event {
-	ch := make(chan Event, 32)
-	go func() {
-		defer close(ch)
-		if len(tm.Members) == 0 {
-			ch <- Event{Type: EventError, Err: fmt.Errorf("agent: team has no members")}
-			return
-		}
-		current := tm.Entry
-		if current == "" {
-			ch <- Event{Type: EventError, Err: fmt.Errorf("agent: team entry is empty")}
-			return
-		}
-		tracker := &handoffTracker{cfg: tm.Config}
-		prompt := tm.handoffPrompt()
-		input := req
-		first := true
-		for {
-			if err := ctx.Err(); err != nil {
-				ch <- Event{Type: EventError, Err: err}
-				return
-			}
-			member, ok := tm.Members[current]
-			if !ok {
-				ch <- Event{Type: EventError, Err: fmt.Errorf("agent: team: unknown member %q", current)}
-				return
-			}
-			stepReq := input
-			if prompt != "" {
-				if stepReq.System != "" {
-					stepReq.System += "\n\n"
-				}
-				stepReq.System += prompt
-			}
-			runCtx := ctx
-			if !first {
-				runCtx = WithTrigger(ctx, TriggerTransfer, current)
-			}
-
-			finalEv, paused, rerr := tm.streamMember(runCtx, member, current, stepReq, ch)
-			if rerr != nil {
-				finalEv.Type, finalEv.Err = EventError, rerr
-				ch <- finalEv
-				return
-			}
-			if paused {
-				ch <- finalEv // EventPaused
-				return
-			}
-			resp := finalEv.Response
-			target, handoffInput, isHandoff := parseHandoff(respContent(resp))
-			if !isHandoff {
-				ch <- finalEv
-				return
-			}
-			if _, exists := tm.Members[target]; !exists {
-				finalEv.Type = EventError
-				finalEv.Err = fmt.Errorf("agent: team: member %q tried to hand off to unknown member %q", current, target)
-				ch <- finalEv
-				return
-			}
-			if err := tracker.record(target); err != nil {
-				finalEv.Type, finalEv.Err = EventError, err
-				ch <- finalEv
-				return
-			}
-			if handoffInput == "" {
-				handoffInput = firstUserContent(input)
-			}
-			current = target
-			input = llm.Request{Model: req.Model, Messages: []llm.Message{{Role: llm.User, Content: handoffInput}}}
-			first = false
-		}
-	}()
-	return ch
-}
-
-func (tm *Team) streamMember(ctx context.Context, member Agent, name string, req llm.Request, ch chan<- Event) (ev Event, paused bool, err error) {
-	if sa, ok := member.(StreamAgent); ok {
-		var fev Event
-		for e := range sa.RunStream(ctx, req) {
-			switch e.Type {
-			case EventFinal:
-				fev = e
-			case EventPaused:
-				return e, true, nil
-			case EventError:
-				return e, false, e.Err
-			default:
-				ch <- e
-			}
-		}
-		return fev, false, nil
-	}
-	out := member.Run(ctx, req)
-	tt, tid := triggerFrom(ctx)
-	switch out.Status {
-	case StatusDone:
-		return Event{
-			Type: EventFinal, Response: out.Response, RunID: out.RunID,
-			AgentName: memberDisplayName(member, name), TriggerType: tt, TriggerID: tid,
-		}, false, nil
-	case StatusPaused:
-		return Event{
-			Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements,
-			AgentName: memberDisplayName(member, name), TriggerType: tt, TriggerID: tid,
-		}, true, nil
-	default:
-		return Event{
-			Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err,
-			AgentName: memberDisplayName(member, name), TriggerType: tt, TriggerID: tid,
-		}, false, out.Err
 	}
 }
 
@@ -393,13 +332,6 @@ func memberDisplayName(m Agent, key string) string {
 	return key
 }
 
-// ContinueStream 是 Continue 的流式版。
-func (tm *Team) ContinueStream(ctx context.Context, runID string, resolutions []Resolution) <-chan Event {
-	return streamAgentOutcome(tm.Name, func(emit func(Event)) RunOutcome {
-		return tm.Continue(ctx, runID, resolutions)
-	})
-}
-
 func respContent(r *llm.Response) string {
 	if r == nil {
 		return ""
@@ -407,7 +339,6 @@ func respContent(r *llm.Response) string {
 	return r.Content
 }
 
-// Info 实现 Agent。
 func (tm *Team) Info() Info {
 	var tools []llm.ToolDef
 	for _, name := range tm.memberNames() {

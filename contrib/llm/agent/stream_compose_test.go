@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func TestRunner_RunStream(t *testing.T) {
 
 	var types []agent.EventType
 	var final string
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}) {
 		types = append(types, ev.Type)
 		if ev.Type == agent.EventFinal && ev.Response != nil {
 			final = ev.Response.Content
@@ -51,7 +52,7 @@ func TestRunner_Cancel(t *testing.T) {
 	r := &agent.Runner{Client: fc}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := r.RunStream(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "x"}}})
+	ch := r.Run(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "x"}}})
 
 	select {
 	case <-entered:
@@ -62,7 +63,7 @@ func TestRunner_Cancel(t *testing.T) {
 	close(block)
 
 	var gotErr error
-	for ev := range ch {
+	for ev, err := range ch {
 		if ev.Type == agent.EventError {
 			gotErr = ev.Err
 		}
@@ -94,8 +95,8 @@ func (b *blockingClient) Generate(ctx context.Context, _ llm.Request) (*llm.Resp
 	return &llm.Response{Content: "ok"}, nil
 }
 
-func (b *blockingClient) Stream(context.Context, llm.Request) (<-chan llm.Chunk, error) {
-	return nil, errors.New("unused")
+func (b *blockingClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return unusedStream()
 }
 
 func TestPermission_Deny(t *testing.T) {
@@ -106,7 +107,7 @@ func TestPermission_Deny(t *testing.T) {
 		{Content: "ok"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{denied}}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatal(err)
 	}
 	got := fc.lastReq.Messages[len(fc.lastReq.Messages)-1].Content
@@ -115,9 +116,9 @@ func TestPermission_Deny(t *testing.T) {
 	}
 }
 
-func TestPermission_AskCompatApproval(t *testing.T) {
+func TestPermission_AskViaPermitAsk(t *testing.T) {
 	ttool := echoTool()
-	ttool.Approval = true // 旧字段应视为 Ask
+	ttool.Permission = agent.PermitAsk
 	called := false
 	fc := &fakeClient{steps: []*llm.Response{
 		{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{}`)}}},
@@ -128,11 +129,11 @@ func TestPermission_AskCompatApproval(t *testing.T) {
 		called = true
 		return agent.Resolution{Approved: true}, nil
 	})
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatal(err)
 	}
 	if !called {
-		t.Fatal("Approval=true 应触发 Ask")
+		t.Fatal("PermitAsk 应触发 Ask")
 	}
 }
 
@@ -147,7 +148,7 @@ func TestAgentAsTool(t *testing.T) {
 		Client: parentFC,
 		Tools:  []agent.Tool{agent.AgentAsTool("researcher", "研究", sub, agent.WithAgentToolModel("m"))},
 	}
-	out := parent.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(parent.Run(context.Background(), llm.Request{Model: "m"}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -168,10 +169,10 @@ func TestChain(t *testing.T) {
 		{Name: "draft", Runner: a, Model: "m"},
 		{Name: "polish", Runner: b, Model: "m", System: "polish"},
 	}}
-	out := ch.Run(context.Background(), llm.Request{
+	out := agent.CollectOutcome(ch.Run(context.Background(), llm.Request{
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "write"}},
-	})
+	}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)

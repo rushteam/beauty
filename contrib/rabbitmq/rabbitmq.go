@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -190,7 +191,24 @@ func (p *Publisher) publishLocked(ctx context.Context, msg mq.Message) error {
 }
 
 func isReconnectable(err error) bool {
-	return errors.Is(err, amqp.ErrClosed)
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, amqp.ErrClosed) {
+		return true
+	}
+	var amqpErr *amqp.Error
+	if errors.As(err, &amqpErr) {
+		switch amqpErr.Code {
+		case 320, 501, 504, 541: // connection/channel forced or not open
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "channel/connection is not open") ||
+		strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "use of closed network connection")
 }
 
 // Close 关闭连接。

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"iter"
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -33,14 +34,27 @@ type BestOfN struct {
 
 var _ Agent = (*BestOfN)(nil)
 
-// Run 并行采样并择优。
-func (b *BestOfN) Run(ctx context.Context, req llm.Request) RunOutcome {
+func (b *BestOfN) Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		out := b.runSync(ctx, req, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err}, out.Err)
+		}
+	}
+}
+
+func (b *BestOfN) runSync(ctx context.Context, req llm.Request, opts ...Option) RunOutcome {
 	if b.Agent == nil {
 		return outcomeError("", nil, nil, fmt.Errorf("agent: BestOfN has nil Agent"))
 	}
 	n := b.N
 	if n <= 1 {
-		return b.Agent.Run(ctx, req)
+		return CollectOutcome(b.Agent.Run(ctx, req, opts...))
 	}
 
 	outs := make([]RunOutcome, n)
@@ -49,7 +63,7 @@ func (b *BestOfN) Run(ctx context.Context, req llm.Request) RunOutcome {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			outs[i] = b.Agent.Run(ctx, req)
+			outs[i] = CollectOutcome(b.Agent.Run(ctx, req, opts...))
 		}(i)
 	}
 	wg.Wait()
@@ -97,12 +111,13 @@ func (b *BestOfN) Run(ctx context.Context, req llm.Request) RunOutcome {
 	return outcomeDone(runID, cands[idx], nil)
 }
 
-// Continue 对 BestOfN 无暂停态,返回错误。
-func (b *BestOfN) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
-	return outcomeError(runID, nil, nil, fmt.Errorf("agent: BestOfN.Continue not supported"))
+func (b *BestOfN) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		err := fmt.Errorf("agent: BestOfN.Continue not supported")
+		yield(Event{Type: EventError, RunID: runID, Err: err}, err)
+	}
 }
 
-// Info 实现 Agent。
 func (b *BestOfN) Info() Info {
 	if b.Agent == nil {
 		return Info{}
@@ -133,8 +148,21 @@ type verifyResume struct {
 	childID string
 }
 
-// Run 执行校验循环。
-func (v *VerifyLoop) Run(ctx context.Context, req llm.Request) RunOutcome {
+func (v *VerifyLoop) Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		out := v.runStart(ctx, req, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err}, out.Err)
+		}
+	}
+}
+
+func (v *VerifyLoop) runStart(ctx context.Context, req llm.Request, opts ...Option) RunOutcome {
 	if v.Agent == nil {
 		return outcomeError("", nil, nil, fmt.Errorf("agent: VerifyLoop has nil Agent"))
 	}
@@ -144,10 +172,10 @@ func (v *VerifyLoop) Run(ctx context.Context, req llm.Request) RunOutcome {
 	runID := newRunID()
 	msgs := make([]llm.Message, len(req.Messages))
 	copy(msgs, req.Messages)
-	return v.runRounds(ctx, runID, req, msgs, 0)
+	return v.runRounds(ctx, runID, req, msgs, 0, opts...)
 }
 
-func (v *VerifyLoop) runRounds(ctx context.Context, runID string, req llm.Request, msgs []llm.Message, startRound int) RunOutcome {
+func (v *VerifyLoop) runRounds(ctx context.Context, runID string, req llm.Request, msgs []llm.Message, startRound int, opts ...Option) RunOutcome {
 	rounds := v.MaxRounds
 	if rounds <= 0 {
 		rounds = 3
@@ -158,7 +186,7 @@ func (v *VerifyLoop) runRounds(ctx context.Context, runID string, req llm.Reques
 			return outcomeError(runID, last, msgs, err)
 		}
 		req.Messages = msgs
-		out := v.Agent.Run(ctx, req)
+		out := CollectOutcome(v.Agent.Run(ctx, req, opts...))
 		switch out.Status {
 		case StatusPaused:
 			snap := &RunSnapshot{Kind: "verify", Request: req, Messages: cloneMessages(msgs), ChildRunID: out.RunID, Step: round, Requirements: out.Requirements}
@@ -190,8 +218,21 @@ func (v *VerifyLoop) runRounds(ctx context.Context, runID string, req llm.Reques
 	return outcomeDone(runID, last, msgs)
 }
 
-// Continue 恢复暂停的校验轮。
-func (v *VerifyLoop) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
+func (v *VerifyLoop) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		out := v.continueSync(ctx, runID, resolutions, opts...)
+		switch out.Status {
+		case StatusDone:
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID}, nil)
+		case StatusPaused:
+			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements}, nil)
+		default:
+			yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err}, out.Err)
+		}
+	}
+}
+
+func (v *VerifyLoop) continueSync(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) RunOutcome {
 	if v.Store == nil {
 		v.Store = NewMemoryRunStore()
 	}
@@ -200,7 +241,7 @@ func (v *VerifyLoop) Continue(ctx context.Context, runID string, resolutions []R
 		return outcomeError(runID, nil, nil, fmt.Errorf("agent: VerifyLoop unknown runID %q", runID))
 	}
 	vr := rv.(verifyResume)
-	out := v.Agent.Continue(ctx, vr.childID, resolutions)
+	out := CollectOutcome(v.Agent.Continue(ctx, vr.childID, resolutions, opts...))
 	switch out.Status {
 	case StatusPaused:
 		v.resumes.Store(runID, verifyResume{msgs: vr.msgs, req: vr.req, round: vr.round, childID: out.RunID})
@@ -221,7 +262,7 @@ func (v *VerifyLoop) Continue(ctx context.Context, runID string, resolutions []R
 					llm.Message{Role: llm.Assistant, Content: last.Content},
 					llm.Message{Role: llm.User, Content: feedback},
 				)
-				return v.runRounds(ctx, runID, vr.req, msgs, vr.round+1)
+				return v.runRounds(ctx, runID, vr.req, msgs, vr.round+1, opts...)
 			}
 		}
 		return outcomeDone(runID, last, msgs)
@@ -230,7 +271,6 @@ func (v *VerifyLoop) Continue(ctx context.Context, runID string, resolutions []R
 	}
 }
 
-// Info 实现 Agent。
 func (v *VerifyLoop) Info() Info {
 	if v.Agent == nil {
 		return Info{}

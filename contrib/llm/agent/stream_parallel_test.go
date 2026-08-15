@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"iter"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,27 +28,31 @@ func (c *streamScriptClient) Generate(_ context.Context, _ llm.Request) (*llm.Re
 	return r, nil
 }
 
-func (c *streamScriptClient) Stream(_ context.Context, _ llm.Request) (<-chan llm.Chunk, error) {
+func (c *streamScriptClient) Stream(_ context.Context, _ llm.Request) iter.Seq2[llm.Chunk, error] {
 	chunks := c.streams[c.si]
 	c.si++
-	ch := make(chan llm.Chunk, len(chunks))
-	for _, c := range chunks {
-		ch <- c
+	return func(yield func(llm.Chunk, error) bool) {
+		for _, chunk := range chunks {
+			if !yield(chunk, nil) {
+				return
+			}
+		}
 	}
-	close(ch)
-	return ch, nil
 }
 
 func TestRunStream_Tokens(t *testing.T) {
 	fc := &streamScriptClient{
 		streams: [][]llm.Chunk{
-			{{Delta: "Hel"}, {Delta: "lo"}, {Done: true}},
+			{{Delta: "Hel"}, {Delta: "lo"}},
 		},
 	}
 	r := &agent.Runner{Client: fc}
 	var tokens []string
 	var final string
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}) {
+		if err != nil {
+			t.Fatal(err)
+		}
 		switch ev.Type {
 		case agent.EventToken:
 			tokens = append(tokens, ev.Result)
@@ -66,14 +71,17 @@ func TestRunStream_StreamToolCalls(t *testing.T) {
 	fc := &streamScriptClient{
 		streams: [][]llm.Chunk{
 			{
-				{Done: true, ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"x":1}`)}}},
+				{ToolCalls: []llm.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"x":1}`)}}},
 			},
-			{{Delta: "done"}, {Done: true}},
+			{{Delta: "done"}},
 		},
 	}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}}
 	var final string
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m"}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
+		if err != nil {
+			t.Fatal(err)
+		}
 		if ev.Type == agent.EventFinal {
 			final = ev.Response.Content
 		}
@@ -112,7 +120,7 @@ func TestParallelTools(t *testing.T) {
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{slow("a"), slow("b")}}
 	start := time.Now()
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +171,7 @@ func TestParallelTools_Disabled(t *testing.T) {
 		Tools:         []agent.Tool{mk("a"), mk("b")},
 		ParallelTools: agent.Bool(false),
 	}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatal(err)
 	}
 	if len(order) != 2 || order[0] != "a" || order[1] != "b" {

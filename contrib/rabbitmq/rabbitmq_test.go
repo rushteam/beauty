@@ -1,6 +1,7 @@
 package rabbitmq
 
 import (
+	"fmt"
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -37,6 +38,19 @@ func TestFromDeliveryFallbackTopic(t *testing.T) {
 	msg := fromDelivery(d, "my.topic")
 	if msg.Topic != "my.topic" {
 		t.Errorf("expected fallback topic, got %q", msg.Topic)
+	}
+}
+
+func TestIsReconnectable(t *testing.T) {
+	if !isReconnectable(amqp.ErrClosed) {
+		t.Fatal("expected ErrClosed to be reconnectable")
+	}
+	err := &amqp.Error{Code: 501, Reason: "channel/connection is not open"}
+	if !isReconnectable(err) {
+		t.Fatal("expected AMQP 501 to be reconnectable")
+	}
+	if isReconnectable(fmt.Errorf("validation failed")) {
+		t.Fatal("expected validation error not reconnectable")
 	}
 }
 

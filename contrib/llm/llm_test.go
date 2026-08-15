@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,16 +66,12 @@ func TestOpenAI_Generate(t *testing.T) {
 
 func TestOpenAI_Stream(t *testing.T) {
 	c := openaiMock(t)
-	ch, err := c.Stream(context.Background(), llm.Request{Model: "gpt-4o", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
-	if err != nil {
-		t.Fatalf("stream: %v", err)
-	}
-	got, done := collect(t, ch)
+	got, hasUsage := collect(t, c.Stream(context.Background(), llm.Request{Model: "gpt-4o", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}))
 	if got != "hello" {
 		t.Fatalf("stream text = %q, want hello", got)
 	}
-	if !done {
-		t.Fatal("应收到 Done")
+	if !hasUsage {
+		t.Fatal("应收到 Usage")
 	}
 }
 
@@ -268,13 +265,9 @@ func TestAnthropic_GenerateAndStream(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 
-	ch, err := c.Stream(context.Background(), llm.Request{Model: "claude-x", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
-	if err != nil {
-		t.Fatalf("stream: %v", err)
-	}
-	got, done := collect(t, ch)
-	if got != "foobar" || !done {
-		t.Fatalf("stream = %q done=%v", got, done)
+	got, hasUsage := collect(t, c.Stream(context.Background(), llm.Request{Model: "claude-x", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}))
+	if got != "foobar" || !hasUsage {
+		t.Fatalf("stream = %q hasUsage=%v", got, hasUsage)
 	}
 }
 
@@ -313,19 +306,19 @@ func TestMetered(t *testing.T) {
 	}
 }
 
-func collect(t *testing.T, ch <-chan llm.Chunk) (text string, done bool) {
+func collect(t *testing.T, seq iter.Seq2[llm.Chunk, error]) (text string, hasUsage bool) {
 	t.Helper()
 	var sb strings.Builder
-	for c := range ch {
-		if c.Err != nil {
-			t.Fatalf("stream chunk err: %v", c.Err)
+	for c, err := range seq {
+		if err != nil {
+			t.Fatalf("stream err: %v", err)
 		}
 		sb.WriteString(c.Delta)
-		if c.Done {
-			done = true
+		if c.Usage != nil {
+			hasUsage = true
 		}
 	}
-	return sb.String(), done
+	return sb.String(), hasUsage
 }
 
 // ---- Cache ----
@@ -394,20 +387,12 @@ func TestCache_Stream(t *testing.T) {
 	cc := llm.Cache(cli, llm.NewMemoryCacheStore(100))
 
 	req := llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}
-	ch, err := cc.Stream(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, _ := collect(t, ch)
+	got, _ := collect(t, cc.Stream(context.Background(), req))
 	if got != "abcd" {
 		t.Fatalf("first stream=%q", got)
 	}
 	// second call should be cached
-	ch2, err := cc.Stream(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got2, _ := collect(t, ch2)
+	got2, _ := collect(t, cc.Stream(context.Background(), req))
 	if got2 != "abcd" {
 		t.Fatalf("cached stream=%q", got2)
 	}
@@ -468,14 +453,10 @@ func TestOutputGuard_Stream(t *testing.T) {
 	cli := openaiMock(t)
 	safe := llm.GuardOutput(cli, llm.MaxOutputLen(3))
 
-	ch, err := safe.Stream(context.Background(), llm.Request{Model: "x", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var gotErr error
-	for c := range ch {
-		if c.Err != nil {
-			gotErr = c.Err
+	for _, err := range safe.Stream(context.Background(), llm.Request{Model: "x", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}) {
+		if err != nil {
+			gotErr = err
 		}
 	}
 	if gotErr == nil || !strings.Contains(gotErr.Error(), "max_output_len") {

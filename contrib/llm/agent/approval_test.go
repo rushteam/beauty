@@ -25,7 +25,7 @@ func TestPause_ContinueApproved(t *testing.T) {
 		{Content: "done"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{gatedEcho()}}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if !out.IsPaused() || len(out.Requirements) != 1 {
 		t.Fatalf("want paused with 1 req, got %+v", out)
 	}
@@ -48,7 +48,7 @@ func TestPause_ContinueDenied(t *testing.T) {
 		{Content: "ok, 换个方式"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{gatedEcho()}}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if !out.IsPaused() {
 		t.Fatalf("want paused, got %s", out.Status)
 	}
@@ -79,7 +79,7 @@ func TestSyncHITL_Approve(t *testing.T) {
 		called = true
 		return agent.Resolution{Approved: true}, nil
 	})
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	resp, err := out.Final()
 	if err != nil || resp.Content != "done" {
 		t.Fatalf("resp=%+v err=%v", resp, err)
@@ -99,7 +99,7 @@ func TestSyncHITL_ApproveError(t *testing.T) {
 	r := agent.SyncHITL(inner, func(context.Context, llm.ToolCall) (agent.Resolution, error) {
 		return agent.Resolution{}, wantErr
 	})
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if out.Status != agent.StatusError || !errors.Is(out.Err, wantErr) {
 		t.Fatalf("want error %v, got status=%s err=%v", wantErr, out.Status, out.Err)
 	}
@@ -114,7 +114,7 @@ func TestPause_NotGated(t *testing.T) {
 		{Content: "done"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{echoTool()}}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if _, err := out.Final(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestPause_AtomicRound(t *testing.T) {
 		{Content: "done"},
 	}}
 	r := &agent.Runner{Client: fc, Tools: []agent.Tool{ask, allow}, ParallelTools: agent.Bool(false)}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if !out.IsPaused() {
 		t.Fatalf("want paused, got %s", out.Status)
 	}

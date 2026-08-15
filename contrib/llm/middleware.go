@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"iter"
 	"math"
 	"math/rand/v2"
 	"sync/atomic"
@@ -35,22 +36,36 @@ func (f *fallback) Generate(ctx context.Context, req Request) (*Response, error)
 	return nil, lastErr
 }
 
-func (f *fallback) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	if len(f.clients) == 0 {
-		return nil, ErrNoClients
-	}
-	var lastErr error
-	for _, c := range f.clients {
-		ch, err := c.Stream(ctx, req)
-		if err == nil {
-			return ch, nil
+func (f *fallback) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		if len(f.clients) == 0 {
+			yield(Chunk{}, ErrNoClients)
+			return
 		}
-		lastErr = err
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		for i, c := range f.clients {
+			started := false
+			for chunk, err := range c.Stream(ctx, req) {
+				started = true
+				if err != nil {
+					if i < len(f.clients)-1 {
+						break
+					}
+					yield(chunk, err)
+					return
+				}
+				if !yield(chunk, nil) {
+					return
+				}
+			}
+			if started {
+				return
+			}
+			if ctx.Err() != nil {
+				yield(Chunk{}, ctx.Err())
+				return
+			}
 		}
 	}
-	return nil, lastErr
 }
 
 // Retry 对 Generate/Stream 的**建立阶段**错误重试至多 attempts 次。
@@ -99,26 +114,39 @@ func (r *retry) Generate(ctx context.Context, req Request) (*Response, error) {
 	return nil, lastErr
 }
 
-func (r *retry) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	var lastErr error
-	for i := 0; i < r.attempts; i++ {
-		ch, err := r.c.Stream(ctx, req)
-		if err == nil {
-			return ch, nil
+func (r *retry) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		var lastErr error
+		for i := 0; i < r.attempts; i++ {
+			started := false
+			for chunk, err := range r.c.Stream(ctx, req) {
+				started = true
+				if err != nil {
+					yield(chunk, err)
+					return
+				}
+				if !yield(chunk, nil) {
+					return
+				}
+			}
+			if started {
+				return
+			}
+			if !r.backoff(ctx, i) {
+				break
+			}
 		}
-		lastErr = err
-		if !r.backoff(ctx, i) {
-			break
+		if lastErr != nil {
+			yield(Chunk{}, lastErr)
 		}
 	}
-	return nil, lastErr
 }
 
 // UsageHook 在一次生成完成后收到用量与耗时,用于计量/计费/埋点(接 OTel、日志、账单等由你定)。
 type UsageHook func(ctx context.Context, model string, u Usage, latency time.Duration)
 
 // Metered 包一层 client,在 Generate/Stream 结束后回调 hook 上报用量与延迟。
-// 流式场景在 channel 读完(Done/Err)后回调,累计最终 Usage。
+// 流式场景在迭代结束后回调,累计最终 Usage。
 func Metered(c Client, hook UsageHook) Client {
 	return &metered{c: c, hook: hook}
 }
@@ -137,28 +165,29 @@ func (m *metered) Generate(ctx context.Context, req Request) (*Response, error) 
 	return resp, err
 }
 
-func (m *metered) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	start := time.Now()
-	src, err := m.c.Stream(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	if m.hook == nil {
-		return src, nil
-	}
-	out := make(chan Chunk)
-	go func() {
-		defer close(out)
+func (m *metered) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		start := time.Now()
 		var usage Usage
-		for ch := range src {
-			if ch.Usage != nil {
-				usage = *ch.Usage
+		for chunk, err := range m.c.Stream(ctx, req) {
+			if err != nil {
+				yield(chunk, err)
+				return
 			}
-			out <- ch
+			if chunk.Usage != nil {
+				usage = *chunk.Usage
+			}
+			if !yield(chunk, nil) {
+				if m.hook != nil {
+					m.hook(ctx, req.Model, usage, time.Since(start))
+				}
+				return
+			}
 		}
-		m.hook(ctx, req.Model, usage, time.Since(start))
-	}()
-	return out, nil
+		if m.hook != nil {
+			m.hook(ctx, req.Model, usage, time.Since(start))
+		}
+	}
 }
 
 // ErrBudgetExceeded 表示累计 token 用量超出 Budget 设定的上限。
@@ -231,26 +260,26 @@ func (b *BudgetClient) Generate(ctx context.Context, req Request) (*Response, er
 	return resp, err
 }
 
-func (b *BudgetClient) Stream(ctx context.Context, req Request) (<-chan Chunk, error) {
-	if err := b.check(); err != nil {
-		return nil, err
-	}
-	src, err := b.c.Stream(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	out := make(chan Chunk)
-	go func() {
-		defer close(out)
-		for ch := range src {
-			if ch.Usage != nil {
-				if err := b.add(*ch.Usage); err != nil {
-					out <- Chunk{Err: err}
+func (b *BudgetClient) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error] {
+	return func(yield func(Chunk, error) bool) {
+		if err := b.check(); err != nil {
+			yield(Chunk{}, err)
+			return
+		}
+		for chunk, err := range b.c.Stream(ctx, req) {
+			if err != nil {
+				yield(chunk, err)
+				return
+			}
+			if chunk.Usage != nil {
+				if err := b.add(*chunk.Usage); err != nil {
+					yield(Chunk{}, err)
 					return
 				}
 			}
-			out <- ch
+			if !yield(chunk, nil) {
+				return
+			}
 		}
-	}()
-	return out, nil
+	}
 }

@@ -40,7 +40,7 @@ func TestMailbox_Steer_InjectBetweenTools(t *testing.T) {
 	}
 
 	var sawSteer bool
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "start"}}}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "start"}}}) {
 		if ev.Type == agent.EventSteer {
 			sawSteer = true
 		}
@@ -87,7 +87,7 @@ func TestHooks_BeforeAfter(t *testing.T) {
 			},
 		},
 	}
-	if _, err := r.Run(context.Background(), llm.Request{Model: "m"}).Final(); err != nil {
+	if _, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"})).Final(); err != nil {
 		t.Fatal(err)
 	}
 	want := "bm am bt at bm am"
@@ -111,7 +111,7 @@ func TestHooks_BeforeModelError(t *testing.T) {
 			BeforeModel: func(context.Context, int, *llm.Request) error { return want },
 		},
 	}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	_, err := out.Final()
 	if !errors.Is(err, want) {
 		t.Fatalf("got %v", err)
@@ -124,7 +124,7 @@ func TestMailbox_Steer_EventType(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "ok"}}}
 	r := &agent.Runner{Client: fc, Mailbox: mb}
 	var saw bool
-	for ev := range r.RunStream(context.Background(), llm.Request{Model: "m"}) {
+	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventSteer && ev.Result == "hi-steer" {
 			saw = true
 		}

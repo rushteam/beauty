@@ -45,6 +45,20 @@ func TestViewerTrackOnAck(t *testing.T) {
 	}
 }
 
+func TestJournalCatchUpSparseFramesNotTruncated(t *testing.T) {
+	j := replicate.NewJournal(64)
+	for _, f := range []uint64{1, 3, 10} {
+		j.Record(replicate.Delta{Frame: f})
+	}
+	batch := j.CatchUp(0, 10)
+	if batch.Truncated {
+		t.Fatal("sparse journal entries should not mark truncated")
+	}
+	if len(batch.Deltas) != 3 {
+		t.Fatalf("deltas = %d want 3", len(batch.Deltas))
+	}
+}
+
 func TestJournalCatchUpTruncated(t *testing.T) {
 	j := replicate.NewJournal(3)
 	for i := uint64(1); i <= 10; i++ {

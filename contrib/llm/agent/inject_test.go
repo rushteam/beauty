@@ -31,10 +31,10 @@ func TestMailbox_InjectSystem(t *testing.T) {
 	mb.Inject("一次性上下文")
 	mb.InjectPersistent("持久上下文")
 
-	_, err := r.Run(context.Background(), llm.Request{
+	_, err := agent.CollectOutcome(r.Run(context.Background(), llm.Request{
 		Model:  "m",
 		System: "基础系统提示",
-	}).Final()
+	})).Final()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestMailbox_InjectSystem(t *testing.T) {
 func TestMailbox_Nil(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "ok"}}}
 	r := &agent.Runner{Client: fc}
-	out := r.Run(context.Background(), llm.Request{Model: "m"})
+	out := agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 	if _, err := out.Final(); err != nil {
 		t.Fatal(err)
 	}

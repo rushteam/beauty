@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/rushteam/beauty/contrib/llm"
 )
@@ -23,31 +24,47 @@ type syncHITL struct {
 
 func (s *syncHITL) Info() Info { return s.inner.Info() }
 
-func (s *syncHITL) Run(ctx context.Context, req llm.Request) RunOutcome {
-	return s.loop(ctx, s.inner.Run(ctx, req))
+func (s *syncHITL) Run(ctx context.Context, req llm.Request, opts ...Option) iter.Seq2[Event, error] {
+	return s.loopIter(ctx, s.inner.Run(ctx, req, opts...))
 }
 
-func (s *syncHITL) Continue(ctx context.Context, runID string, resolutions []Resolution) RunOutcome {
-	return s.loop(ctx, s.inner.Continue(ctx, runID, resolutions))
+func (s *syncHITL) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
+	return s.loopIter(ctx, s.inner.Continue(ctx, runID, resolutions, opts...))
 }
 
-func (s *syncHITL) loop(ctx context.Context, out RunOutcome) RunOutcome {
-	for out.Status == StatusPaused {
-		if s.approve == nil {
-			out.Status = StatusError
-			out.Err = fmt.Errorf("%w (run_id=%s)", ErrPaused, out.RunID)
-			return out
-		}
-		resolutions := make([]Resolution, 0, len(out.Requirements))
-		for _, rq := range out.Requirements {
-			res, err := s.approve(ctx, rq.ToolCall)
-			if err != nil {
-				return outcomeError(out.RunID, out.Response, out.Messages, fmt.Errorf("agent: sync HITL for %q: %w", rq.ToolCall.Name, err))
+func (s *syncHITL) loopIter(ctx context.Context, seq iter.Seq2[Event, error]) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		for {
+			out := CollectOutcome(seq)
+			switch out.Status {
+			case StatusDone:
+				yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID}, nil)
+				return
+			case StatusError:
+				yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: out.Err}, out.Err)
+				return
+			case StatusPaused:
+				if s.approve == nil {
+					err := fmt.Errorf("%w (run_id=%s)", ErrPaused, out.RunID)
+					yield(Event{Type: EventError, Response: out.Response, RunID: out.RunID, Err: err}, err)
+					return
+				}
+				resolutions := make([]Resolution, 0, len(out.Requirements))
+				for _, rq := range out.Requirements {
+					res, err := s.approve(ctx, rq.ToolCall)
+					if err != nil {
+						err = fmt.Errorf("agent: sync HITL for %q: %w", rq.ToolCall.Name, err)
+						yield(Event{}, err)
+						return
+					}
+					res.ID = rq.ID
+					resolutions = append(resolutions, res)
+				}
+				seq = s.inner.Continue(ctx, out.RunID, resolutions)
+			default:
+				yield(Event{}, fmt.Errorf("agent: unexpected status %q", out.Status))
+				return
 			}
-			res.ID = rq.ID
-			resolutions = append(resolutions, res)
 		}
-		out = s.inner.Continue(ctx, out.RunID, resolutions)
 	}
-	return out
 }

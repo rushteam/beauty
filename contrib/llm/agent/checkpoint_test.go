@@ -25,7 +25,7 @@ func TestCheckpointPauseResumeReplay(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	out := r.Run(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}})
+	out := agent.CollectOutcome(r.Run(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}))
 	if !out.IsPaused() {
 		t.Fatalf("expected paused, got %s", out.Status)
 	}
@@ -93,7 +93,7 @@ func TestCheckpointRunTree(t *testing.T) {
 	parent.Tools = []agent.Tool{agent.AgentAsTool("researcher", "子 agent", child)}
 
 	// 父 agent 直接完成(子 agent 同步完成),检查 run.started 事件。
-	out := parent.Run(context.Background(), llm.Request{
+	out := agent.CollectOutcome(parent.Run(context.Background(), llm.Request{)
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "research X"}},
 	})

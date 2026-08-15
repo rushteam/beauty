@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 )
 
 // Role 是对话角色。
@@ -27,6 +28,25 @@ const (
 	User      Role = "user"
 	Assistant Role = "assistant"
 	Tool      Role = "tool" // 工具执行结果消息(承载 ToolCallID 对应的返回)
+)
+
+// SourceType 标识消息的注入来源,用于 session 持久化时精确过滤:
+// 避免 history provider 注入的消息被重复存储,或调试时追踪每条消息由哪个子系统产生。
+type SourceType int
+
+const (
+	// SourceUser 用户或应用直接提供。
+	SourceUser SourceType = iota
+	// SourceHistory 由 HistoryProvider 从持久化存储加载的历史消息。
+	SourceHistory
+	// SourceContext 由 ContextProvider 注入的 RAG / Skills / 环境等上下文。
+	SourceContext
+	// SourceMiddleware 由 Agent 中间件注入(如 evaluator loop 的反馈消息)。
+	SourceMiddleware
+	// SourceModel 模型生成的 assistant 消息(工具调用循环中自动追加)。
+	SourceModel
+	// SourceTool 工具执行结果消息。
+	SourceTool
 )
 
 // Message 是一条对话消息。纯文本对话只用 Role+Content;工具调用往返时,assistant 回合可能带
@@ -47,6 +67,11 @@ type Message struct {
 	// 设为 "ephemeral" 时,provider 在该消息的 content block 上附加 cache_control。
 	// 不支持 prompt caching 的 provider 忽略此字段。
 	CacheControl string `json:"cache_control,omitempty"`
+
+	// Source 标识消息的注入来源。零值(SourceUser)表示用户或应用直接提供。
+	// 用于 session 持久化过滤(避免 history 消息被重复存储)、调试追踪、审计。
+	// Provider 序列化时忽略此字段——它是框架内部元数据,不发给模型。
+	Source SourceType `json:"-"`
 }
 
 // PartType 标识内容块类型。
@@ -165,34 +190,100 @@ type Response struct {
 	Thinking string `json:"thinking,omitempty"`
 }
 
-// Chunk 是流式生成的一个增量片段。Delta 是本次新增文本;结束时 Done=true 且可能带最终 Usage;
-// 出错时 Err 非 nil(随后 channel 关闭)。
+// Chunk 是流式生成的一个增量片段。Delta 是本次新增文本;迭代结束时最后一个 Chunk 可能带最终 Usage。
 //
-// ToolCalls:支持流式工具调用的 provider 在 Done 时带上组装好的完整调用列表
-// (增量分片过程中可不填);agent.RunStream 据此继续工具循环。
+// ToolCalls:支持流式工具调用的 provider 在流结束时带上组装好的完整调用列表
+// (增量分片过程中可不填);agent 工具循环据此继续执行。
 type Chunk struct {
-	Delta     string
-	ToolCalls []ToolCall
-	Usage     *Usage
-	Done      bool
-	Err       error
-	// ThinkingDelta 是模型思考过程的增量文本(仅 thinking 模式下的流式输出)。
+	Delta         string
+	ToolCalls     []ToolCall
+	Usage         *Usage
 	ThinkingDelta string `json:"thinking_delta,omitempty"`
-	// Thinking 是完整的思考文本(Done 时填充;非流式或流式结束后)。
-	Thinking string `json:"thinking,omitempty"`
+	Thinking      string `json:"thinking,omitempty"`
 }
 
 // Client 是一个对话补全客户端(由各 provider 实现)。
 type Client interface {
 	// Generate 非流式生成。
 	Generate(ctx context.Context, req Request) (*Response, error)
-	// Stream 流式生成:返回的 channel 逐块产出 Delta,以 Done 或 Err 结束后关闭。
-	Stream(ctx context.Context, req Request) (<-chan Chunk, error)
+	// Stream 流式生成:每次 yield 产出一个 Chunk,error 非 nil 表示终止。
+	// 调用方可随时 break 停止消费(天然背压)。
+	Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error]
+}
+
+// Collect 消费整个 Stream 并组装成 Response(类似非流式 Generate 的结果)。
+func Collect(seq iter.Seq2[Chunk, error]) (*Response, error) {
+	var resp Response
+	for c, err := range seq {
+		if err != nil {
+			return nil, err
+		}
+		resp.Content += c.Delta
+		if c.ThinkingDelta != "" {
+			resp.Thinking += c.ThinkingDelta
+		}
+		if len(c.ToolCalls) > 0 {
+			resp.ToolCalls = c.ToolCalls
+		}
+		if c.Usage != nil {
+			resp.Usage = *c.Usage
+		}
+		if c.Thinking != "" {
+			resp.Thinking = c.Thinking
+		}
+	}
+	return &resp, nil
 }
 
 // Embedder 生成文本向量(用于 RAG / 语义检索,配 contrib/vector)。
 type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// FilterBySource 返回仅包含指定来源类型消息的新切片。
+func FilterBySource(msgs []Message, sources ...SourceType) []Message {
+	set := make(map[SourceType]struct{}, len(sources))
+	for _, s := range sources {
+		set[s] = struct{}{}
+	}
+	out := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		if _, ok := set[m.Source]; ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// ExcludeSource 返回排除指定来源类型消息后的新切片。
+func ExcludeSource(msgs []Message, sources ...SourceType) []Message {
+	set := make(map[SourceType]struct{}, len(sources))
+	for _, s := range sources {
+		set[s] = struct{}{}
+	}
+	out := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		if _, ok := set[m.Source]; !ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// WithSource 返回一个消息副本,标记了指定的 SourceType。
+func (m Message) WithSource(s SourceType) Message {
+	m.Source = s
+	return m
+}
+
+// MarkSource 为一批消息统一设置 SourceType,返回新切片。
+func MarkSource(msgs []Message, s SourceType) []Message {
+	out := make([]Message, len(msgs))
+	for i, m := range msgs {
+		m.Source = s
+		out[i] = m
+	}
+	return out
 }
 
 // ErrNoClients 表示 Fallback 没有可用的下游 client。

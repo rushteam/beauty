@@ -30,10 +30,10 @@ func TestChainCheckpointEvents(t *testing.T) {
 		},
 	}
 
-	out := agent.CollectOutcome(chain.Run(context.Background(), llm.Request{)
+	out := agent.CollectOutcome(chain.Run(context.Background(), llm.Request{
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "go"}},
-	})
+	}))
 	if !out.IsDone() {
 		t.Fatalf("expected done, got %s", out.Status)
 	}

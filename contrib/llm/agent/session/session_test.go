@@ -1,10 +1,8 @@
 package session_test
 
 import (
-	"context
-	"iter"
 	"context"
-	"errors"
+	"iter"
 	"strings"
 	"testing"
 
@@ -56,13 +54,13 @@ func TestManager_PersistsAndInjectsHistory(t *testing.T) {
 	r := &agent.Runner{Client: fc}
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", r, user("第一句")))); !out.IsDone() {)
+	if out := agent.CollectOutcome(m.Run(ctx, "s1", r, user("第一句"))); !out.IsDone() {
 		if _, err := out.Final(); err != nil {
 			t.Fatalf("run1: %v", err)
 		}
 	}
 	fc.reply = "回复B"
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", r, user("第二句")))); !out.IsDone() {)
+	if out := agent.CollectOutcome(m.Run(ctx, "s1", r, user("第二句"))); !out.IsDone() {
 		if _, err := out.Final(); err != nil {
 			t.Fatalf("run2: %v", err)
 		}
@@ -86,13 +84,13 @@ func TestManager_AcceptsNonRunnerAgent(t *testing.T) {
 	a := &agent.VerifyLoop{Agent: &agent.Runner{Client: fc}} // 实现 Agent,但不是 *Runner
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", a, user("第一句")))); !out.IsDone() {)
+	if out := agent.CollectOutcome(m.Run(ctx, "s1", a, user("第一句"))); !out.IsDone() {
 		if _, err := out.Final(); err != nil {
 			t.Fatalf("run1: %v", err)
 		}
 	}
 	fc.reply = "答复B"
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", a, user("第二句")))); !out.IsDone() {)
+	if out := agent.CollectOutcome(m.Run(ctx, "s1", a, user("第二句"))); !out.IsDone() {
 		if _, err := out.Final(); err != nil {
 			t.Fatalf("run2: %v", err)
 		}
@@ -103,14 +101,17 @@ func TestManager_AcceptsNonRunnerAgent(t *testing.T) {
 	}
 }
 
-func TestManager_RunStream_Persists(t *testing.T) {
+func TestManager_RunIter_Persists(t *testing.T) {
 	ctx := context.Background()
 	fc := &replyClient{reply: "流式回复"}
 	r := &agent.Runner{Client: fc}
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
 	var final string
-	for ev, err := range m.Run(ctx, "s-stream", r, user("你好")) {
+	for ev, err := range m.RunIter(ctx, "s-stream", r, user("你好")) {
+		if err != nil {
+			t.Fatal(err)
+		}
 		if ev.Type == agent.EventError {
 			t.Fatal(ev.Err)
 		}

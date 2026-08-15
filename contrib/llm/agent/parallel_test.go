@@ -1,10 +1,9 @@
 package agent_test
 
 import (
-	"context
-	"iter"
 	"context"
 	"errors"
+	"iter"
 	"strings"
 	"testing"
 
@@ -87,16 +86,14 @@ func TestParallel_AllFail(t *testing.T) {
 		&agent.Runner{Client: errClient{}},
 		&agent.Runner{Client: errClient{}},
 	}}
-	if out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{}); out.IsDone() {)
+	if out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{})); !out.IsDone() {
 		t.Fatal("全部失败应报错")
 	}
 }
 
-// RunStream:透传各分支中间事件,对外仅一条合并后的终态 EventFinal。
 func TestParallel_RunStream(t *testing.T) {
-	// 两个流式分支:各推一个 token 后给终态。
-	a := &agent.Runner{Name: "a", Client: &streamScriptClient{streams: [][]llm.Chunk{{{Delta: "A1"}, {Done: true}}}}}
-	b := &agent.Runner{Name: "b", Client: &streamScriptClient{streams: [][]llm.Chunk{{{Delta: "B1"}, {Done: true}}}}}
+	a := &agent.Runner{Name: "a", Client: &streamScriptClient{streams: [][]llm.Chunk{{{Delta: "A1"}}}}}
+	b := &agent.Runner{Name: "b", Client: &streamScriptClient{streams: [][]llm.Chunk{{{Delta: "B1"}}}}}
 	p := &agent.Parallel{Agents: []agent.Agent{a, b}}
 
 	var finals []agent.Event

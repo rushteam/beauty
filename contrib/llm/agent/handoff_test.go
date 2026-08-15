@@ -1,10 +1,8 @@
 package agent_test
 
 import (
-	"context
-	"iter"
 	"context"
-	"errors"
+	"iter"
 	"strings"
 	"testing"
 

@@ -1,9 +1,8 @@
 package session_test
 
 import (
-	"context
-	"iter"
 	"context"
+	"iter"
 	"testing"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -17,10 +16,10 @@ func TestManagerRecordsSessionEvents(t *testing.T) {
 	r := &agent.Runner{
 		Client: &stubClient{content: "reply"},
 	}
-	out := agent.CollectOutcome(mgr.Run(context.Background(), "s1", r, llm.Request{)
+	out := agent.CollectOutcome(mgr.Run(context.Background(), "s1", r, llm.Request{
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "hello"}},
-	})
+	}))
 	if !out.IsDone() {
 		t.Fatalf("expected done, got %s err=%v", out.Status, out.Err)
 	}

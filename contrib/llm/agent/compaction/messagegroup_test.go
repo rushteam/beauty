@@ -12,6 +12,20 @@ import (
 // 固定估算: 每字符 1 token,便于测试阈值。
 func charTokens(s string) int { return len(s) }
 
+func TestMessageTokens_IncludesToolCalls(t *testing.T) {
+	m := llm.Message{
+		Role: llm.Assistant,
+		ToolCalls: []llm.ToolCall{
+			{ID: "c1", Name: "search", Arguments: []byte(`{"q":"hello"}`)},
+		},
+	}
+	got := compaction.MessageTokens(m, charTokens)
+	want := len("search") + len(`{"q":"hello"}`)
+	if got != want {
+		t.Fatalf("tokens = %d, want %d", got, want)
+	}
+}
+
 func TestNewMessageIndex_Grouping(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.System, Content: "sys"},

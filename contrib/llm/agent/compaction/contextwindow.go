@@ -80,6 +80,23 @@ func (cw *ContextWindow) CompactGroups(_ context.Context, idx *MessageIndex) err
 		}
 	}
 
+	// 阶段 3(降级): 若仍超预算,从保护区中也淘汰最旧的非 system 组。
+	for idx.TotalTokens() > budget {
+		evicted := false
+		for i := range idx.Groups {
+			g := idx.Groups[i]
+			if g.Excluded || g.Kind == GroupSystem {
+				continue
+			}
+			g.Excluded = true
+			evicted = true
+			break
+		}
+		if !evicted {
+			break
+		}
+	}
+
 	return nil
 }
 

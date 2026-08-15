@@ -77,7 +77,11 @@ func (l *Logger) Error(ctx context.Context, msg string, args ...any) {
 
 // With 返回带有额外属性的新 Logger(继承 IncludeSensitive 设置)。
 func (l *Logger) With(args ...any) *Logger {
-	nl := &Logger{Inner: l.base().With(args...)}
+	filtered := args
+	if !l.includeSensitive() {
+		filtered = filterSensitive(args)
+	}
+	nl := &Logger{Inner: l.base().With(filtered...)}
 	if l != nil {
 		nl.IncludeSensitive = l.IncludeSensitive
 	}
@@ -85,7 +89,7 @@ func (l *Logger) With(args ...any) *Logger {
 }
 
 func filterSensitive(args []any) []any {
-	var out []any
+	out := make([]any, 0, len(args))
 	for i := 0; i < len(args); {
 		if attr, ok := args[i].(slog.Attr); ok {
 			if _, isSensitive := attr.Value.Any().(sensitiveData); !isSensitive {

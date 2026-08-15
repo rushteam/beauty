@@ -123,7 +123,7 @@ func TestContextWindow_Phase2EvictsAllGroups(t *testing.T) {
 
 func TestContextWindow_KeepRecentGroupsProtection(t *testing.T) {
 	cw := &compaction.ContextWindow{
-		MaxInputTokens:        100,
+		MaxInputTokens:        125,
 		ToolEvictionThreshold: 0.5,
 		TruncationThreshold:   0.8,
 		KeepRecentGroups:      3,
@@ -135,7 +135,7 @@ func TestContextWindow_KeepRecentGroupsProtection(t *testing.T) {
 		{Role: llm.User, Content: strings.Repeat("3", 40)},
 		{Role: llm.User, Content: strings.Repeat("4", 40)},
 	}
-	// 160 tokens, 预算 100; 保留最近 3 组 → 最多逐出 1 组。
+	// 160 tokens, 预算 125; 阶段 2 保留最近 3 组,仅逐出最旧 1 组 → 120 tokens。
 
 	out, err := cw.Compact(context.Background(), in)
 	if err != nil {
@@ -150,6 +150,33 @@ func TestContextWindow_KeepRecentGroupsProtection(t *testing.T) {
 	}
 	if out[2].Content != strings.Repeat("4", 40) {
 		t.Fatal("newest group must remain")
+	}
+	if compaction.TotalTokens(out, charTokens) > cw.MaxInputTokens {
+		t.Fatalf("result should fit budget, tokens=%d", compaction.TotalTokens(out, charTokens))
+	}
+}
+
+func TestContextWindow_Phase3ForceEvictProtected(t *testing.T) {
+	cw := &compaction.ContextWindow{
+		MaxInputTokens:        80,
+		ToolEvictionThreshold: 0.5,
+		TruncationThreshold:   0.8,
+		KeepRecentGroups:      3,
+		Estimate:              charTokens,
+	}
+	in := []llm.Message{
+		{Role: llm.User, Content: strings.Repeat("1", 40)},
+		{Role: llm.User, Content: strings.Repeat("2", 40)},
+		{Role: llm.User, Content: strings.Repeat("3", 40)},
+		{Role: llm.User, Content: strings.Repeat("4", 40)},
+	}
+
+	out, err := cw.Compact(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compaction.TotalTokens(out, charTokens) > cw.MaxInputTokens {
+		t.Fatalf("phase 3 should force evict to fit budget, tokens=%d", compaction.TotalTokens(out, charTokens))
 	}
 }
 

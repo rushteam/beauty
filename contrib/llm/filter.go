@@ -6,7 +6,7 @@ type MessageFilter func(Message) bool
 // Apply 过滤消息切片,仅保留通过 filter 的消息。
 func (f MessageFilter) Apply(msgs []Message) []Message {
 	if f == nil {
-		return nil
+		return msgs // nil filter = 不过滤
 	}
 	out := make([]Message, 0, len(msgs))
 	for _, m := range msgs {

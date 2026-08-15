@@ -24,6 +24,27 @@ func TestResponseBuilder_BasicText(t *testing.T) {
 	}
 }
 
+func TestResponseBuilder_BuildDeepClone(t *testing.T) {
+	b := agenttest.NewResponseBuilder().AddText("first")
+	turns := b.Build()
+	b.AddText("mutated")
+	if turns[0].Response.Content != "first" {
+		t.Fatalf("Build should snapshot content, got %q", turns[0].Response.Content)
+	}
+}
+
+func TestResponseBuilder_BuildDeepCloneToolCalls(t *testing.T) {
+	b := agenttest.NewResponseBuilder().AddToolCall("c1", "echo", `{}`)
+	turns := b.Build()
+	b.AddToolCall("c2", "other", `{}`)
+	if len(turns[0].Response.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(turns[0].Response.ToolCalls))
+	}
+	if turns[0].Response.ToolCalls[0].ID != "c1" {
+		t.Fatalf("tool call = %+v", turns[0].Response.ToolCalls[0])
+	}
+}
+
 func TestResponseBuilder_MultiTurn(t *testing.T) {
 	turns := agenttest.NewResponseBuilder().
 		AddText("first").

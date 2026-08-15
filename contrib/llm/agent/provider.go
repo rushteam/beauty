@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"strings"
+	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
 )
@@ -77,13 +79,14 @@ func RAGContextProvider(retrieve func(ctx context.Context, query string) ([]stri
 		if len(docs) == 0 {
 			return nil, nil, nil
 		}
-		var content string
+		var b strings.Builder
 		for i, doc := range docs {
 			if i > 0 {
-				content += "\n---\n"
+				b.WriteString("\n---\n")
 			}
-			content += doc
+			b.WriteString(doc)
 		}
+		content := b.String()
 		msgs := []llm.Message{{
 			Role:    llm.User,
 			Content: "以下是与你的问题相关的参考资料:\n\n" + content,
@@ -104,6 +107,7 @@ func lastUserContent(msgs []llm.Message) string {
 
 // InMemoryHistoryProvider 基于 session Store 的内存历史管理。
 type InMemoryHistoryProvider struct {
+	mu    sync.RWMutex
 	store map[string]*historyEntry
 }
 
@@ -118,8 +122,10 @@ func NewInMemoryHistoryProvider() *InMemoryHistoryProvider {
 }
 
 func (p *InMemoryHistoryProvider) Invoking(_ context.Context, sessionID string) ([]llm.Message, string, error) {
+	p.mu.RLock()
 	entry, ok := p.store[sessionID]
 	if !ok {
+		p.mu.RUnlock()
 		return nil, "", nil
 	}
 	msgs := make([]llm.Message, len(entry.messages))
@@ -131,10 +137,13 @@ func (p *InMemoryHistoryProvider) Invoking(_ context.Context, sessionID string) 
 	if entry.summary != "" {
 		systemExtra = "以下是此前对话的摘要:\n" + entry.summary
 	}
+	p.mu.RUnlock()
 	return msgs, systemExtra, nil
 }
 
 func (p *InMemoryHistoryProvider) Invoked(_ context.Context, sessionID string, newMessages []llm.Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	entry, ok := p.store[sessionID]
 	if !ok {
 		entry = &historyEntry{}

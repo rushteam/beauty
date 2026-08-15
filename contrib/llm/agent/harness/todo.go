@@ -49,16 +49,19 @@ type TodoProvider struct {
 	mu           sync.Mutex
 	items        map[string][]TodoItem // key by session/context ID
 	nextID       map[string]int
+	cachedTools  []agent.Tool
 }
 
 // NewTodoProvider 创建 todo harness。
 func NewTodoProvider() *TodoProvider {
-	return &TodoProvider{
+	p := &TodoProvider{
 		Instructions: defaultInstructions,
 		stateKey:     defaultStateKey,
 		items:        make(map[string][]TodoItem),
 		nextID:       make(map[string]int),
 	}
+	p.cachedTools = p.buildTools()
+	return p
 }
 
 // GetItems 获取所有待办事项(外部访问用)。
@@ -100,7 +103,7 @@ func (p *TodoProvider) Invoking(ctx context.Context, _ *llm.Request) ([]llm.Mess
 		Content: content,
 		Source:  llm.SourceContext,
 	}}
-	return msgs, p.tools(), nil
+	return msgs, p.cachedTools, nil
 }
 
 // Invoked implements ContextProvider。
@@ -108,7 +111,7 @@ func (p *TodoProvider) Invoked(_ context.Context, _ *agent.RunOutcome) error {
 	return nil
 }
 
-func (p *TodoProvider) tools() []agent.Tool {
+func (p *TodoProvider) buildTools() []agent.Tool {
 	return []agent.Tool{
 		agent.Func("todos_add", "添加一条待办事项", json.RawMessage(`{
 			"type":"object",

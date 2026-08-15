@@ -66,22 +66,23 @@ func (gc *GroupChat) shouldTerminate(ctx context.Context, history []llm.Message,
 }
 
 func (gc *GroupChat) broadcastHistory(ctx context.Context, history []llm.Message) ([]llm.Message, error) {
-	if gc.Manager.UpdateHistory != nil {
-		return gc.Manager.UpdateHistory(ctx, history)
+	if gc.Manager.UpdateHistory == nil {
+		return history, nil
 	}
-	return cloneMessages(history), nil
+	return gc.Manager.UpdateHistory(ctx, history)
 }
 
 func (gc *GroupChat) buildAgentRequest(req llm.Request, history []llm.Message) llm.Request {
-	sys := req.System
+	r := req
+	r.Messages = history
 	if gc.System != "" {
-		sys = joinSys(gc.System, sys)
+		if r.System != "" {
+			r.System = gc.System + "\n\n" + r.System
+		} else {
+			r.System = gc.System
+		}
 	}
-	return llm.Request{
-		Model:    req.Model,
-		System:   sys,
-		Messages: history,
-	}
+	return r
 }
 
 func (gc *GroupChat) appendTurn(history []llm.Message, name string, resp *llm.Response) []llm.Message {
@@ -99,7 +100,7 @@ func (gc *GroupChat) finalResponse(terminate bool, last *llm.Response, all []*ll
 		}
 		return &llm.Response{}
 	}
-	var parts []string
+	parts := make([]string, 0, len(all))
 	var usage llm.Usage
 	model := ""
 	for _, r := range all {
@@ -276,7 +277,7 @@ func MaxIterationTerminator(max int) func(ctx context.Context, history []llm.Mes
 }
 
 func nonNilAgents(agents []Agent) []Agent {
-	var valid []Agent
+	valid := make([]Agent, 0, len(agents))
 	for _, a := range agents {
 		if a != nil {
 			valid = append(valid, a)

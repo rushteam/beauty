@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"iter"
+	"log/slog"
 	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -169,11 +170,13 @@ func RunAsync(ctx context.Context, store ContinuationStore, a Agent, req llm.Req
 	if err != nil {
 		return "", err
 	}
-	go runAsyncLoop(ctx, store, token, a.Run(ctx, req, opts...))
+	bgCtx := context.WithoutCancel(ctx)
+	go runAsyncLoop(bgCtx, store, token, a.Run(bgCtx, req, opts...))
 	return token, nil
 }
 
-// ContinueAsync 在后台恢复暂停的 agent 任务,立即返回新的 continuation token。
+// ContinueAsync 在后台恢复暂停的 agent 任务,返回新的 continuation token。
+// 调用方应在调用后删除旧 token: store.Delete(ctx, oldToken)。
 func ContinueAsync(ctx context.Context, store ContinuationStore, a Agent, runID string, resolutions []Resolution, opts ...Option) (string, error) {
 	if store == nil {
 		return "", fmt.Errorf("agent: nil ContinuationStore")
@@ -185,55 +188,74 @@ func ContinueAsync(ctx context.Context, store ContinuationStore, a Agent, runID 
 	if err != nil {
 		return "", err
 	}
-	go runAsyncLoop(ctx, store, token, a.Continue(ctx, runID, resolutions, opts...))
+	bgCtx := context.WithoutCancel(ctx)
+	go runAsyncLoop(bgCtx, store, token, a.Continue(bgCtx, runID, resolutions, opts...))
 	return token, nil
 }
 
 func runAsyncLoop(ctx context.Context, store ContinuationStore, token string, seq iter.Seq2[Event, error]) {
+	defer func() {
+		if r := recover(); r != nil {
+			if err := store.Update(ctx, token, ContinuationResult{
+				Token: token,
+				State: ContinuationFailed,
+				Outcome: &RunOutcome{
+					Status: StatusError,
+					Err:    fmt.Errorf("agent: async run panic: %v", r),
+				},
+			}); err != nil {
+				slog.ErrorContext(ctx, "continuation: store update failed", "token", token, "error", err)
+			}
+		}
+	}()
+
 	var events []Event
 	var last *llm.Response
 	var runID string
 
-	update := func(state ContinuationState, outcome *RunOutcome, reqs []Requirement) {
-		_ = store.Update(ctx, token, ContinuationResult{
+	updateTerminal := func(state ContinuationState, outcome *RunOutcome, reqs []Requirement) {
+		if err := store.Update(ctx, token, ContinuationResult{
 			Token:        token,
 			State:        state,
 			Outcome:      outcome,
-			Events:       append([]Event(nil), events...),
+			Events:       events,
 			Requirements: reqs,
-		})
+		}); err != nil {
+			slog.ErrorContext(ctx, "continuation: store update failed", "token", token, "error", err)
+		}
 	}
 
 	for ev, err := range seq {
 		if err != nil {
 			out := outcomeError(runID, last, nil, err)
-			update(ContinuationFailed, &out, nil)
+			updateTerminal(ContinuationFailed, &out, nil)
 			return
 		}
 		events = append(events, ev)
 		switch ev.Type {
 		case EventFinal:
 			out := outcomeDone(ev.RunID, ev.Response, nil)
-			update(ContinuationCompleted, &out, nil)
+			updateTerminal(ContinuationCompleted, &out, nil)
 			return
 		case EventPaused:
 			out := outcomePaused(ev.RunID, ev.Response, nil, ev.Requirements)
-			update(ContinuationPaused, &out, ev.Requirements)
+			updateTerminal(ContinuationPaused, &out, ev.Requirements)
 			return
 		case EventError:
 			out := outcomeError(ev.RunID, ev.Response, nil, ev.Err)
-			update(ContinuationFailed, &out, nil)
+			updateTerminal(ContinuationFailed, &out, nil)
 			return
 		case EventStep:
 			last = ev.Response
 			runID = ev.RunID
 		}
-		_ = store.Update(ctx, token, ContinuationResult{
-			Token:  token,
-			State:  ContinuationRunning,
-			Events: append([]Event(nil), events...),
-		})
+		if err := store.Update(ctx, token, ContinuationResult{
+			Token: token,
+			State: ContinuationRunning,
+		}); err != nil {
+			slog.ErrorContext(ctx, "continuation: store update failed", "token", token, "error", err)
+		}
 	}
 	out := outcomeDone(runID, last, nil)
-	update(ContinuationCompleted, &out, nil)
+	updateTerminal(ContinuationCompleted, &out, nil)
 }

@@ -242,6 +242,8 @@ func (m *Manager) RunIter(ctx context.Context, id string, a agent.Agent, req llm
 				final = ev.Response
 				continue
 			case agent.EventPaused:
+				sess.Messages = append(sess.Messages, newMsgs...)
+				sess.Messages = append(sess.Messages, intermediates...)
 				sess.PendingRunID = ev.RunID
 				sess.UpdatedAt = time.Now()
 				if err := m.Store.Save(ctx, sess); err != nil {
@@ -249,7 +251,8 @@ func (m *Manager) RunIter(ctx context.Context, id string, a agent.Agent, req llm
 					return
 				}
 				if es, ok := m.Store.(EventStore); ok {
-					_ = RecordMessages(ctx, es, id, 0, ev.RunID, newMsgs)
+					msgs := append(append([]llm.Message{}, newMsgs...), intermediates...)
+					_ = RecordMessages(ctx, es, id, 0, ev.RunID, msgs)
 				}
 				yield(ev, nil)
 				return
@@ -271,6 +274,8 @@ func (m *Manager) RunIter(ctx context.Context, id string, a agent.Agent, req llm
 		}
 
 		if final == nil {
+			err := errString("session: agent run ended without final event")
+			yield(agent.Event{Type: agent.EventError, Err: err}, err)
 			return
 		}
 		sess.PendingRunID = ""
@@ -300,6 +305,7 @@ func (m *Manager) ContinueIter(ctx context.Context, id string, a agent.Agent, re
 			return
 		}
 
+		var intermediates []llm.Message
 		var final *llm.Response
 		var runID string
 		for ev, err := range a.Continue(ctx, sess.PendingRunID, resolutions) {
@@ -313,11 +319,26 @@ func (m *Manager) ContinueIter(ctx context.Context, id string, a agent.Agent, re
 				final = ev.Response
 				continue
 			case agent.EventPaused:
+				sess.Messages = append(sess.Messages, intermediates...)
 				sess.PendingRunID = ev.RunID
 				sess.UpdatedAt = time.Now()
-				_ = m.Store.Save(ctx, sess)
+				if err := m.Store.Save(ctx, sess); err != nil {
+					yield(agent.Event{Type: agent.EventError, Err: err}, err)
+					return
+				}
+				if es, ok := m.Store.(EventStore); ok {
+					_ = RecordMessages(ctx, es, id, 0, ev.RunID, intermediates)
+				}
 				yield(ev, nil)
 				return
+			case agent.EventStep:
+				if ev.Response != nil && len(ev.Response.ToolCalls) > 0 {
+					intermediates = append(intermediates, llm.Message{Role: llm.Assistant, Content: ev.Response.Content, ToolCalls: ev.Response.ToolCalls})
+				}
+			case agent.EventToolResult:
+				if ev.ToolCall != nil {
+					intermediates = append(intermediates, llm.Message{Role: llm.Tool, ToolCallID: ev.ToolCall.ID, Content: ev.Result})
+				}
 			case agent.EventError:
 				yield(ev, ev.Err)
 				return
@@ -328,11 +349,13 @@ func (m *Manager) ContinueIter(ctx context.Context, id string, a agent.Agent, re
 		}
 
 		if final == nil {
+			err := errString("session: agent run ended without final event")
+			yield(agent.Event{Type: agent.EventError, Err: err}, err)
 			return
 		}
 		sess.PendingRunID = ""
 		content := final.Content
-		if err := m.persist(ctx, sess, nil, nil, content, runID); err != nil {
+		if err := m.persist(ctx, sess, nil, intermediates, content, runID); err != nil {
 			yield(agent.Event{Type: agent.EventError, Err: err}, err)
 			return
 		}
@@ -373,6 +396,9 @@ func (s *Summarizer) compress(ctx context.Context, sess *Session) error {
 		return nil
 	}
 	cut := len(sess.Messages) - keep
+	if cut <= 0 {
+		return nil
+	}
 	older := sess.Messages[:cut]
 
 	var b strings.Builder

@@ -139,6 +139,18 @@ func TestLoggerIncludeSensitiveFalseKeepsNonSensitive(t *testing.T) {
 	}
 }
 
+func TestWithFiltersSensitiveAttrs(t *testing.T) {
+	base, h := newTestLogger(false)
+	child := base.With(redact.SensitiveData("secret", "hidden"))
+	child.Info(context.Background(), "test", "public", "visible")
+	if h.hasKey("secret") {
+		t.Error("sensitive attr passed to With should be filtered when IncludeSensitive=false")
+	}
+	if !h.hasKey("public") {
+		t.Error("public attr should be present")
+	}
+}
+
 func TestWithPreservesIncludeSensitive(t *testing.T) {
 	base, h := newTestLogger(false)
 	child := base.With("component", "agent")

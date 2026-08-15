@@ -229,15 +229,19 @@ func defaultExecutor(ctx context.Context, shell string, args []string, workDir s
 	return output, -1, err
 }
 
-// truncateHeadTail 保留前一半与后一半字节,中间插入截断标记。
+// truncateHeadTail 保留前一半与后一半字节,中间插入截断标记;总长度不超过 maxBytes。
 func truncateHeadTail(data []byte, maxBytes int) (truncated bool, out string) {
 	if maxBytes <= 0 || len(data) <= maxBytes {
 		return false, string(data)
 	}
-	half := maxBytes / 2
-	head := data[:half]
-	tail := data[len(data)-half:]
-	removed := len(data) - len(head) - len(tail)
-	marker := fmt.Sprintf("\n[... truncated %d bytes ...]\n", removed)
+	marker := fmt.Sprintf("\n[... truncated %d bytes ...]\n", len(data)-maxBytes)
+	budget := maxBytes - len(marker)
+	if budget <= 0 {
+		budget = maxBytes // 标记比预算还长时的兜底
+	}
+	headSize := budget / 2
+	tailSize := budget - headSize
+	head := data[:headSize]
+	tail := data[len(data)-tailSize:]
 	return true, string(head) + marker + string(tail)
 }

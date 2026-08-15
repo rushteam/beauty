@@ -8,6 +8,33 @@ import (
 	"github.com/rushteam/beauty/contrib/llm/agent"
 )
 
+func TestInMemoryHistoryProvider_Concurrent(t *testing.T) {
+	hp := agent.NewInMemoryHistoryProvider()
+	ctx := context.Background()
+
+	const goroutines = 16
+	const perGoroutine = 8
+
+	done := make(chan struct{}, goroutines)
+	for g := range goroutines {
+		go func(id int) {
+			defer func() { done <- struct{}{} }()
+			sid := "session-" + string(rune('a'+id%4))
+			for i := range perGoroutine {
+				_, _, _ = hp.Invoking(ctx, sid)
+				_ = hp.Invoked(ctx, sid, []llm.Message{
+					{Role: llm.User, Content: "q", Source: llm.SourceUser},
+					{Role: llm.Assistant, Content: "a", Source: llm.SourceModel},
+				})
+				_ = i
+			}
+		}(g)
+	}
+	for range goroutines {
+		<-done
+	}
+}
+
 func TestInMemoryHistoryProvider(t *testing.T) {
 	hp := agent.NewInMemoryHistoryProvider()
 	ctx := context.Background()

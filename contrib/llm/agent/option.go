@@ -76,7 +76,9 @@ func applyOptions(req *llm.Request, tools *[]Tool, maxSteps *int, opts []Option)
 		case WithMaxSteps:
 			*maxSteps = int(v)
 		case WithTools:
-			*tools = append(*tools, v...)
+			if tools != nil {
+				*tools = append(*tools, v...)
+			}
 		case WithTemperature:
 			req.Temperature = float64(v)
 		case WithResponseFormat:

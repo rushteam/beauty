@@ -119,19 +119,20 @@ func TestNewPolicy_InvalidRegex(t *testing.T) {
 }
 
 func TestTruncateHeadTail(t *testing.T) {
+	const maxBytes = 40
 	data := []byte(strings.Repeat("a", 100))
-	truncated, out := truncateHeadTail(data, 40)
+	truncated, out := truncateHeadTail(data, maxBytes)
 	if !truncated {
 		t.Fatal("expected truncation")
 	}
-	if len(out) >= 100 {
-		t.Fatalf("output len = %d, want less than original 100", len(out))
+	if len(out) > maxBytes {
+		t.Fatalf("output len = %d, want <= %d", len(out), maxBytes)
 	}
-	if !strings.HasPrefix(out, strings.Repeat("a", 20)) {
-		t.Fatalf("head not preserved: %q", out[:30])
+	if !strings.HasPrefix(out, "a") {
+		t.Fatalf("head not preserved: %q", out)
 	}
-	if !strings.HasSuffix(out, strings.Repeat("a", 20)) {
-		t.Fatalf("tail not preserved: %q", out[len(out)-30:])
+	if !strings.HasSuffix(out, "a") {
+		t.Fatalf("tail not preserved: %q", out)
 	}
 	if !strings.Contains(out, "[... truncated 60 bytes ...]") {
 		t.Fatalf("missing marker: %q", out)

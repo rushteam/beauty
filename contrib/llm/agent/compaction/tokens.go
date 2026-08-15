@@ -20,6 +20,10 @@ func MessageTokens(m llm.Message, estimate func(string) int) int {
 	for _, p := range m.Parts {
 		n += estimate(p.Text)
 	}
+	for _, tc := range m.ToolCalls {
+		n += estimate(tc.Name)
+		n += estimate(string(tc.Arguments))
+	}
 	return n
 }
 

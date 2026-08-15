@@ -91,6 +91,19 @@ func TestFilterPersistable(t *testing.T) {
 	}
 }
 
+func TestFilterApplyNilFilter(t *testing.T) {
+	msgs := sampleMessages()
+	got := (llm.MessageFilter)(nil).Apply(msgs)
+	if len(got) != len(msgs) {
+		t.Fatalf("nil filter Apply = %d messages, want %d (passthrough)", len(got), len(msgs))
+	}
+	for i := range msgs {
+		if got[i].Content != msgs[i].Content || got[i].Source != msgs[i].Source {
+			t.Errorf("message[%d] changed after nil filter", i)
+		}
+	}
+}
+
 func TestFilterApplyEmpty(t *testing.T) {
 	got := llm.BySource(llm.SourceUser).Apply(nil)
 	if len(got) != 0 {

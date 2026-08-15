@@ -69,10 +69,21 @@ func (b *ResponseBuilder) NewTurn(callbacks ...func(ctx context.Context, req llm
 	return b
 }
 
-// Build 返回完成的 Turn 序列。
+// Build 返回完成的 Turn 序列(深拷贝 Response,避免后续 builder 修改影响已构建结果)。
 func (b *ResponseBuilder) Build() []Turn {
 	out := make([]Turn, len(b.turns))
-	copy(out, b.turns)
+	for i, t := range b.turns {
+		out[i] = t
+		if t.Response != nil {
+			resp := *t.Response
+			if len(resp.ToolCalls) > 0 {
+				tcs := make([]llm.ToolCall, len(resp.ToolCalls))
+				copy(tcs, resp.ToolCalls)
+				resp.ToolCalls = tcs
+			}
+			out[i].Response = &resp
+		}
+	}
 	return out
 }
 
@@ -94,9 +105,17 @@ type ScriptedClient struct {
 	currentTurn int
 }
 
-// NewScriptedClient 创建按轮次编排的 mock client。
+// NewScriptedClient 创建按轮次编排的 mock client(拷贝 turns 避免外部别名)。
 func NewScriptedClient(turns []Turn) *ScriptedClient {
-	return &ScriptedClient{turns: turns}
+	turnsCopy := make([]Turn, len(turns))
+	for i, t := range turns {
+		turnsCopy[i] = t
+		if t.Response != nil {
+			resp := *t.Response
+			turnsCopy[i].Response = &resp
+		}
+	}
+	return &ScriptedClient{turns: turnsCopy}
 }
 
 func (c *ScriptedClient) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {

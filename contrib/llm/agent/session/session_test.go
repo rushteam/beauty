@@ -256,3 +256,147 @@ func TestManager_RollingSummary(t *testing.T) {
 		t.Fatalf("下一轮应把摘要注入 System: %q", runClient.last.System)
 	}
 }
+
+// KeepRecent >= len(Messages) 时不应 panic,也不应截断消息。
+func TestManager_SummarizerKeepRecentGteLen(t *testing.T) {
+	ctx := context.Background()
+	runClient := &replyClient{reply: "ok"}
+	sumClient := &replyClient{reply: "摘要"}
+	r := &agent.Runner{Client: runClient}
+	st := session.NewMemoryStore()
+	m := &session.Manager{
+		Store:      st,
+		Summarizer: &session.Summarizer{Client: sumClient, Model: "m", MaxMessages: 4, KeepRecent: 100},
+	}
+
+	for _, in := range []string{"a", "b", "c"} {
+		out := m.Run(ctx, "s", r, user(in))
+		if _, err := out.Final(); err != nil {
+			t.Fatalf("run %s: %v", in, err)
+		}
+	}
+	sess, _ := st.Load(ctx, "s")
+	if sess == nil || len(sess.Messages) != 6 {
+		t.Fatalf("KeepRecent>=len 时不应压缩, got %d msgs", len(sess.Messages))
+	}
+}
+
+// pauseContinueAgent 模拟暂停后 Continue 的多步工具链。
+type pauseContinueAgent struct {
+	runID string
+}
+
+func (a *pauseContinueAgent) Info() agent.Info { return agent.Info{Name: "stub"} }
+
+func (a *pauseContinueAgent) Run(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		a.runID = "run-1"
+		tc := llm.ToolCall{ID: "c1", Name: "echo"}
+		if !yield(agent.Event{
+			Type: agent.EventStep, RunID: a.runID,
+			Response: &llm.Response{Content: "calling", ToolCalls: []llm.ToolCall{tc}},
+		}, nil) {
+			return
+		}
+		yield(agent.Event{
+			Type: agent.EventPaused, RunID: a.runID,
+			Response: &llm.Response{Content: "calling", ToolCalls: []llm.ToolCall{tc}},
+		}, nil)
+	}
+}
+
+func (a *pauseContinueAgent) Continue(_ context.Context, _ string, _ []agent.Resolution, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		tc := llm.ToolCall{ID: "c1", Name: "echo"}
+		if !yield(agent.Event{Type: agent.EventToolResult, RunID: a.runID, ToolCall: &tc, Result: "echoed"}, nil) {
+			return
+		}
+		if !yield(agent.Event{Type: agent.EventStep, RunID: a.runID, Response: &llm.Response{Content: "thinking"}}, nil) {
+			return
+		}
+		yield(agent.Event{Type: agent.EventFinal, RunID: a.runID, Response: &llm.Response{Content: "done"}}, nil)
+	}
+}
+
+// 暂停时应持久化用户消息与 step 中间态;Continue 后 tool 结果也应写入会话。
+func TestManager_PauseContinue_PersistsIntermediates(t *testing.T) {
+	ctx := context.Background()
+	st := session.NewMemoryStore()
+	m := &session.Manager{Store: st}
+	a := &pauseContinueAgent{}
+
+	var paused bool
+	for ev, err := range m.RunIter(ctx, "s-pause", a, user("hello")) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Type == agent.EventPaused {
+			paused = true
+		}
+	}
+	if !paused {
+		t.Fatal("应收到 EventPaused")
+	}
+	sess, _ := st.Load(ctx, "s-pause")
+	if sess == nil || len(sess.Messages) != 2 {
+		t.Fatalf("暂停后应持久化 user+assistant tool step, got %+v", sess)
+	}
+	if sess.Messages[0].Content != "hello" || len(sess.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("暂停快照不对: %+v", sess.Messages)
+	}
+
+	var final string
+	for ev, err := range m.ContinueIter(ctx, "s-pause", a, nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Type == agent.EventFinal {
+			final = ev.Response.Content
+		}
+	}
+	if final != "done" {
+		t.Fatalf("final=%q", final)
+	}
+	sess, _ = st.Load(ctx, "s-pause")
+	if len(sess.Messages) != 4 {
+		t.Fatalf("Continue 后应有 user+tool_step+tool_result+assistant, got %d: %+v", len(sess.Messages), sess.Messages)
+	}
+	if sess.Messages[2].Role != llm.Tool || sess.Messages[2].Content != "echoed" {
+		t.Fatalf("tool 结果未持久化: %+v", sess.Messages[2])
+	}
+	if sess.Messages[3].Content != "done" {
+		t.Fatalf("assistant 未持久化: %+v", sess.Messages[3])
+	}
+}
+
+type noFinalAgent struct{}
+
+func (a *noFinalAgent) Info() agent.Info { return agent.Info{Name: "stub"} }
+
+func (a *noFinalAgent) Run(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		yield(agent.Event{Type: agent.EventStep, RunID: "r1", Response: &llm.Response{Content: "partial"}}, nil)
+	}
+}
+
+func (a *noFinalAgent) Continue(_ context.Context, _ string, _ []agent.Resolution, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return a.Run(context.Background(), llm.Request{})
+}
+
+// 无 EventFinal 结束时应产出 EventError,而非静默成功。
+func TestManager_RunIter_NoFinalYieldsError(t *testing.T) {
+	ctx := context.Background()
+	m := &session.Manager{Store: session.NewMemoryStore()}
+	var gotErr bool
+	for ev, err := range m.RunIter(ctx, "s-nofinal", &noFinalAgent{}, user("hi")) {
+		if ev.Type == agent.EventError {
+			gotErr = true
+			if err == nil {
+				t.Fatal("EventError 应携带 err")
+			}
+		}
+	}
+	if !gotErr {
+		t.Fatal("无 final 时应产出 EventError")
+	}
+}

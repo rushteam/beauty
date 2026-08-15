@@ -82,6 +82,12 @@ func WithStrict(strict bool) SchemaOption {
 	return func(c *schemaConfig) { c.strict = strict }
 }
 
+// GenerateSchema 从 Go 类型生成 JSON Schema(简化版,覆盖常用类型)。
+// 供 Tool 参数、结构化输出等场景复用。
+func GenerateSchema(t reflect.Type) (json.RawMessage, error) {
+	return generateSchema(t)
+}
+
 // generateSchema 从 Go 类型生成 JSON Schema(简化版,覆盖常用类型)。
 func generateSchema(t reflect.Type) (json.RawMessage, error) {
 	schema := buildSchema(t)

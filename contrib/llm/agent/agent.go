@@ -2,7 +2,7 @@
 // 步数上限或 PermitAsk 原子暂停。Run/Continue 返回 iter.Seq2[Event, error];CollectOutcome
 // 可收束为 RunOutcome。审批不进 Runner 核心(产品路径显式 Continue;阻塞审批用外置 SyncHITL)。
 //
-// Runner / Chain / Team / Parallel / BestOfN / VerifyLoop 实现同一 Agent 契约,可互相嵌套。
+// Runner / Chain / Team / Parallel / GroupChat / BestOfN / VerifyLoop 实现同一 Agent 契约,可互相嵌套。
 package agent
 
 import (

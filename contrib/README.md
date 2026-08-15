@@ -45,6 +45,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
 | [`contrib/rabbitmq`](rabbitmq) | `pkg/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
 | [`contrib/redisstream`](redisstream) | `pkg/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
+| [`contrib/graphql`](graphql) | GraphQL/BFF 层:gqlgen schema-first 封装为 beauty.Service + DataLoader + 复杂度限制 + APQ + 认证透传 + Federation + Subscription(WS/SSE) | 99designs/gqlgen |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 | [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 多厂商(OpenAI 兼容 / Anthropic / **AWS Bedrock**)+ 薄 **agent 循环**(`llm/agent`,含审批/流式事件/Steer/Hooks + 统一 Agent 接口/**Planner**/**Team 移交**/**Parallel 并发**/**BestOfN**/**VerifyLoop** 编排 + 工具参数 **JSON 容错**/运行内**上下文压缩**/消息合并)+ **会话记忆** + **Agent Skills** | 无(纯 stdlib) |
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |

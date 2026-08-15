@@ -1,0 +1,36 @@
+type Query {
+  user(id: ID!): User
+  users(limit: Int = 10): [User!]!
+  order(id: ID!): Order
+}
+
+type Mutation {
+  createOrder(input: CreateOrderInput!): Order!
+}
+
+type Subscription {
+  orderStatus(orderId: ID!): Order!
+}
+
+type User {
+  id: ID!
+  name: String!
+  email: String!
+  orders: [Order!]!
+}
+
+type Order {
+  id: ID!
+  userId: ID!
+  total: Float!
+  status: String!
+  items: [String!]!
+  updatedAt: String!
+  user: User
+}
+
+input CreateOrderInput {
+  userId: ID!
+  items: [String!]!
+  total: Float!
+}

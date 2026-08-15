@@ -248,6 +248,12 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 	}
 
 	var last *llm.Response
+	var consecutiveErrors int
+	maxConsecErrors := r.MaxConsecutiveErrors
+	if maxConsecErrors <= 0 {
+		maxConsecErrors = DefaultMaxConsecutiveErrors
+	}
+
 	for step := startStep; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			out := outcomeError(runID, last, msgs, err)
@@ -255,7 +261,11 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			return out
 		}
 
-		if r.Scope != nil {
+		// 最后一轮:去掉 tools schema,让模型只能生成文本回复(优雅收尾,不再粗暴 ErrMaxSteps)
+		isLastStep := step == maxSteps
+		if isLastStep {
+			req.Tools = nil
+		} else if r.Scope != nil {
 			activeTools = r.Scope.Filter(ctx, step, tools)
 			defs = make([]llm.ToolDef, len(activeTools))
 			byName = make(map[string]Tool, len(activeTools))
@@ -376,7 +386,27 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			return r.pauseNested(ctx, runID, req, msgs, resp, step, nested)
 		}
 		msgs = append(msgs, toolMsgs...)
+
+		// 连续工具错误熔断:如果本轮所有工具都失败,计数器递增
+		allFailed := true
+		for _, tm := range toolMsgs {
+			if tm.Role == llm.Tool && !strings.HasPrefix(tm.Content, "error:") {
+				allFailed = false
+				break
+			}
+		}
+		if allFailed && len(toolMsgs) > 0 {
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecErrors {
+				out := outcomeError(runID, last, msgs, ErrConsecutiveErrors)
+				r.afterTurn(ctx, &out)
+				return out
+			}
+		} else {
+			consecutiveErrors = 0
+		}
 	}
+	// maxSteps 到达但最后一步(无 tools)模型仍未给出无工具回复——不应到这里
 	out := outcomeError(runID, last, msgs, ErrMaxSteps)
 	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunError, runID).WithStep(maxSteps))
 	r.afterTurn(ctx, &out)

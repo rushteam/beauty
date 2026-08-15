@@ -46,6 +46,9 @@ func Func(name, description string, parameters json.RawMessage, call func(contex
 // DefaultMaxSteps 是未设置 Runner.MaxSteps 时的默认步数上限。
 const DefaultMaxSteps = 8
 
+// DefaultMaxConsecutiveErrors 是连续工具全失败轮数的默认熔断阈值。
+const DefaultMaxConsecutiveErrors = 3
+
 // TriggerType 标识一次 agent 运行(及其发出的 Event)由何种事件触发。
 type TriggerType string
 
@@ -283,6 +286,10 @@ type Runner struct {
 	Tools    []Tool
 	MaxSteps int
 
+	// MaxConsecutiveErrors 连续工具全失败轮数达到此值时熔断(默认 3)。
+	// 防止工具持续报错时无意义消耗步数。
+	MaxConsecutiveErrors int
+
 	Name           string
 	Description    string
 	Planner        Planner
@@ -312,6 +319,10 @@ type Runner struct {
 
 	// SessionID 用于 HistoryProvider 的 session 标识。空串时回退到 Name。
 	SessionID string
+
+	// ApprovalRules 持久化的 standing approval 规则。匹配的 PermitAsk 工具自动放行。
+	// nil 时不启用(每次都要求审批)。
+	ApprovalRules *ApprovalStore
 
 	// nestedResume 保存 AgentAsTool 等冒泡暂停时的子 Continue 回调(进程内,不入 Store)。
 	nestedResume sync.Map // runID → func(ctx, []Resolution, ...Option) iter.Seq2[Event, error]
@@ -469,6 +480,10 @@ func (r *Runner) askRequirements(byName map[string]Tool, tcs []llm.ToolCall) []R
 			perm = t.effectivePerm()
 		}
 		if perm == PermitAsk {
+			// Standing rules 自动放行:匹配时跳过审批
+			if r.ApprovalRules != nil && r.ApprovalRules.IsApproved(tc) {
+				continue
+			}
 			id := tc.ID
 			if id == "" {
 				id = fmt.Sprintf("ask-%d", i)

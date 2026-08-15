@@ -47,6 +47,98 @@ func TestMemoryStore_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSession_SetMetaGetMeta_RoundTrip(t *testing.T) {
+	s := &session.Session{ID: "s1"}
+	type state struct {
+		Count int    `json:"count"`
+		Label string `json:"label"`
+	}
+	want := state{Count: 3, Label: "todo"}
+	if err := s.SetMeta("todo", want); err != nil {
+		t.Fatal(err)
+	}
+	var got state
+	ok, err := s.GetMeta("todo", &got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("GetMeta 应找到已设置的 key")
+	}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestSession_GetMeta_NotFound(t *testing.T) {
+	s := &session.Session{ID: "s1"}
+	var v int
+	ok, err := s.GetMeta("missing", &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("不存在的 key 应返回 false")
+	}
+}
+
+func TestSession_DeleteMeta(t *testing.T) {
+	s := &session.Session{ID: "s1"}
+	if err := s.SetMeta("k", 1); err != nil {
+		t.Fatal(err)
+	}
+	s.DeleteMeta("k")
+	var v int
+	ok, err := s.GetMeta("k", &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("DeleteMeta 后 GetMeta 应返回 false")
+	}
+}
+
+func TestMemoryStore_MetadataRoundTrip(t *testing.T) {
+	st := session.NewMemoryStore()
+	ctx := context.Background()
+	s := &session.Session{ID: "x"}
+	if err := s.SetMeta("compaction", map[string]int{"tokens": 42}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Load(ctx, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta map[string]int
+	ok, err := got.GetMeta("compaction", &meta)
+	if err != nil || !ok || meta["tokens"] != 42 {
+		t.Fatalf("metadata 未持久化: ok=%v err=%v meta=%v", ok, err, meta)
+	}
+}
+
+func TestMemoryStore_CloneSessionPreservesMetadata(t *testing.T) {
+	st := session.NewMemoryStore()
+	ctx := context.Background()
+	s := &session.Session{ID: "x"}
+	if err := s.SetMeta("ns", "value"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Load(ctx, "x")
+	got.Metadata["ns"] = []byte(`"changed"`)
+	again, _ := st.Load(ctx, "x")
+	var v string
+	ok, err := again.GetMeta("ns", &v)
+	if err != nil || !ok || v != "value" {
+		t.Fatalf("cloneSession 应深拷贝 metadata: ok=%v err=%v v=%q", ok, err, v)
+	}
+}
+
 // 多轮:第二轮请求应带上第一轮的 user+assistant 历史。
 func TestManager_PersistsAndInjectsHistory(t *testing.T) {
 	ctx := context.Background()

@@ -3,6 +3,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"iter"
 	"strings"
 	"sync"
@@ -19,6 +20,47 @@ type Session struct {
 	Messages     []llm.Message
 	PendingRunID string
 	UpdatedAt    time.Time
+	// Metadata 是中间件/harness 可在 session 中存储的任意 JSON 可序列化状态。
+	// key 是命名空间字符串(如 "compaction", "approval_rules", "todo"),
+	// value 是 json.RawMessage 以支持延迟反序列化。
+	Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
+}
+
+// GetMeta 从 session metadata 中反序列化指定 key 的值到 target。
+// key 不存在时返回 false。
+func (s *Session) GetMeta(key string, target any) (bool, error) {
+	if s.Metadata == nil {
+		return false, nil
+	}
+	raw, ok := s.Metadata[key]
+	if !ok {
+		return false, nil
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// SetMeta 把 value 序列化后存入 session metadata。
+func (s *Session) SetMeta(key string, value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if s.Metadata == nil {
+		s.Metadata = make(map[string]json.RawMessage)
+	}
+	s.Metadata[key] = raw
+	return nil
+}
+
+// DeleteMeta 删除指定 key 的 metadata。
+func (s *Session) DeleteMeta(key string) {
+	if s.Metadata == nil {
+		return
+	}
+	delete(s.Metadata, key)
 }
 
 // Store 持久化会话快照。Load 对不存在的 id 应返回 (nil, nil) 而非错误。
@@ -110,7 +152,18 @@ var (
 func cloneSession(s *Session) *Session {
 	msgs := make([]llm.Message, len(s.Messages))
 	copy(msgs, s.Messages)
-	return &Session{ID: s.ID, Summary: s.Summary, Messages: msgs, PendingRunID: s.PendingRunID, UpdatedAt: s.UpdatedAt}
+	var meta map[string]json.RawMessage
+	if len(s.Metadata) > 0 {
+		meta = make(map[string]json.RawMessage, len(s.Metadata))
+		for k, v := range s.Metadata {
+			meta[k] = append(json.RawMessage(nil), v...)
+		}
+	}
+	return &Session{
+		ID: s.ID, Summary: s.Summary, Messages: msgs,
+		PendingRunID: s.PendingRunID, UpdatedAt: s.UpdatedAt,
+		Metadata: meta,
+	}
 }
 
 // Manager 用 Store(+ 可选 Summarizer)给 Agent 加会话记忆。

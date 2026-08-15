@@ -140,7 +140,77 @@ func (p *InMemoryHistoryProvider) Invoked(_ context.Context, sessionID string, n
 		entry = &historyEntry{}
 		p.store[sessionID] = entry
 	}
-	persistable := llm.ExcludeSource(newMessages, llm.SourceHistory, llm.SourceContext, llm.SourceMiddleware)
-	entry.messages = append(entry.messages, persistable...)
+	entry.messages = append(entry.messages, llm.Persistable().Apply(newMessages)...)
 	return nil
+}
+
+// FilteringHistoryProvider 用可配置的消息 filter 包装 HistoryProvider。
+type FilteringHistoryProvider struct {
+	Inner       HistoryProvider
+	LoadFilter  llm.MessageFilter // Invoking 加载后应用(nil = 不过滤)
+	StoreFilter llm.MessageFilter // Invoked 持久化前应用(nil = Persistable)
+}
+
+func (p *FilteringHistoryProvider) Invoking(ctx context.Context, sessionID string) ([]llm.Message, string, error) {
+	msgs, systemExtra, err := p.Inner.Invoking(ctx, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
+	if p.LoadFilter != nil {
+		msgs = p.LoadFilter.Apply(msgs)
+	}
+	return msgs, systemExtra, nil
+}
+
+func (p *FilteringHistoryProvider) Invoked(ctx context.Context, sessionID string, newMessages []llm.Message) error {
+	storeFilter := p.StoreFilter
+	if storeFilter == nil {
+		storeFilter = llm.Persistable()
+	}
+	return p.Inner.Invoked(ctx, sessionID, storeFilter.Apply(newMessages))
+}
+
+// FilteringContextProvider 用消息 filter 包装 ContextProvider,过滤注入的上下文消息。
+type FilteringContextProvider struct {
+	Inner        ContextProvider
+	InjectFilter llm.MessageFilter // Invoking 注入前应用(nil = 不过滤)
+}
+
+func (p *FilteringContextProvider) Invoking(ctx context.Context, req *llm.Request) ([]llm.Message, []Tool, error) {
+	msgs, tools, err := p.Inner.Invoking(ctx, req)
+	if err != nil {
+		return nil, nil, err
+	}
+	if p.InjectFilter != nil {
+		msgs = p.InjectFilter.Apply(msgs)
+	}
+	return msgs, tools, nil
+}
+
+func (p *FilteringContextProvider) Invoked(ctx context.Context, outcome *RunOutcome) error {
+	return p.Inner.Invoked(ctx, outcome)
+}
+
+// WithLoadFilter 包装 HistoryProvider,在加载历史时过滤消息。
+func WithLoadFilter(hp HistoryProvider, f llm.MessageFilter) HistoryProvider {
+	if fp, ok := hp.(*FilteringHistoryProvider); ok {
+		return &FilteringHistoryProvider{
+			Inner:       fp.Inner,
+			LoadFilter:  f,
+			StoreFilter: fp.StoreFilter,
+		}
+	}
+	return &FilteringHistoryProvider{Inner: hp, LoadFilter: f}
+}
+
+// WithStoreFilter 包装 HistoryProvider,在持久化前过滤消息。
+func WithStoreFilter(hp HistoryProvider, f llm.MessageFilter) HistoryProvider {
+	if fp, ok := hp.(*FilteringHistoryProvider); ok {
+		return &FilteringHistoryProvider{
+			Inner:       fp.Inner,
+			LoadFilter:  fp.LoadFilter,
+			StoreFilter: f,
+		}
+	}
+	return &FilteringHistoryProvider{Inner: hp, StoreFilter: f}
 }

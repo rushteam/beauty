@@ -55,6 +55,12 @@ type WithResponseFormat struct{ Format *llm.ResponseFormat }
 
 func (WithResponseFormat) agentOption() {}
 
+// WithToolChoice 覆盖本次运行的工具选择策略。
+// 值: ""/"auto"(模型自决)、"none"(禁用)、"required"(必须调用)、或具体工具名。
+type WithToolChoice string
+
+func (WithToolChoice) agentOption() {}
+
 // applyOptions 把 per-run options 合并到 Request 和运行参数上。
 func applyOptions(req *llm.Request, tools *[]Tool, maxSteps *int, opts []Option) {
 	for _, o := range opts {
@@ -75,6 +81,8 @@ func applyOptions(req *llm.Request, tools *[]Tool, maxSteps *int, opts []Option)
 			req.Temperature = float64(v)
 		case WithResponseFormat:
 			req.ResponseFormat = v.Format
+		case WithToolChoice:
+			req.ToolChoice = string(v)
 		}
 	}
 }

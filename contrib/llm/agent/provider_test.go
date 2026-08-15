@@ -100,3 +100,136 @@ func TestHistoryProviderFunc(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFilteringHistoryProvider_LoadFilter(t *testing.T) {
+	inner := agent.NewInMemoryHistoryProvider()
+	ctx := context.Background()
+
+	// 预置历史: user + assistant + tool
+	_ = inner.Invoked(ctx, "s1", []llm.Message{
+		{Role: llm.User, Content: "q", Source: llm.SourceUser},
+		{Role: llm.Assistant, Content: "a", Source: llm.SourceModel},
+		{Role: llm.Tool, Content: "result", Source: llm.SourceModel},
+	})
+
+	hp := &agent.FilteringHistoryProvider{
+		Inner:      inner,
+		LoadFilter: llm.ByRole(llm.User, llm.Assistant),
+	}
+	msgs, _, err := hp.Invoking(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("LoadFilter: got %d messages, want 2 (user+assistant only)", len(msgs))
+	}
+	for _, m := range msgs {
+		if m.Role != llm.User && m.Role != llm.Assistant {
+			t.Errorf("unexpected role %q", m.Role)
+		}
+	}
+}
+
+func TestFilteringHistoryProvider_StoreFilter(t *testing.T) {
+	inner := agent.NewInMemoryHistoryProvider()
+	ctx := context.Background()
+
+	hp := &agent.FilteringHistoryProvider{
+		Inner:       inner,
+		StoreFilter: llm.ByRole(llm.User, llm.Assistant),
+	}
+	err := hp.Invoked(ctx, "s1", []llm.Message{
+		{Role: llm.User, Content: "q", Source: llm.SourceUser},
+		{Role: llm.Assistant, Content: "a", Source: llm.SourceModel},
+		{Role: llm.Tool, Content: "result", Source: llm.SourceModel},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, _, err := inner.Invoking(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("StoreFilter: stored %d messages, want 2 (tool excluded)", len(msgs))
+	}
+}
+
+func TestFilteringContextProvider_InjectFilter(t *testing.T) {
+	inner := agent.ContextProviderFunc(func(_ context.Context, _ *llm.Request) ([]llm.Message, []agent.Tool, error) {
+		return []llm.Message{
+			{Role: llm.User, Content: "doc1", Source: llm.SourceContext},
+			{Role: llm.User, Content: "doc2", Source: llm.SourceContext},
+			{Role: llm.Assistant, Content: "hint", Source: llm.SourceContext},
+		}, nil, nil
+	})
+
+	cp := &agent.FilteringContextProvider{
+		Inner:        inner,
+		InjectFilter: llm.HasContent(),
+	}
+	msgs, _, err := cp.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("InjectFilter: got %d messages, want 3", len(msgs))
+	}
+
+	cp2 := &agent.FilteringContextProvider{
+		Inner:        inner,
+		InjectFilter: llm.ByRole(llm.User),
+	}
+	msgs, _, err = cp2.Invoking(context.Background(), &llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("InjectFilter ByRole(User): got %d messages, want 2", len(msgs))
+	}
+}
+
+func TestWithLoadFilter_WithStoreFilter(t *testing.T) {
+	inner := agent.NewInMemoryHistoryProvider()
+	ctx := context.Background()
+
+	// 预置 user+assistant+tool 历史
+	_ = inner.Invoked(ctx, "s1", []llm.Message{
+		{Role: llm.User, Content: "q", Source: llm.SourceUser},
+		{Role: llm.Assistant, Content: "a", Source: llm.SourceModel},
+		{Role: llm.Tool, Content: "r", Source: llm.SourceModel},
+	})
+
+	hp := agent.WithLoadFilter(
+		agent.WithStoreFilter(inner, llm.ByRole(llm.User, llm.Assistant)),
+		llm.ByRole(llm.User, llm.Assistant),
+	)
+
+	// LoadFilter 应排除 tool
+	msgs, _, err := hp.Invoking(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("WithLoadFilter: got %d messages, want 2", len(msgs))
+	}
+
+	// StoreFilter 应排除 tool,仅追加 user
+	err = hp.Invoked(ctx, "s1", []llm.Message{
+		{Role: llm.User, Content: "q2", Source: llm.SourceUser},
+		{Role: llm.Tool, Content: "r2", Source: llm.SourceModel},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all, _, err := inner.Invoking(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 原有 3 + 新增 1(user), tool 被 StoreFilter 排除
+	if len(all) != 4 {
+		t.Fatalf("WithStoreFilter: stored %d total messages, want 4", len(all))
+	}
+}

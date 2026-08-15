@@ -23,6 +23,9 @@ const (
 // ErrMaxSteps 表示循环到达 MaxSteps 仍未得到终态回复。
 var ErrMaxSteps = errors.New("agent: reached max steps without final response")
 
+// ErrConsecutiveErrors 表示连续多轮工具调用全部失败,触发熔断。
+var ErrConsecutiveErrors = errors.New("agent: too many consecutive tool errors, circuit broken")
+
 // ErrPaused 在需要把「暂停」表示成 error 的边界使用(少见);正常路径用 RunOutcome.Status=Paused。
 var ErrPaused = errors.New("agent: run paused; call Continue with resolutions")
 

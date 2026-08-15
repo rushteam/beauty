@@ -136,28 +136,24 @@ func TestStream_Anthropic(t *testing.T) {
 	defer srv.Close()
 
 	cli := testClient(t, srv)
-	ch, err := cli.Stream(context.Background(), llm.Request{
-		Model:    "anthropic.claude-3-5-sonnet-20241022-v2:0",
-		Messages: []llm.Message{{Role: llm.User, Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var text strings.Builder
 	var final llm.Chunk
-	for c := range ch {
-		if c.Err != nil {
-			t.Fatalf("chunk err: %v", c.Err)
+	for c, err := range cli.Stream(context.Background(), llm.Request{
+		Model:    "anthropic.claude-3-5-sonnet-20241022-v2:0",
+		Messages: []llm.Message{{Role: llm.User, Content: "hi"}},
+	}) {
+		if err != nil {
+			t.Fatalf("chunk err: %v", err)
 		}
 		text.WriteString(c.Delta)
-		if c.Done {
+		if c.Usage != nil || len(c.ToolCalls) > 0 {
 			final = c
 		}
 	}
 	if text.String() != "Hello" {
 		t.Fatalf("streamed text = %q", text.String())
 	}
-	if !final.Done || final.Usage == nil || final.Usage.InputTokens != 9 || final.Usage.OutputTokens != 7 {
+	if final.Usage == nil || final.Usage.InputTokens != 9 || final.Usage.OutputTokens != 7 {
 		t.Fatalf("final chunk = %#v usage=%#v", final, final.Usage)
 	}
 }
@@ -172,19 +168,15 @@ func TestStream_ToolCalls_Anthropic(t *testing.T) {
 	defer srv.Close()
 
 	cli := testClient(t, srv)
-	ch, err := cli.Stream(context.Background(), llm.Request{
+	var final llm.Chunk
+	for c, err := range cli.Stream(context.Background(), llm.Request{
 		Model:    "anthropic.claude-3-5-sonnet-20241022-v2:0",
 		Messages: []llm.Message{{Role: llm.User, Content: "weather?"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var final llm.Chunk
-	for c := range ch {
-		if c.Err != nil {
-			t.Fatalf("chunk err: %v", c.Err)
+	}) {
+		if err != nil {
+			t.Fatalf("chunk err: %v", err)
 		}
-		if c.Done {
+		if len(c.ToolCalls) > 0 {
 			final = c
 		}
 	}
@@ -208,17 +200,13 @@ func TestStream_ExceptionFrame(t *testing.T) {
 	defer srv.Close()
 
 	cli := testClient(t, srv)
-	ch, err := cli.Stream(context.Background(), llm.Request{
+	var gotErr error
+	for _, err := range cli.Stream(context.Background(), llm.Request{
 		Model:    "anthropic.claude-3-5-sonnet-20241022-v2:0",
 		Messages: []llm.Message{{Role: llm.User, Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var gotErr error
-	for c := range ch {
-		if c.Err != nil {
-			gotErr = c.Err
+	}) {
+		if err != nil {
+			gotErr = err
 		}
 	}
 	if gotErr == nil || !strings.Contains(gotErr.Error(), "throttlingException") {

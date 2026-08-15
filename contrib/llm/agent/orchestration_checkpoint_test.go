@@ -90,7 +90,7 @@ func TestChainCheckpointPause(t *testing.T) {
 	if snap == nil || snap.EventCount <= 0 {
 		t.Fatal("expected checkpoint snap with EventCount")
 	}
-	cont := chain.Continue(context.Background(), out.RunID, []agent.Resolution{{ID: "c1", Approved: true}})
+	cont := agent.CollectOutcome(chain.Continue(context.Background(), out.RunID, []agent.Resolution{{ID: "c1", Approved: true}}))
 	if !cont.IsDone() {
 		t.Fatalf("expected done after continue, got %s", cont.Status)
 	}

@@ -22,7 +22,7 @@ func TestScopeByName(t *testing.T) {
 		Scope: agent.ScopeByName("echo", "search"),
 	}
 
-	r.Run(context.Background(), llm.Request{Model: "m"})
+	agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 
 	if len(fc.lastReq.Tools) != 2 {
 		t.Fatalf("expected 2 tools, got %d: %v", len(fc.lastReq.Tools), fc.lastReq.Tools)
@@ -51,7 +51,7 @@ func TestScopeExclude(t *testing.T) {
 		Scope: agent.ScopeExclude("dangerous"),
 	}
 
-	r.Run(context.Background(), llm.Request{Model: "m"})
+	agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 
 	if len(fc.lastReq.Tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(fc.lastReq.Tools))
@@ -91,7 +91,7 @@ func TestScopeByStep(t *testing.T) {
 		},
 	}
 
-	r.Run(context.Background(), llm.Request{Model: "m"})
+	agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 
 	if step1Tools != 1 {
 		t.Errorf("step1 should have 1 tool, got %d", step1Tools)
@@ -117,7 +117,7 @@ func TestChainScopes(t *testing.T) {
 		),
 	}
 
-	r.Run(context.Background(), llm.Request{Model: "m"})
+	agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 
 	if len(fc.lastReq.Tools) != 1 || fc.lastReq.Tools[0].Name != "echo" {
 		t.Fatalf("expected only echo, got %v", fc.lastReq.Tools)

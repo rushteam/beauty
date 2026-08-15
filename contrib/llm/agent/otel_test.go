@@ -132,8 +132,7 @@ func (s *stubLLMClient) Generate(_ context.Context, _ llm.Request) (*llm.Respons
 }
 
 func (s *stubLLMClient) Stream(_ context.Context, _ llm.Request) iter.Seq2[llm.Chunk, error] {
-	ch := make(chan llm.Chunk, 1)
-	ch <- llm.Chunk{Done: true, Delta: s.response.Content, Usage: &s.response.Usage}
-	close(ch)
-	return ch, nil
+	return func(yield func(llm.Chunk, error) bool) {
+		yield(llm.Chunk{Delta: s.response.Content, Usage: &s.response.Usage}, nil)
+	}
 }

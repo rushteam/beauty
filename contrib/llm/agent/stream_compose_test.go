@@ -22,7 +22,7 @@ func TestRunner_RunStream(t *testing.T) {
 
 	var types []agent.EventType
 	var final string
-	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}) {
+	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}) {
 		types = append(types, ev.Type)
 		if ev.Type == agent.EventFinal && ev.Response != nil {
 			final = ev.Response.Content
@@ -54,20 +54,25 @@ func TestRunner_Cancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := r.Run(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "x"}}})
 
+	var gotErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev, _ := range ch {
+			if ev.Type == agent.EventError {
+				gotErr = ev.Err
+			}
+		}
+	}()
+
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
-		t.Fatal("Generate 未进入")
+		t.Fatal("Stream 未进入")
 	}
 	cancel()
 	close(block)
-
-	var gotErr error
-	for ev, err := range ch {
-		if ev.Type == agent.EventError {
-			gotErr = ev.Err
-		}
-	}
+	<-done
 	if !errors.Is(gotErr, context.Canceled) {
 		t.Fatalf("want canceled, got %v", gotErr)
 	}
@@ -95,8 +100,24 @@ func (b *blockingClient) Generate(ctx context.Context, _ llm.Request) (*llm.Resp
 	return &llm.Response{Content: "ok"}, nil
 }
 
-func (b *blockingClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
-	return unusedStream()
+func (b *blockingClient) Stream(ctx context.Context, _ llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		if !b.once {
+			b.once = true
+			close(b.entered)
+			select {
+			case <-b.block:
+			case <-ctx.Done():
+				yield(llm.Chunk{}, ctx.Err())
+				return
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			yield(llm.Chunk{}, err)
+			return
+		}
+		yield(llm.Chunk{Delta: "ok"}, nil)
+	}
 }
 
 func TestPermission_Deny(t *testing.T) {

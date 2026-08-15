@@ -16,10 +16,10 @@ func TestManagerRecordsSessionEvents(t *testing.T) {
 	r := &agent.Runner{
 		Client: &stubClient{content: "reply"},
 	}
-	out := agent.CollectOutcome(mgr.Run(context.Background(), "s1", r, llm.Request{
+	out := mgr.Run(context.Background(), "s1", r, llm.Request{
 		Model:    "m",
 		Messages: []llm.Message{{Role: llm.User, Content: "hello"}},
-	}))
+	})
 	if !out.IsDone() {
 		t.Fatalf("expected done, got %s err=%v", out.Status, out.Err)
 	}
@@ -40,9 +40,8 @@ func (c *stubClient) Generate(ctx context.Context, req llm.Request) (*llm.Respon
 	return &llm.Response{Content: c.content}, nil
 }
 
-func (c *stubClient) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
-	ch := make(chan llm.Chunk, 1)
-	ch <- llm.Chunk{Delta: c.content}
-	close(ch)
-	return ch, nil
+func (c *stubClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		yield(llm.Chunk{Delta: c.content}, nil)
+	}
 }

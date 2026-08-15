@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
@@ -350,7 +351,12 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			return out
 		}
 
-		emitUI := func(e Event) { r.emitEvent(ctx, runID, emit, e) }
+		var emitMu sync.Mutex
+		emitUI := func(e Event) {
+			emitMu.Lock()
+			r.emitEvent(ctx, runID, emit, e)
+			emitMu.Unlock()
+		}
 		toolMsgs, fatal, nested := r.runTools(ctx, step, byName, resp.ToolCalls, emitUI)
 		for i := range toolMsgs {
 			toolMsgs[i].Source = llm.SourceTool
@@ -435,7 +441,7 @@ func (r *Runner) callModel(ctx context.Context, req llm.Request, step int, emit 
 		Model:     req.Model,
 		Thinking:  thinking.String(),
 	}
-	if len(req.Tools) > 0 && len(toolCalls) == 0 && content.Len() == 0 {
+	if content.Len() == 0 && len(toolCalls) == 0 && thinking.Len() == 0 {
 		return r.Client.Generate(ctx, req)
 	}
 	return resp, nil

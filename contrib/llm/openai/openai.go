@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"sort"
 	"strings"
@@ -335,26 +336,29 @@ func (c *Client) generateCompletion(ctx context.Context, req llm.Request) (*llm.
 	return r, nil
 }
 
-func (c *Client) streamCompletion(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	resp, err := c.post(ctx, "completions", completionReq{
-		Model: req.Model, Prompt: c.instTmpl.Format(req),
-		MaxTokens: req.MaxTokens, Temperature: req.Temperature,
-		Stop: c.instTmpl.MergeStops(req.Stop), Stream: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("openai: completion request: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
+func (c *Client) streamCompletion(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		resp, err := c.post(ctx, "completions", completionReq{
+			Model: req.Model, Prompt: c.instTmpl.Format(req),
+			MaxTokens: req.MaxTokens, Temperature: req.Temperature,
+			Stop: c.instTmpl.MergeStops(req.Stop), Stream: true,
+		})
+		if err != nil {
+			yield(llm.Chunk{}, fmt.Errorf("openai: completion request: %w", err))
+			return
+		}
 		defer resp.Body.Close()
-		return nil, apiError(resp)
-	}
-	out := make(chan llm.Chunk)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			yield(llm.Chunk{}, apiError(resp))
+			return
+		}
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
+			if err := ctx.Err(); err != nil {
+				yield(llm.Chunk{}, err)
+				return
+			}
 			line := strings.TrimSpace(sc.Text())
 			data, ok := strings.CutPrefix(line, "data:")
 			if !ok {
@@ -362,7 +366,6 @@ func (c *Client) streamCompletion(ctx context.Context, req llm.Request) (<-chan 
 			}
 			data = strings.TrimSpace(data)
 			if data == "[DONE]" {
-				out <- llm.Chunk{Done: true}
 				return
 			}
 			var ev struct {
@@ -374,20 +377,15 @@ func (c *Client) streamCompletion(ctx context.Context, req llm.Request) (<-chan 
 				continue
 			}
 			if len(ev.Choices) > 0 && ev.Choices[0].Text != "" {
-				select {
-				case out <- llm.Chunk{Delta: ev.Choices[0].Text}:
-				case <-ctx.Done():
+				if !yield(llm.Chunk{Delta: ev.Choices[0].Text}, nil) {
 					return
 				}
 			}
 		}
 		if err := sc.Err(); err != nil {
-			out <- llm.Chunk{Err: fmt.Errorf("openai: completion stream: %w", err)}
-			return
+			yield(llm.Chunk{}, fmt.Errorf("openai: completion stream: %w", err))
 		}
-		out <- llm.Chunk{Done: true}
-	}()
-	return out, nil
+	}
 }
 
 func buildChatReq(req llm.Request, stream bool) chatReq {
@@ -450,24 +448,23 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 }
 
 // Stream 实现 llm.Client(SSE:data: {json} ... data: [DONE])。
-// 透传文本增量和思考增量,并组装流式 tool_calls(按 index 拼接 arguments),在 Done 时带回完整 ToolCalls。
+// 透传文本增量和思考增量,并组装流式 tool_calls(按 index 拼接 arguments),在结束时带回完整 ToolCalls。
 // Completion mode 下走 /v1/completions 的流式格式(delta 在 choices[0].text)。
-func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
+func (c *Client) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
 	if c.instTmpl != nil {
 		return c.streamCompletion(ctx, req)
 	}
-	resp, err := c.post(ctx, "chat/completions", buildChatReq(req, true))
-	if err != nil {
-		return nil, fmt.Errorf("openai: request: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
+	return func(yield func(llm.Chunk, error) bool) {
+		resp, err := c.post(ctx, "chat/completions", buildChatReq(req, true))
+		if err != nil {
+			yield(llm.Chunk{}, fmt.Errorf("openai: request: %w", err))
+			return
+		}
 		defer resp.Body.Close()
-		return nil, apiError(resp)
-	}
-	out := make(chan llm.Chunk)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			yield(llm.Chunk{}, apiError(resp))
+			return
+		}
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		type acc struct {
@@ -479,7 +476,9 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 		finish := func() {
 			thinking := thinkingSB.String()
 			if len(byIdx) == 0 {
-				out <- llm.Chunk{Done: true, Thinking: thinking}
+				if thinking != "" {
+					yield(llm.Chunk{Thinking: thinking}, nil)
+				}
 				return
 			}
 			idxs := make([]int, 0, len(byIdx))
@@ -498,9 +497,13 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 					ID: a.id, Name: a.name, Arguments: json.RawMessage(args),
 				})
 			}
-			out <- llm.Chunk{Done: true, ToolCalls: tcs, Thinking: thinking}
+			yield(llm.Chunk{ToolCalls: tcs, Thinking: thinking}, nil)
 		}
 		for sc.Scan() {
+			if err := ctx.Err(); err != nil {
+				yield(llm.Chunk{}, err)
+				return
+			}
 			line := strings.TrimSpace(sc.Text())
 			data, ok := strings.CutPrefix(line, "data:")
 			if !ok {
@@ -536,16 +539,12 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			d := ev.Choices[0].Delta
 			if d.ReasoningContent != "" {
 				thinkingSB.WriteString(d.ReasoningContent)
-				select {
-				case out <- llm.Chunk{ThinkingDelta: d.ReasoningContent}:
-				case <-ctx.Done():
+				if !yield(llm.Chunk{ThinkingDelta: d.ReasoningContent}, nil) {
 					return
 				}
 			}
 			if d.Content != "" {
-				select {
-				case out <- llm.Chunk{Delta: d.Content}:
-				case <-ctx.Done():
+				if !yield(llm.Chunk{Delta: d.Content}, nil) {
 					return
 				}
 			}
@@ -565,12 +564,11 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			}
 		}
 		if err := sc.Err(); err != nil {
-			out <- llm.Chunk{Err: fmt.Errorf("openai: stream: %w", err)}
+			yield(llm.Chunk{}, fmt.Errorf("openai: stream: %w", err))
 			return
 		}
 		finish()
-	}()
-	return out, nil
+	}
 }
 
 // Embed 实现 llm.Embedder(/v1/embeddings)。model 由 EmbedModel 指定,默认 text-embedding-3-small。

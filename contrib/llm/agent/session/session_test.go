@@ -22,7 +22,7 @@ func (c *replyClient) Generate(_ context.Context, req llm.Request) (*llm.Respons
 	return &llm.Response{Content: c.reply, Model: req.Model}, nil
 }
 func (c *replyClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
-	return unusedStream()
+	return func(yield func(llm.Chunk, error) bool) {}
 }
 
 func user(text string) llm.Request {
@@ -54,16 +54,14 @@ func TestManager_PersistsAndInjectsHistory(t *testing.T) {
 	r := &agent.Runner{Client: fc}
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", r, user("第一句"))); !out.IsDone() {
-		if _, err := out.Final(); err != nil {
-			t.Fatalf("run1: %v", err)
-		}
+	out := m.Run(ctx, "s1", r, user("第一句"))
+	if _, err := out.Final(); err != nil {
+		t.Fatalf("run1: %v", err)
 	}
 	fc.reply = "回复B"
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", r, user("第二句"))); !out.IsDone() {
-		if _, err := out.Final(); err != nil {
-			t.Fatalf("run2: %v", err)
-		}
+	out = m.Run(ctx, "s1", r, user("第二句"))
+	if _, err := out.Final(); err != nil {
+		t.Fatalf("run2: %v", err)
 	}
 
 	// 第二轮 Runner 收到的消息:第一句(user)、回复A(assistant)、第二句(user)。
@@ -84,16 +82,14 @@ func TestManager_AcceptsNonRunnerAgent(t *testing.T) {
 	a := &agent.VerifyLoop{Agent: &agent.Runner{Client: fc}} // 实现 Agent,但不是 *Runner
 	m := &session.Manager{Store: session.NewMemoryStore()}
 
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", a, user("第一句"))); !out.IsDone() {
-		if _, err := out.Final(); err != nil {
-			t.Fatalf("run1: %v", err)
-		}
+	out := m.Run(ctx, "s1", a, user("第一句"))
+	if _, err := out.Final(); err != nil {
+		t.Fatalf("run1: %v", err)
 	}
 	fc.reply = "答复B"
-	if out := agent.CollectOutcome(m.Run(ctx, "s1", a, user("第二句"))); !out.IsDone() {
-		if _, err := out.Final(); err != nil {
-			t.Fatalf("run2: %v", err)
-		}
+	out = m.Run(ctx, "s1", a, user("第二句"))
+	if _, err := out.Final(); err != nil {
+		t.Fatalf("run2: %v", err)
 	}
 	msgs := fc.last.Messages
 	if len(msgs) != 3 || msgs[0].Content != "第一句" || msgs[1].Content != "答复A" || msgs[2].Content != "第二句" {
@@ -145,10 +141,9 @@ func TestManager_RollingSummary(t *testing.T) {
 
 	// 跑 3 轮 → 每轮 +2 条(user+assistant)= 6 条 > MaxMessages(4),触发摘要。
 	for _, in := range []string{"a", "b", "c"} {
-		if out := agent.CollectOutcome(m.Run(ctx, "s", r, user(in)))); !out.IsDone() {)
-			if _, err := out.Final(); err != nil {
-				t.Fatalf("run %s: %v", in, err)
-			}
+		out := m.Run(ctx, "s", r, user(in))
+		if _, err := out.Final(); err != nil {
+			t.Fatalf("run %s: %v", in, err)
 		}
 	}
 	sess, _ := st.Load(ctx, "s")

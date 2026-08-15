@@ -321,8 +321,6 @@ type Runner struct {
 	storeOnce sync.Once
 }
 
-var _ Agent = (*Runner)(nil)
-
 // ensureStore 在首次 Run 时初始化默认 Store。并发安全(见 storeOnce 注释)。
 func (r *Runner) ensureStore() {
 	r.storeOnce.Do(func() {

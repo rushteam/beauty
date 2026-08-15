@@ -119,7 +119,7 @@ func TestHooks_OnChunk(t *testing.T) {
 	}
 
 	var tokens []string
-	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventToken {
 			tokens = append(tokens, ev.Result)
 		}
@@ -153,7 +153,7 @@ func TestHooks_OnChunkError(t *testing.T) {
 	}
 
 	var errSeen bool
-	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventError && ev.Err != nil {
 			errSeen = true
 		}
@@ -220,7 +220,7 @@ func TestHooks_BeforeTool_ModifyArgs(t *testing.T) {
 		},
 	}
 
-	r.Run(context.Background(), llm.Request{Model: "m"})
+	agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 
 	if receivedArgs != `{"secret":"[REDACTED]"}` {
 		t.Errorf("BeforeTool should have rewritten args, got %s", receivedArgs)
@@ -244,7 +244,7 @@ func TestHooks_AfterTool_ModifyResult(t *testing.T) {
 		},
 	}
 
-	r.Run(context.Background(), llm.Request{Model: "m"})
+	agent.CollectOutcome(r.Run(context.Background(), llm.Request{Model: "m"}))
 
 	// 模型第二轮收到的 tool result 应被改写
 	msgs := fc.lastReq.Messages

@@ -32,7 +32,7 @@ func TestPause_ContinueApproved(t *testing.T) {
 	if fc.genCalls != 1 {
 		t.Fatalf("pause 前不应继续 Generate, genCalls=%d", fc.genCalls)
 	}
-	out = r.Continue(context.Background(), out.RunID, []agent.Resolution{{ID: "c1", Approved: true}})
+	out = agent.CollectOutcome(r.Continue(context.Background(), out.RunID, []agent.Resolution{{ID: "c1", Approved: true}}))
 	resp, err := out.Final()
 	if err != nil || resp.Content != "done" {
 		t.Fatalf("resp=%+v err=%v status=%s", resp, err, out.Status)
@@ -52,9 +52,9 @@ func TestPause_ContinueDenied(t *testing.T) {
 	if !out.IsPaused() {
 		t.Fatalf("want paused, got %s", out.Status)
 	}
-	out = r.Continue(context.Background(), out.RunID, []agent.Resolution{
+	out = agent.CollectOutcome(r.Continue(context.Background(), out.RunID, []agent.Resolution{
 		{ID: out.Requirements[0].ID, Approved: false, Reason: "太危险"},
-	})
+	}))
 	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("拒绝不应中止: %v", err)
@@ -146,7 +146,7 @@ func TestPause_AtomicRound(t *testing.T) {
 	if allowCalled {
 		t.Fatal("原子暂停:Allow 工具也不应在 Continue 前执行")
 	}
-	out = r.Continue(context.Background(), out.RunID, []agent.Resolution{{ID: "a1", Approved: true}})
+	out = agent.CollectOutcome(r.Continue(context.Background(), out.RunID, []agent.Resolution{{ID: "a1", Approved: true}}))
 	if _, err := out.Final(); err != nil {
 		t.Fatal(err)
 	}

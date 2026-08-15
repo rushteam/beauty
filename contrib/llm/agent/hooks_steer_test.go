@@ -40,7 +40,7 @@ func TestMailbox_Steer_InjectBetweenTools(t *testing.T) {
 	}
 
 	var sawSteer bool
-	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "start"}}}) {
+	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "start"}}}) {
 		if ev.Type == agent.EventSteer {
 			sawSteer = true
 		}
@@ -124,7 +124,7 @@ func TestMailbox_Steer_EventType(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "ok"}}}
 	r := &agent.Runner{Client: fc, Mailbox: mb}
 	var saw bool
-	for ev, err := range r.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventSteer && ev.Result == "hi-steer" {
 			saw = true
 		}

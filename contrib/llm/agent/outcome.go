@@ -43,12 +43,13 @@ type Resolution struct {
 
 // RunOutcome 是 Agent.Run / Continue 的统一结果。
 type RunOutcome struct {
-	Status       RunStatus
-	RunID        string
-	Response     *llm.Response // Done 时为终态;Paused 时为触发暂停的那轮模型输出
-	Messages     []llm.Message // 截至当前的规范历史
-	Requirements []Requirement // Paused 时非空
-	Err          error         // Status=Error 时非 nil
+	Status           RunStatus
+	RunID            string
+	Response         *llm.Response // Done 时为终态;Paused 时为触发暂停的那轮模型输出
+	Messages         []llm.Message // 截至当前的规范历史
+	Requirements     []Requirement // Paused 时非空
+	Err              error         // Status=Error 时非 nil
+	CompletingMember string        // 编排器用:完成终态的成员名(Team 等)
 }
 
 // IsDone 表示已得到终态文本回复。

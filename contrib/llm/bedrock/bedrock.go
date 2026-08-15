@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"os"
 	"strings"
@@ -158,54 +159,55 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 }
 
 // Stream 实现 llm.Client(/invoke-with-response-stream + event-stream 帧解码)。
-func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	codec, err := c.codecFor(req.Model)
-	if err != nil {
-		return nil, err
-	}
-	body, err := codec.BuildBody(req, true)
-	if err != nil {
-		return nil, fmt.Errorf("bedrock: build body: %w", err)
-	}
-	resp, err := c.invoke(ctx, req.Model, "/invoke-with-response-stream", body, "application/vnd.amazon.eventstream")
-	if err != nil {
-		return nil, fmt.Errorf("bedrock: request: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
+func (c *Client) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		codec, err := c.codecFor(req.Model)
+		if err != nil {
+			yield(llm.Chunk{}, err)
+			return
+		}
+		body, err := codec.BuildBody(req, true)
+		if err != nil {
+			yield(llm.Chunk{}, fmt.Errorf("bedrock: build body: %w", err))
+			return
+		}
+		resp, err := c.invoke(ctx, req.Model, "/invoke-with-response-stream", body, "application/vnd.amazon.eventstream")
+		if err != nil {
+			yield(llm.Chunk{}, fmt.Errorf("bedrock: request: %w", err))
+			return
+		}
 		defer resp.Body.Close()
-		return nil, apiError(resp)
-	}
-
-	out := make(chan llm.Chunk)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			yield(llm.Chunk{}, apiError(resp))
+			return
+		}
 
 		state := codec.NewStream()
 		dec := NewDecoder(resp.Body)
 		for {
+			if err := ctx.Err(); err != nil {
+				yield(llm.Chunk{}, err)
+				return
+			}
 			frame, err := dec.Next()
 			if err == io.EOF {
 				break
 			}
 			if err != nil {
-				out <- llm.Chunk{Err: fmt.Errorf("bedrock: stream: %w", err)}
+				yield(llm.Chunk{}, fmt.Errorf("bedrock: stream: %w", err))
 				return
 			}
-			// 异常帧:把 payload 当错误抛出。
 			if frame.MessageType() == "exception" || frame.ExceptionType() != "" {
-				out <- llm.Chunk{Err: fmt.Errorf("bedrock: stream %s: %s", frame.ExceptionType(), bytes.TrimSpace(frame.Payload))}
+				yield(llm.Chunk{}, fmt.Errorf("bedrock: stream %s: %s", frame.ExceptionType(), bytes.TrimSpace(frame.Payload)))
 				return
 			}
 			event, err := DecodeChunkBytes(frame.Payload)
 			if err != nil {
-				continue // 非 chunk 帧(如 metrics)或无内层 bytes,跳过
+				continue
 			}
 			delta, done := state.Feed(event)
 			if delta != "" {
-				select {
-				case out <- llm.Chunk{Delta: delta}:
-				case <-ctx.Done():
+				if !yield(llm.Chunk{Delta: delta}, nil) {
 					return
 				}
 			}
@@ -214,9 +216,8 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			}
 		}
 		tcs, usage := state.Result()
-		out <- llm.Chunk{Done: true, ToolCalls: tcs, Usage: &usage}
-	}()
-	return out, nil
+		yield(llm.Chunk{ToolCalls: tcs, Usage: &usage}, nil)
+	}
 }
 
 // Embed 实现 llm.Embedder。仅当所选家族 codec 实现 EmbedCodec 时可用(如 Titan Embeddings)。

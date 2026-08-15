@@ -127,9 +127,13 @@ func (tm *Team) Run(ctx context.Context, req llm.Request, opts ...Option) iter.S
 		tracker := &handoffTracker{cfg: tm.Config}
 		tm.cp().Started(ctx, runID, req)
 		out := tm.loop(ctx, runID, req, current, req, tracker, true, yield, opts...)
+		completing := out.CompletingMember
+		if completing == "" {
+			completing = tm.Name
+		}
 		switch out.Status {
 		case StatusDone:
-			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: tm.Name}, nil)
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: completing}, nil)
 		case StatusPaused:
 			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements, AgentName: tm.Name}, nil)
 		default:
@@ -199,7 +203,9 @@ func (tm *Team) loop(ctx context.Context, runID string, base llm.Request, curren
 		if !ok {
 			cp.Completed(ctx, runID)
 			_ = tm.Store.Delete(ctx, runID)
-			return outcomeDone(runID, last, nil)
+			out := outcomeDone(runID, last, nil)
+			out.CompletingMember = memberDisplayName(member, current)
+			return out
 		}
 		if _, exists := tm.Members[target]; !exists {
 			return outcomeError(runID, last, nil, fmt.Errorf("agent: team: member %q tried to hand off to unknown member %q", current, target))
@@ -252,9 +258,13 @@ func (tm *Team) runMember(ctx context.Context, member Agent, name string, req ll
 func (tm *Team) Continue(ctx context.Context, runID string, resolutions []Resolution, opts ...Option) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		out := tm.continueSync(ctx, runID, resolutions, yield, opts...)
+		completing := out.CompletingMember
+		if completing == "" {
+			completing = tm.Name
+		}
 		switch out.Status {
 		case StatusDone:
-			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: tm.Name}, nil)
+			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: completing}, nil)
 		case StatusPaused:
 			yield(Event{Type: EventPaused, Response: out.Response, RunID: out.RunID, Requirements: out.Requirements, AgentName: tm.Name}, nil)
 		default:
@@ -307,7 +317,9 @@ func (tm *Team) continueSync(ctx context.Context, runID string, resolutions []Re
 		if !isHandoff {
 			cp.Completed(ctx, runID)
 			_ = tm.Store.Delete(ctx, runID)
-			return outcomeDone(runID, last, nil)
+			out := outcomeDone(runID, last, nil)
+			out.CompletingMember = memberDisplayName(tr.member, tr.current)
+			return out
 		}
 		if _, exists := tm.Members[target]; !exists {
 			return outcomeError(runID, last, nil, fmt.Errorf("agent: team: member %q tried to hand off to unknown member %q", tr.current, target))

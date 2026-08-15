@@ -36,11 +36,6 @@ func TestGetOption(t *testing.T) {
 	if float64(temp) != 0.7 {
 		t.Errorf("temp = %f, want 0.7", temp)
 	}
-
-	_, ok = agent.GetOption[agent.WithStreaming](opts)
-	if ok {
-		t.Error("WithStreaming should not be found")
-	}
 }
 
 func TestGetOption_LastWins(t *testing.T) {

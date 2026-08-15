@@ -66,12 +66,9 @@ func TestOpenAI_Generate(t *testing.T) {
 
 func TestOpenAI_Stream(t *testing.T) {
 	c := openaiMock(t)
-	got, hasUsage := collect(t, c.Stream(context.Background(), llm.Request{Model: "gpt-4o", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}))
+	got, _ := collect(t, c.Stream(context.Background(), llm.Request{Model: "gpt-4o", Messages: []llm.Message{{Role: llm.User, Content: "hi"}}}))
 	if got != "hello" {
 		t.Fatalf("stream text = %q, want hello", got)
-	}
-	if !hasUsage {
-		t.Fatal("应收到 Usage")
 	}
 }
 

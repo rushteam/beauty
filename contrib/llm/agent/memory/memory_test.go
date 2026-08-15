@@ -83,5 +83,5 @@ func (s *scriptClient) Generate(_ context.Context, req llm.Request) (*llm.Respon
 }
 
 func (s *scriptClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
-	return unusedStream()
+	return func(yield func(llm.Chunk, error) bool) {}
 }

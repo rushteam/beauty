@@ -458,11 +458,11 @@ func AgentNode(a agent.Agent, model, system string) NodeFunc {
 		if system != "" {
 			sys = system
 		}
-		out := a.Run(ctx, llm.Request{
+		out := agent.CollectOutcome(a.Run(ctx, llm.Request{
 			Model:    m,
 			System:   sys,
 			Messages: msgs,
-		})
+		}))
 		switch out.Status {
 		case agent.StatusDone:
 			if out.Response != nil {

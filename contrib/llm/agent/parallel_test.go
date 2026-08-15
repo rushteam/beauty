@@ -86,7 +86,7 @@ func TestParallel_AllFail(t *testing.T) {
 		&agent.Runner{Client: errClient{}},
 		&agent.Runner{Client: errClient{}},
 	}}
-	if out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{})); !out.IsDone() {
+	if out := agent.CollectOutcome(p.Run(context.Background(), llm.Request{})); out.IsDone() {
 		t.Fatal("全部失败应报错")
 	}
 }
@@ -98,7 +98,7 @@ func TestParallel_RunStream(t *testing.T) {
 
 	var finals []agent.Event
 	tokens := map[string]int{}
-	for ev, err := range p.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev, _ := range p.Run(context.Background(), llm.Request{Model: "m"}) {
 		switch ev.Type {
 		case agent.EventError:
 			t.Fatalf("unexpected error: %v", ev.Err)

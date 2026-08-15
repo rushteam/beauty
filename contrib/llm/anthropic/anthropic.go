@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"strings"
 
@@ -140,26 +141,29 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 }
 
 // Stream 实现 llm.Client(SSE 事件流,支持文本增量、思考增量与流式 tool_calls 组装)。
-// 事件语义由 anthropicwire.EventAccumulator 处理;本函数只负责逐行取 SSE data 并推 channel。
-func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	betas := collectBetas(req)
-	resp, err := c.post(ctx, c.build(req, true), betas...)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: request: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
+// 事件语义由 anthropicwire.EventAccumulator 处理;本函数只负责逐行取 SSE data 并 yield。
+func (c *Client) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		betas := collectBetas(req)
+		resp, err := c.post(ctx, c.build(req, true), betas...)
+		if err != nil {
+			yield(llm.Chunk{}, fmt.Errorf("anthropic: request: %w", err))
+			return
+		}
 		defer resp.Body.Close()
-		return nil, apiError(resp)
-	}
-	out := make(chan llm.Chunk)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			yield(llm.Chunk{}, apiError(resp))
+			return
+		}
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 		acc := anthropicwire.NewEventAccumulator()
 		for sc.Scan() {
+			if err := ctx.Err(); err != nil {
+				yield(llm.Chunk{}, err)
+				return
+			}
 			line := strings.TrimSpace(sc.Text())
 			data, ok := strings.CutPrefix(line, "data:")
 			if !ok {
@@ -167,30 +171,25 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk,
 			}
 			sd := acc.FeedExt([]byte(strings.TrimSpace(data)))
 			if sd.Thinking != "" {
-				select {
-				case out <- llm.Chunk{ThinkingDelta: sd.Thinking}:
-				case <-ctx.Done():
+				if !yield(llm.Chunk{ThinkingDelta: sd.Thinking}, nil) {
 					return
 				}
 			}
 			if sd.Text != "" {
-				select {
-				case out <- llm.Chunk{Delta: sd.Text}:
-				case <-ctx.Done():
+				if !yield(llm.Chunk{Delta: sd.Text}, nil) {
 					return
 				}
 			}
 			if sd.Done {
 				tcs, usage := acc.Result()
-				out <- llm.Chunk{Done: true, ToolCalls: tcs, Usage: &usage, Thinking: acc.ThinkingText()}
+				yield(llm.Chunk{ToolCalls: tcs, Usage: &usage, Thinking: acc.ThinkingText()}, nil)
 				return
 			}
 		}
 		if err := sc.Err(); err != nil {
-			out <- llm.Chunk{Err: fmt.Errorf("anthropic: stream: %w", err)}
+			yield(llm.Chunk{}, fmt.Errorf("anthropic: stream: %w", err))
 		}
-	}()
-	return out, nil
+	}
 }
 
 // collectBetas 根据请求内容收集需要的 anthropic-beta 头。

@@ -13,7 +13,7 @@ func TestEvent_DefaultTrigger(t *testing.T) {
 	fc := &fakeClient{steps: []*llm.Response{{Content: "hi"}}}
 	r := &agent.Runner{Name: "root", Client: fc}
 	var n int
-	for ev, err := range r.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}) {
+	for ev, _ := range r.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}) {
 		n++
 		if ev.AgentName != "root" {
 			t.Fatalf("AgentName = %q, want root (ev=%s)", ev.AgentName, ev.Type)
@@ -33,7 +33,7 @@ func TestEvent_WithTrigger(t *testing.T) {
 	r := &agent.Runner{Name: "child", Client: fc}
 	ctx := agent.WithTrigger(context.Background(), agent.TriggerTransfer, "h1")
 	sawFinal := false
-	for ev, err := range r.Run(ctx, llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}) {
+	for ev, _ := range r.Run(ctx, llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "q"}}}) {
 		if ev.TriggerType != agent.TriggerTransfer || ev.TriggerID != "h1" {
 			t.Fatalf("trigger = (%s,%q), want (transfer,h1) on %s", ev.TriggerType, ev.TriggerID, ev.Type)
 		}

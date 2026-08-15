@@ -84,6 +84,13 @@ func (p *Parallel) Run(ctx context.Context, req llm.Request, opts ...Option) ite
 		runID := newRunID()
 		p.cp().Started(ctx, runID, req)
 
+		var yieldMu sync.Mutex
+		safeYield := func(ev Event, err error) bool {
+			yieldMu.Lock()
+			defer yieldMu.Unlock()
+			return yield(ev, err)
+		}
+
 		outs := make([]RunOutcome, len(p.Agents))
 		var wg sync.WaitGroup
 		for i := range p.Agents {
@@ -94,7 +101,7 @@ func (p *Parallel) Run(ctx context.Context, req llm.Request, opts ...Option) ite
 					outs[i] = outcomeError("", nil, nil, fmt.Errorf("agent: Parallel branch %d nil", i))
 					return
 				}
-				outs[i] = p.streamBranch(ctx, p.Agents[i], req, yield, opts...)
+				outs[i] = p.streamBranch(ctx, p.Agents[i], req, safeYield, opts...)
 			}(i)
 		}
 		wg.Wait()

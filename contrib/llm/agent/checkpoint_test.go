@@ -61,7 +61,7 @@ func TestCheckpointPauseResumeReplay(t *testing.T) {
 		t.Fatalf("replayed messages = %d, want >=2", len(msgs))
 	}
 
-	cont := r.Continue(ctx, out.RunID, []agent.Resolution{{ID: "c1", Approved: true}})
+	cont := agent.CollectOutcome(r.Continue(ctx, out.RunID, []agent.Resolution{{ID: "c1", Approved: true}}))
 	if !cont.IsDone() {
 		t.Fatalf("expected done after continue, got %s err=%v", cont.Status, cont.Err)
 	}

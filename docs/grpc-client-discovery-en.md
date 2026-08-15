@@ -322,3 +322,23 @@ client := factory.GetClient("v1alpha.Greeter",
 ```
 
 This allows the client to automatically discover and connect to service instances in the same region, enabling proximity-based access and load balancing.
+
+### Locality-Aware Routing (LocalityRouter)
+
+For more flexible geo-routing with **tiered fallback** (campus → zone → region), use `LocalityRouter` instead of or alongside `WithDiscoveryRegionFilter`:
+
+```go
+import "github.com/rushteam/beauty/pkg/governance/router"
+
+r := router.NewLocalityRouter(router.Locality{
+    Region: "us-west-1",
+    Zone:   "us-west-1a",
+    Campus: "campus-1",
+}, router.WithGlobalFallback(true))
+
+client := grpcclient.NewServiceDiscoveryClient(discovery, "v1alpha.Greeter",
+    grpcclient.WithServiceRouter(r),
+)
+```
+
+Unlike `WithDiscoveryRegionFilter` (hard match), `LocalityRouter` progressively relaxes the filter — preferring the closest tier while falling back to broader regions when needed. See [Geo-Routing documentation](geo-routing-en.md) for details.

@@ -322,3 +322,23 @@ client := factory.GetClient("v1alpha.Greeter",
 ```
 
 这样客户端就能自动发现并连接到同地域的服务实例，实现就近访问和负载均衡。
+
+### 地域亲和路由（LocalityRouter）
+
+如果需要更灵活的**分级 fallback**（campus → zone → region），可以用 `LocalityRouter` 替代或配合 `WithDiscoveryRegionFilter`：
+
+```go
+import "github.com/rushteam/beauty/pkg/governance/router"
+
+r := router.NewLocalityRouter(router.Locality{
+    Region: "us-west-1",
+    Zone:   "us-west-1a",
+    Campus: "campus-1",
+}, router.WithGlobalFallback(true))
+
+client := grpcclient.NewServiceDiscoveryClient(discovery, "v1alpha.Greeter",
+    grpcclient.WithServiceRouter(r),
+)
+```
+
+与 `WithDiscoveryRegionFilter`（硬匹配）不同，`LocalityRouter` 逐级放宽过滤——优先就近、逐级退回更大范围。详见 [地域亲和路由文档](geo-routing.md)。

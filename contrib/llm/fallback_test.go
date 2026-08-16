@@ -57,14 +57,20 @@ func TestClassifyError(t *testing.T) {
 		{errors.New("HTTP 401 unauthorized"), ErrorGeneral},
 		{errors.New("rate limit exceeded"), ErrorRateLimit},
 		{errors.New("Error 429: Too Many Requests"), ErrorRateLimit},
+		{errors.New("429 too many requests"), ErrorRateLimit},
 		{errors.New("quota exceeded for model"), ErrorRateLimit},
 		{errors.New("request was throttled"), ErrorRateLimit},
 		{errors.New("RATE_LIMIT error"), ErrorRateLimit},
+		// 独立数字:避免子串误伤
+		{errors.New("error code 1429"), ErrorGeneral},
+		{errors.New("status 4290"), ErrorGeneral},
 		{errors.New("context_length_exceeded"), ErrorContextOverflow},
 		{errors.New("maximum context length reached"), ErrorContextOverflow},
 		{errors.New("token limit exceeded"), ErrorContextOverflow},
 		{errors.New("input too long for model"), ErrorContextOverflow},
-		{errors.New("max_tokens parameter invalid"), ErrorContextOverflow},
+		{errors.New("max_tokens exceeded"), ErrorContextOverflow},
+		// 参数校验错误不应判为上下文溢出
+		{errors.New("max_tokens parameter invalid"), ErrorGeneral},
 		{&typedErr{msg: "custom", kind: ErrorRateLimit}, ErrorRateLimit},
 		{&typedErr{msg: "custom overflow", kind: ErrorContextOverflow}, ErrorContextOverflow},
 	}

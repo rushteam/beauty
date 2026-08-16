@@ -44,28 +44,38 @@ func (f *fallback) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, err
 			yield(Chunk{}, ErrNoClients)
 			return
 		}
-		for i, c := range f.clients {
+		var lastErr error
+		for _, c := range f.clients {
 			started := false
+			var setupErr error
 			for chunk, err := range c.Stream(ctx, req) {
-				started = true
 				if err != nil {
-					if i < len(f.clients)-1 {
-						break
+					if started {
+						// 已产出增量,不可切换,直接透传
+						yield(chunk, err)
+						return
 					}
-					yield(chunk, err)
-					return
+					// 建流失败:尝试下一家
+					setupErr = err
+					break
 				}
+				started = true
 				if !yield(chunk, nil) {
 					return
 				}
 			}
-			if started {
+			if started || setupErr == nil {
+				// 已产出增量,或空流正常结束——均视为成功,不再切换
 				return
 			}
+			lastErr = setupErr
 			if ctx.Err() != nil {
 				yield(Chunk{}, ctx.Err())
 				return
 			}
+		}
+		if lastErr != nil {
+			yield(Chunk{}, lastErr)
 		}
 	}
 }
@@ -97,23 +107,50 @@ func ClassifyError(err error) ErrorKind {
 	}
 	msg := strings.ToLower(err.Error())
 	rateLimitKeys := []string{
-		"rate limit", "rate_limit", "429", "quota", "too many requests", "throttl",
+		"rate limit", "rate_limit", "quota exceeded", "quota_exceeded",
+		"too many requests", "throttl",
 	}
 	for _, k := range rateLimitKeys {
 		if strings.Contains(msg, k) {
 			return ErrorRateLimit
 		}
 	}
+	// "429" 必须作为独立数字匹配,避免 "1429"/"4290" 误伤
+	if containsStandaloneNumber(msg, "429") {
+		return ErrorRateLimit
+	}
 	contextKeys := []string{
 		"context_length", "context length", "maximum context", "token limit",
-		"too many tokens", "max_tokens", "input too long",
+		"too many tokens", "input too long",
 	}
 	for _, k := range contextKeys {
 		if strings.Contains(msg, k) {
 			return ErrorContextOverflow
 		}
 	}
+	// max_tokens 单独处理:仅当伴随超限语义时判为溢出(避免 "max_tokens parameter invalid")
+	if strings.Contains(msg, "max_tokens") &&
+		(strings.Contains(msg, "exceed") || strings.Contains(msg, "overflow") ||
+			strings.Contains(msg, "too large") || strings.Contains(msg, "too long")) {
+		return ErrorContextOverflow
+	}
 	return ErrorGeneral
+}
+
+// containsStandaloneNumber 判断 s 中是否出现独立数字 token(前后非数字)。
+func containsStandaloneNumber(s, num string) bool {
+	for i := 0; i+len(num) <= len(s); i++ {
+		if s[i:i+len(num)] != num {
+			continue
+		}
+		beforeOK := i == 0 || s[i-1] < '0' || s[i-1] > '9'
+		after := i + len(num)
+		afterOK := after == len(s) || s[after] < '0' || s[after] > '9'
+		if beforeOK && afterOK {
+			return true
+		}
+	}
+	return false
 }
 
 // FallbackConfig 按错误类型路由到不同的降级 Client 链。
@@ -200,20 +237,22 @@ func (f *fallbackConfig) Stream(ctx context.Context, req Request) iter.Seq2[Chun
 			yield(Chunk{}, ErrNoClients)
 			return
 		}
-		started, setupErr := f.tryStream(ctx, req, f.cfg.Primary, yield)
-		if started {
+		done, setupErr := f.tryStream(ctx, req, f.cfg.Primary, yield)
+		if done {
 			return
 		}
 		if ctx.Err() != nil {
 			yield(Chunk{}, ctx.Err())
 			return
 		}
+		// setupErr == nil 且 !done 不应出现;防御性直接返回
+		if setupErr == nil {
+			return
+		}
 		kind := ClassifyError(setupErr)
 		chain := f.chainFor(kind)
 		if len(chain) == 0 {
-			if setupErr != nil {
-				yield(Chunk{}, setupErr)
-			}
+			yield(Chunk{}, setupErr)
 			return
 		}
 		lastErr := setupErr
@@ -222,11 +261,13 @@ func (f *fallbackConfig) Stream(ctx context.Context, req Request) iter.Seq2[Chun
 			if f.cfg.OnFallback != nil {
 				f.cfg.OnFallback(ctx, kind, primaryName, clientLabel(c), setupErr)
 			}
-			started, err := f.tryStream(ctx, req, c, yield)
-			if started {
+			done, err := f.tryStream(ctx, req, c, yield)
+			if done {
 				return
 			}
-			lastErr = err
+			if err != nil {
+				lastErr = err
+			}
 			if ctx.Err() != nil {
 				yield(Chunk{}, ctx.Err())
 				return
@@ -238,8 +279,11 @@ func (f *fallbackConfig) Stream(ctx context.Context, req Request) iter.Seq2[Chun
 	}
 }
 
-// tryStream 尝试单个 client 的 Stream。started 表示已产出有效 chunk;否则 setupErr 为建流/首包错误(可降级)。
-func (f *fallbackConfig) tryStream(ctx context.Context, req Request, c Client, yield func(Chunk, error) bool) (started bool, setupErr error) {
+// tryStream 尝试单个 client 的 Stream。
+// done=true: 流已正常结束(含空流)或中途错误已透传,调用方不应再降级;
+// done=false 且 setupErr!=nil: 建流/首包失败,可降级。
+func (f *fallbackConfig) tryStream(ctx context.Context, req Request, c Client, yield func(Chunk, error) bool) (done bool, setupErr error) {
+	started := false
 	for chunk, err := range c.Stream(ctx, req) {
 		if err != nil {
 			if started {
@@ -253,7 +297,8 @@ func (f *fallbackConfig) tryStream(ctx context.Context, req Request, c Client, y
 			return true, nil
 		}
 	}
-	return started, nil
+	// 正常结束(可能零 chunk)——视为成功,勿降级
+	return true, nil
 }
 
 // Retry 对 Generate/Stream 的**建立阶段**错误重试至多 attempts 次。
@@ -307,25 +352,38 @@ func (r *retry) Stream(ctx context.Context, req Request) iter.Seq2[Chunk, error]
 		var lastErr error
 		for i := 0; i < r.attempts; i++ {
 			started := false
+			var setupErr error
 			for chunk, err := range r.c.Stream(ctx, req) {
-				started = true
 				if err != nil {
-					yield(chunk, err)
-					return
+					if started {
+						// 已产出增量,不可回滚,直接透传
+						yield(chunk, err)
+						return
+					}
+					// 建流失败:记录错误并重试,勿在此处 yield(否则会吞掉后续重试机会)
+					setupErr = err
+					break
 				}
+				started = true
 				if !yield(chunk, nil) {
 					return
 				}
 			}
-			if started {
+			if started || setupErr == nil {
+				// 已产出增量,或空流正常结束——均视为成功,不再重试
 				return
 			}
+			lastErr = setupErr
 			if !r.backoff(ctx, i) {
 				break
 			}
 		}
 		if lastErr != nil {
 			yield(Chunk{}, lastErr)
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			yield(Chunk{}, err)
 		}
 	}
 }

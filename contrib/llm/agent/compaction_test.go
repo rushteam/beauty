@@ -19,7 +19,7 @@ func TestToolResults_BelowThreshold(t *testing.T) {
 		{Role: llm.User, Content: "hi"},
 		{Role: llm.Tool, ToolCallID: "1", Content: bigStr(1000)},
 	}
-	out, err := c.Compact(nil, in)
+	out, err := c.Compact(context.Background(), in)
 	if err != nil || len(out) != 2 || out[1].Content != in[1].Content {
 		t.Fatalf("未超阈值不应改动: %+v err=%v", out, err)
 	}
@@ -35,7 +35,7 @@ func TestToolResults_TruncatesOldToolResults(t *testing.T) {
 		{Role: llm.Tool, ToolCallID: "2", Content: bigStr(4000)},
 	}
 	orig := in[2].Content
-	out, err := c.Compact(nil, in)
+	out, err := c.Compact(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestToolResults_OnlyToolResults(t *testing.T) {
 		{Role: llm.User, Content: bigStr(4000)},
 		{Role: llm.Assistant, Content: "ok"},
 	}
-	out, err := c.Compact(nil, in)
+	out, err := c.Compact(context.Background(), in)
 	if err != nil || out[0].Content != in[0].Content {
 		t.Fatal("user 大消息不应被截断")
 	}

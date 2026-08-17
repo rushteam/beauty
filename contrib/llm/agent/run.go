@@ -244,8 +244,7 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 				continue
 			}
 			ev := checkpoint.NewEvent(checkpoint.TypeUserMessage, runID).WithStep(0)
-			msg := m
-			ev.Message = &msg
+			ev.Message = &m
 			r.appendCheckpoint(ctx, runID, ev)
 		}
 	}

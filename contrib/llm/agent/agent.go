@@ -404,21 +404,9 @@ func (r *Runner) continueNested(ctx context.Context, runID string, snap *RunSnap
 	}
 }
 
-func filterResolutions(resolutions []Resolution, source string) []Resolution {
-	if source == "" {
-		return resolutions
-	}
-	prefix := source + "/"
-	var out []Resolution
-	for _, r := range resolutions {
-		// 顶层暴露的 Requirement.ID 未改;Source 仅作标注。全部转交子 Continue。
-		_ = prefix
-		out = append(out, r)
-	}
-	if len(out) == 0 {
-		return resolutions
-	}
-	return out
+func filterResolutions(resolutions []Resolution, _ string) []Resolution {
+	// 顶层暴露的 Requirement.ID 未改;Source 仅作标注。全部转交子 Continue。
+	return resolutions
 }
 
 func nestedToolCallID(msgs []llm.Message, toolName string) string {
@@ -629,10 +617,6 @@ func (r *Runner) execOne(ctx context.Context, step int, byName map[string]Tool, 
 	return toolOutcome{tc: tc, result: result}
 }
 
-func (t Tool) effectivePerm() Permission {
-	return t.Permission
-}
-
 func (r *Runner) effectivePerm(t Tool, tc llm.ToolCall) Permission {
 	perm := t.Permission
 	if r.Policy != nil {
@@ -641,7 +625,7 @@ func (r *Runner) effectivePerm(t Tool, tc llm.ToolCall) Permission {
 	return perm
 }
 
-func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.ToolCall, ask map[string]Requirement, byRes map[string]Resolution, idx int) (result string, fatal error) {
+func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.ToolCall, _ map[string]Requirement, byRes map[string]Resolution, idx int) (result string, fatal error) {
 	t, ok := byName[tc.Name]
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", tc.Name), nil

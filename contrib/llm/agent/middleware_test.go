@@ -70,7 +70,9 @@ func TestLoggingMiddleware(t *testing.T) {
 
 	core := agent.AgentRunFunc(func(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
 		return iter.Seq2[agent.Event, error](func(yield func(agent.Event, error) bool) {
-			yield(agent.Event{Type: agent.EventStep, Response: &llm.Response{Content: "x"}}, nil)
+			if !yield(agent.Event{Type: agent.EventStep, Response: &llm.Response{Content: "x"}}, nil) {
+				return
+			}
 			yield(agent.Event{Type: agent.EventFinal, Response: &llm.Response{Content: "done", Usage: llm.Usage{InputTokens: 10, OutputTokens: 5}}}, nil)
 		})
 	})
@@ -93,14 +95,16 @@ func TestLoggingMiddleware(t *testing.T) {
 func TestSourceAttributionMiddleware(t *testing.T) {
 	core := agent.AgentRunFunc(func(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
 		return iter.Seq2[agent.Event, error](func(yield func(agent.Event, error) bool) {
-			yield(agent.Event{Type: agent.EventStep}, nil)
+			if !yield(agent.Event{Type: agent.EventStep}, nil) {
+				return
+			}
 			yield(agent.Event{Type: agent.EventFinal, AgentName: "explicit"}, nil)
 		})
 	})
 
 	fn := agent.SourceAttributionMiddleware("test-agent")(core)
 	var names []string
-	for ev, _ := range fn(context.Background(), llm.Request{}) {
+	for ev := range fn(context.Background(), llm.Request{}) {
 		names = append(names, ev.AgentName)
 	}
 

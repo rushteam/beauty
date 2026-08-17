@@ -23,7 +23,9 @@ func (s stubAgent) Info() agent.Info { return agent.Info{Name: s.name} }
 
 func (s stubAgent) Run(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
 	return func(yield func(agent.Event, error) bool) {
-		yield(agent.Event{Type: agent.EventStep, RunID: "run-test", Response: &llm.Response{Content: "hi"}}, nil)
+		if !yield(agent.Event{Type: agent.EventStep, RunID: "run-test", Response: &llm.Response{Content: "hi"}}, nil) {
+			return
+		}
 		yield(agent.Event{Type: agent.EventFinal, RunID: "run-test", Response: &llm.Response{Content: "ok"}}, nil)
 	}
 }

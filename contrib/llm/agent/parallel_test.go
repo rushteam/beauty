@@ -98,7 +98,7 @@ func TestParallel_RunStream(t *testing.T) {
 
 	var finals []agent.Event
 	tokens := map[string]int{}
-	for ev, _ := range p.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev := range p.Run(context.Background(), llm.Request{Model: "m"}) {
 		switch ev.Type {
 		case agent.EventError:
 			t.Fatalf("unexpected error: %v", ev.Err)

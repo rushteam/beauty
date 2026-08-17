@@ -22,7 +22,7 @@ func TestRunner_RunStream(t *testing.T) {
 
 	var types []agent.EventType
 	var final string
-	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}) {
+	for ev := range r.Run(context.Background(), llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "go"}}}) {
 		types = append(types, ev.Type)
 		if ev.Type == agent.EventFinal && ev.Response != nil {
 			final = ev.Response.Content
@@ -58,7 +58,7 @@ func TestRunner_Cancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for ev, _ := range ch {
+		for ev := range ch {
 			if ev.Type == agent.EventError {
 				gotErr = ev.Err
 			}

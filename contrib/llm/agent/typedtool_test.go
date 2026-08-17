@@ -21,7 +21,7 @@ type weatherOutput struct {
 }
 
 func TestTypedFunc_BasicCall(t *testing.T) {
-	tool, err := agent.TypedFunc[weatherInput, weatherOutput]("get_weather", "查天气",
+	tool, err := agent.TypedFunc("get_weather", "查天气",
 		func(_ context.Context, in weatherInput) (weatherOutput, error) {
 			if in.City != "北京" {
 				t.Fatalf("city = %q, want 北京", in.City)
@@ -42,7 +42,7 @@ func TestTypedFunc_BasicCall(t *testing.T) {
 }
 
 func TestTypedFunc_StringOutput(t *testing.T) {
-	tool, err := agent.TypedFunc[weatherInput, string]("echo_city", "回显城市",
+	tool, err := agent.TypedFunc("echo_city", "回显城市",
 		func(_ context.Context, in weatherInput) (string, error) {
 			return "city:" + in.City, nil
 		})
@@ -60,7 +60,7 @@ func TestTypedFunc_StringOutput(t *testing.T) {
 }
 
 func TestTypedFunc_SchemaGeneration(t *testing.T) {
-	tool, err := agent.TypedFunc[weatherInput, weatherOutput]("get_weather", "查天气",
+	tool, err := agent.TypedFunc("get_weather", "查天气",
 		func(_ context.Context, in weatherInput) (weatherOutput, error) {
 			return weatherOutput{}, nil
 		})
@@ -102,13 +102,13 @@ func TestMustTypedFunc_PanicsOnInvalidInputType(t *testing.T) {
 			t.Fatalf("panic = %v, want struct validation error", r)
 		}
 	}()
-	_ = agent.MustTypedFunc[int, string]("bad", "", func(_ context.Context, _ int) (string, error) {
+	_ = agent.MustTypedFunc("bad", "", func(_ context.Context, _ int) (string, error) {
 		return "", nil
 	})
 }
 
 func TestTypedFunc_WithPermission(t *testing.T) {
-	tool, err := agent.TypedFunc[weatherInput, string]("gated", "需审批",
+	tool, err := agent.TypedFunc("gated", "需审批",
 		func(_ context.Context, _ weatherInput) (string, error) { return "ok", nil },
 		agent.WithToolPermission(agent.PermitAsk))
 	if err != nil {
@@ -120,7 +120,7 @@ func TestTypedFunc_WithPermission(t *testing.T) {
 }
 
 func TestTypedFunc_RunnerIntegration(t *testing.T) {
-	tool := agent.MustTypedFunc[weatherInput, weatherOutput]("get_weather", "查天气",
+	tool := agent.MustTypedFunc("get_weather", "查天气",
 		func(_ context.Context, in weatherInput) (weatherOutput, error) {
 			return weatherOutput{Temp: 25, Cond: in.City + "晴"}, nil
 		})

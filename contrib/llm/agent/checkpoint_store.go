@@ -149,10 +149,3 @@ func (r *Runner) checkpointPaused(ctx context.Context, runID string, emit func(E
 		emit(Event{Type: EventPaused, Step: step, Response: resp, RunID: runID, Requirements: reqs})
 	}
 }
-
-func (r *Runner) checkpointCompleted(ctx context.Context, runID string, emit func(Event), step int, resp *llm.Response) {
-	r.appendCheckpoint(ctx, runID, checkpoint.NewEvent(checkpoint.TypeRunCompleted, runID).WithStep(step))
-	if emit != nil {
-		emit(Event{Type: EventFinal, Step: step, Response: resp, RunID: runID})
-	}
-}

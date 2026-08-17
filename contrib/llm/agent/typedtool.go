@@ -80,7 +80,7 @@ func TypedFunc[In, Out any](name, description string, handler func(context.Conte
 
 // MustTypedFunc 同 TypedFunc,出错时 panic。
 func MustTypedFunc[In, Out any](name, description string, handler func(context.Context, In) (Out, error), opts ...ToolOption) Tool {
-	tool, err := TypedFunc[In, Out](name, description, handler, opts...)
+	tool, err := TypedFunc(name, description, handler, opts...)
 	if err != nil {
 		panic(err)
 	}

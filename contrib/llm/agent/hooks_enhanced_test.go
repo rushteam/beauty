@@ -119,7 +119,7 @@ func TestHooks_OnChunk(t *testing.T) {
 	}
 
 	var tokens []string
-	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventToken {
 			tokens = append(tokens, ev.Result)
 		}
@@ -153,7 +153,7 @@ func TestHooks_OnChunkError(t *testing.T) {
 	}
 
 	var errSeen bool
-	for ev, _ := range r.Run(context.Background(), llm.Request{Model: "m"}) {
+	for ev := range r.Run(context.Background(), llm.Request{Model: "m"}) {
 		if ev.Type == agent.EventError && ev.Err != nil {
 			errSeen = true
 		}

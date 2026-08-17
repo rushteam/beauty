@@ -52,11 +52,13 @@ func TestOTelMiddleware(t *testing.T) {
 
 	core := agent.AgentRunFunc(func(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
 		return iter.Seq2[agent.Event, error](func(yield func(agent.Event, error) bool) {
-			yield(agent.Event{
+			if !yield(agent.Event{
 				Type:     agent.EventStep,
 				Step:     1,
 				Response: &llm.Response{Usage: llm.Usage{InputTokens: 100, OutputTokens: 50}},
-			}, nil)
+			}, nil) {
+				return
+			}
 			yield(agent.Event{
 				Type:     agent.EventFinal,
 				Response: &llm.Response{Content: "done"},

@@ -69,7 +69,7 @@ func TestTeam_RunStream(t *testing.T) {
 
 	var finals []agent.Event
 	sawResearcherUser, sawWriterTransfer := false, false
-	for ev, _ := range tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究 X"}}}) {
+	for ev := range tm.Run(context.Background(), llm.Request{Messages: []llm.Message{{Role: llm.User, Content: "研究 X"}}}) {
 		if ev.Type == agent.EventError {
 			t.Fatalf("unexpected error event: %v", ev.Err)
 		}

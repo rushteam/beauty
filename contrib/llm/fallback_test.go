@@ -69,6 +69,8 @@ func TestClassifyError(t *testing.T) {
 		{errors.New("token limit exceeded"), ErrorContextOverflow},
 		{errors.New("input too long for model"), ErrorContextOverflow},
 		{errors.New("max_tokens exceeded"), ErrorContextOverflow},
+		{errors.New("max_output_tokens exceeded"), ErrorMaxOutput},
+		{errors.New("prompt_too_long"), ErrorContextOverflow},
 		// 参数校验错误不应判为上下文溢出
 		{errors.New("max_tokens parameter invalid"), ErrorGeneral},
 		{&typedErr{msg: "custom", kind: ErrorRateLimit}, ErrorRateLimit},

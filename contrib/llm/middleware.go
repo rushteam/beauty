@@ -87,6 +87,7 @@ const (
 	ErrorGeneral         ErrorKind = iota // 通用错误
 	ErrorRateLimit                        // 速率限制 (429, quota exceeded)
 	ErrorContextOverflow                  // 上下文窗口溢出 (context_length_exceeded)
+	ErrorMaxOutput                        // 输出 token 上限 (max_output_tokens)
 )
 
 // ErrorWithKind 允许 provider 返回已分类的错误。
@@ -119,9 +120,18 @@ func ClassifyError(err error) ErrorKind {
 	if containsStandaloneNumber(msg, "429") {
 		return ErrorRateLimit
 	}
+	outputKeys := []string{
+		"max_output_tokens", "max output tokens", "output token",
+		"completion_tokens", "output length exceeded",
+	}
+	for _, k := range outputKeys {
+		if strings.Contains(msg, k) {
+			return ErrorMaxOutput
+		}
+	}
 	contextKeys := []string{
 		"context_length", "context length", "maximum context", "token limit",
-		"too many tokens", "input too long",
+		"too many tokens", "input too long", "prompt_too_long", "prompt too long",
 	}
 	for _, k := range contextKeys {
 		if strings.Contains(msg, k) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent/skills"
 )
 
@@ -110,12 +111,75 @@ func TestSystemPrompt_CatalogOnly(t *testing.T) {
 	if !strings.Contains(p, "greeter") || !strings.Contains(p, "打招呼技能") {
 		t.Fatalf("目录应含名字+描述: %s", p)
 	}
+	if !strings.Contains(p, "<available_skills>") {
+		t.Fatal("应使用 available_skills 标签")
+	}
+	if !strings.Contains(p, "<location>") {
+		t.Fatal("应包含 location/path")
+	}
 	if !strings.Contains(p, "get_skill_instructions") {
 		t.Fatal("应说明用元工具访问")
 	}
-	// 渐进式披露:目录里不应泄露正文。
+	// 渐进式披露:目录里不应泄露正文,也不再塞 scripts/references 清单。
 	if strings.Contains(p, "按用户语言问候") {
 		t.Fatal("system prompt 不应包含技能正文")
+	}
+	if strings.Contains(p, "<scripts>") || strings.Contains(p, "hello.sh") {
+		t.Fatal("system prompt 不应再列 scripts/references(进一步省上下文)")
+	}
+}
+
+func TestSystemPrompt_DisableModelInvocation(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "public",
+		"name: public\ndescription: 可见技能",
+		"# Public\n公开正文",
+		nil, nil)
+	writeSkill(t, root, "private",
+		"name: private\ndescription: 仅斜杠\ndisable-model-invocation: true",
+		"# Private\n私有正文勿进目录",
+		nil, nil)
+	sk, err := skills.Load(skills.LocalSkills{Dir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := sk.SystemPrompt()
+	if !strings.Contains(p, "public") || strings.Contains(p, "private") {
+		t.Fatalf("目录应只含 public: %s", p)
+	}
+	if strings.Contains(p, "私有正文") {
+		t.Fatal("禁用模型调用的技能正文绝不可出现")
+	}
+
+	// 显式 Expand / get_skill_instructions 仍可用。
+	got, ok := sk.Expand("private")
+	if !ok || !strings.Contains(got.Instructions, "私有正文") {
+		t.Fatalf("Expand 应仍能取到: %+v", got)
+	}
+	call := toolByName(t, sk, "get_skill_instructions")
+	out, _ := call(context.Background(), json.RawMessage(`{"skill_name":"private"}`))
+	if !strings.Contains(decode(t, out)["instructions"].(string), "私有正文") {
+		t.Fatalf("工具仍应能加载: %s", out)
+	}
+}
+
+func TestAsContextProvider(t *testing.T) {
+	sk := loadOne(t)
+	cp := sk.AsContextProvider()
+	req := &llm.Request{System: "base"}
+	msgs, tools, err := cp.Invoking(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("skills provider 不应注入 messages, got %d", len(msgs))
+	}
+	if len(tools) != 3 {
+		t.Fatalf("tools = %d, want 3", len(tools))
+	}
+	if !strings.Contains(req.System, "base") || !strings.Contains(req.System, "greeter") {
+		t.Fatalf("system = %q", req.System)
 	}
 }
 

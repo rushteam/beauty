@@ -1,9 +1,11 @@
 // Package skills 在 llm/agent 之上实现 **Agent Skills**(与 Claude Code 的 SKILL.md 同规范):
 // 一个技能 = 一个目录(SKILL.md + 可选 scripts/、references/)。加载后,skills 以"渐进式披露"
 // 的方式接入 agent.Runner:
-//   - SystemPrompt() 只把每个技能的名字/描述/文件清单放进系统提示(不含正文);
+//   - SystemPrompt() 只把每个技能的 name/description/location 放进系统提示(不含正文);
+//   - DisableModelInvocation 的技能不进入目录,仅保留斜杠/显式调用;
 //   - Tools() 返回三个元工具(get_skill_instructions/reference/script),模型命中任务时才按需拉全文、
-//     读引用、读/跑脚本。
+//     读引用、读/跑脚本;
+//   - AsContextProvider() 可直接挂到 Runner.ContextProvs。
 //
 // 这样底座仍是普通 function calling(agent.Tool + Runner),技能只是"目录 + 三个工具 + 一段目录快照"。
 // 纯标准库,零外部依赖。
@@ -30,6 +32,9 @@ type Skill struct {
 	License      string
 	AllowedTools []string
 	Metadata     map[string]string
+	// DisableModelInvocation 为 true 时,技能不进入 SystemPrompt 目录(模型不会自动发现),
+	// 仍可通过显式调用(斜杠命令 / get_skill_instructions)加载正文。
+	DisableModelInvocation bool
 }
 
 // name 规范:小写字母/数字,连字符分隔(与 Agent Skills 规范一致)。
@@ -66,11 +71,12 @@ func parseSkillMD(data []byte) (fm frontmatter, body string, err error) {
 }
 
 type frontmatter struct {
-	Name         string
-	Description  string
-	License      string
-	AllowedTools []string
-	Metadata     map[string]string
+	Name                   string
+	Description            string
+	License                string
+	AllowedTools           []string
+	Metadata               map[string]string
+	DisableModelInvocation bool
 }
 
 // parseFrontmatter 解析 frontmatter 的 YAML 子集。支持:
@@ -155,8 +161,19 @@ func assignScalar(fm *frontmatter, key, val string) {
 		if len(fm.AllowedTools) == 0 && val != "" {
 			fm.AllowedTools = []string{val}
 		}
+	case "disable-model-invocation", "disable_model_invocation":
+		fm.DisableModelInvocation = parseBool(val)
 	default:
 		fm.Metadata[key] = val
+	}
+}
+
+func parseBool(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "yes", "1", "on":
+		return true
+	default:
+		return false
 	}
 }
 

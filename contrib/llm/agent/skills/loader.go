@@ -54,15 +54,16 @@ func parseSkill(data []byte, dir string) (Skill, error) {
 		return Skill{}, err
 	}
 	return Skill{
-		Name:         fm.Name,
-		Description:  fm.Description,
-		Instructions: body,
-		Scripts:      listFiles(filepath.Join(dir, "scripts")),
-		References:   listFiles(filepath.Join(dir, "references")),
-		SourcePath:   dir,
-		License:      fm.License,
-		AllowedTools: fm.AllowedTools,
-		Metadata:     fm.Metadata,
+		Name:                   fm.Name,
+		Description:            fm.Description,
+		Instructions:           body,
+		Scripts:                listFiles(filepath.Join(dir, "scripts")),
+		References:             listFiles(filepath.Join(dir, "references")),
+		SourcePath:             dir,
+		License:                fm.License,
+		AllowedTools:           fm.AllowedTools,
+		Metadata:               fm.Metadata,
+		DisableModelInvocation: fm.DisableModelInvocation,
 	}, nil
 }
 

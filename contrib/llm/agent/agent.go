@@ -324,6 +324,14 @@ type Runner struct {
 	// nil 时不启用(每次都要求审批)。
 	ApprovalRules *ApprovalStore
 
+	// Policy 工具准入策略(Allow/Deny/Ask + Mode)。与 Tool.Permission 取更严者;
+	// Ask 接到现有 HITL(Pause/Continue)。Deny 工具不会广告给模型。
+	Policy *ToolPolicy
+
+	// Recovery 模型调用失败时的同 run 恢复(prompt_too_long / max_output_tokens)。
+	// nil 时用 DefaultRecovery。
+	Recovery *Recovery
+
 	// nestedResume 保存 AgentAsTool 等冒泡暂停时的子 Continue 回调(进程内,不入 Store)。
 	nestedResume sync.Map // runID → func(ctx, []Resolution, ...Option) iter.Seq2[Event, error]
 
@@ -477,7 +485,9 @@ func (r *Runner) askRequirements(byName map[string]Tool, tcs []llm.ToolCall) []R
 		t, ok := byName[tc.Name]
 		perm := PermitAllow
 		if ok {
-			perm = t.effectivePerm()
+			perm = r.effectivePerm(t, tc)
+		} else if r.Policy != nil {
+			perm = r.Policy.Decide(tc)
 		}
 		if perm == PermitAsk {
 			// Standing rules 自动放行:匹配时跳过审批
@@ -623,12 +633,20 @@ func (t Tool) effectivePerm() Permission {
 	return t.Permission
 }
 
+func (r *Runner) effectivePerm(t Tool, tc llm.ToolCall) Permission {
+	perm := t.Permission
+	if r.Policy != nil {
+		perm = stricterPerm(perm, r.Policy.Decide(tc))
+	}
+	return perm
+}
+
 func (r *Runner) dispatch(ctx context.Context, byName map[string]Tool, tc llm.ToolCall, ask map[string]Requirement, byRes map[string]Resolution, idx int) (result string, fatal error) {
 	t, ok := byName[tc.Name]
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", tc.Name), nil
 	}
-	perm := t.effectivePerm()
+	perm := r.effectivePerm(t, tc)
 	switch perm {
 	case PermitDeny:
 		return fmt.Sprintf("工具 %q 被策略拒绝(deny),不可调用", tc.Name), nil

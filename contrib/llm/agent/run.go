@@ -215,6 +215,9 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 	if r.Scope != nil {
 		activeTools = r.Scope.Filter(ctx, startStep, tools)
 	}
+	if r.Policy != nil {
+		activeTools = r.Policy.Filter(activeTools)
+	}
 	defs := make([]llm.ToolDef, len(activeTools))
 	byName := make(map[string]Tool, len(activeTools))
 	for i, t := range activeTools {
@@ -267,6 +270,9 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			req.Tools = nil
 		} else if r.Scope != nil {
 			activeTools = r.Scope.Filter(ctx, step, tools)
+			if r.Policy != nil {
+				activeTools = r.Policy.Filter(activeTools)
+			}
 			defs = make([]llm.ToolDef, len(activeTools))
 			byName = make(map[string]Tool, len(activeTools))
 			for i, t := range activeTools {
@@ -307,7 +313,7 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 		if emit != nil || r.Hooks.OnChunk != nil {
 			modelEmit = func(e Event) { r.emitEvent(ctx, runID, emit, e) }
 		}
-		resp, err := r.callModel(ctx, req, step, modelEmit)
+		resp, err := r.callModelRecover(ctx, &req, step, modelEmit)
 		if err != nil {
 			out := outcomeError(runID, last, msgs, err)
 			r.afterTurn(ctx, &out)

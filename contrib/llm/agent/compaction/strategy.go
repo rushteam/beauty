@@ -1,8 +1,8 @@
 // Package compaction 提供可组合的上下文压缩策略,在模型调用前对消息做确定性投影,
 // 降低长对话与工具密集 run 的 token 占用。压缩只作用于发给模型的副本,不改动 Runner 规范历史。
 //
-// 内置策略:SlidingWindow、Truncation、ToolResults、Summarization;可用 Chain 串联。
-// 挂到 Runner.Compaction,或通过 Strategy.Hook() 接入 Hooks.BeforeModel。
+// 内置策略:SlidingWindow、Truncation、ToolResults、Snip、Microcompact、Summarization、Auto;
+// 可用 Chain 串联。挂到 Runner.Compaction,或通过 AutoLadder 做「snip → 丢旧 tool result → 摘要」。
 package compaction
 
 import (

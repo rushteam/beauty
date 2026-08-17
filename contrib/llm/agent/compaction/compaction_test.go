@@ -120,3 +120,67 @@ func TestBeforeModelHook(t *testing.T) {
 		t.Fatalf("hook did not compact: %+v", req.Messages)
 	}
 }
+
+func TestSnip_HeadTail(t *testing.T) {
+	s := &compaction.Snip{MaxRunes: 20, PrefixRunes: 6, SuffixRunes: 4}
+	in := []llm.Message{
+		{Role: llm.User, Content: strings.Repeat("u", 100)},
+		{Role: llm.Tool, ToolCallID: "t1", Content: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+	}
+	out, err := s.Compact(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out[0].Content != in[0].Content {
+		t.Fatal("user message should not snip")
+	}
+	if !strings.Contains(out[1].Content, "snip") || !strings.HasPrefix(out[1].Content, "ABCDEF") {
+		t.Fatalf("snip = %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "WXYZ") {
+		t.Fatalf("missing tail: %q", out[1].Content)
+	}
+}
+
+func TestMicrocompact_KeepsRecent(t *testing.T) {
+	m := &compaction.Microcompact{KeepRecent: 1}
+	in := []llm.Message{
+		{Role: llm.Tool, ToolCallID: "a", Content: "old"},
+		{Role: llm.User, Content: "q"},
+		{Role: llm.Tool, ToolCallID: "b", Content: "new"},
+	}
+	out, err := m.Compact(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out[0].Content == "old" {
+		t.Fatal("old tool result should be dropped")
+	}
+	if out[2].Content != "new" {
+		t.Fatalf("recent tool = %q", out[2].Content)
+	}
+}
+
+func TestAutoLadder_Steps(t *testing.T) {
+	var levels []compaction.CompactLevel
+	a := compaction.AutoLadder(200, nil)
+	a.Estimate = func(s string) int { return len(s) }
+	a.Snip = &compaction.Snip{MaxRunes: 30, PrefixRunes: 10, SuffixRunes: 5}
+	a.Micro = &compaction.Microcompact{KeepRecent: 1}
+	a.OnState = func(st compaction.WindowState) { levels = append(levels, st.Level) }
+
+	in := []llm.Message{
+		{Role: llm.Tool, ToolCallID: "a", Content: strings.Repeat("a", 80)},
+		{Role: llm.Tool, ToolCallID: "b", Content: strings.Repeat("b", 80)},
+	}
+	out, err := a.Compact(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(levels) == 0 || levels[0] == compaction.CompactOK {
+		t.Fatalf("should trigger auto, levels=%v", levels)
+	}
+	if out[0].Content == in[0].Content && out[1].Content == in[1].Content {
+		t.Fatal("expected snip or microcompact to change tool results")
+	}
+}

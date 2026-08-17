@@ -80,39 +80,72 @@ func (s *Skills) All() []Skill {
 	return out
 }
 
-// SystemPrompt 生成技能目录快照:只含名字/描述/文件清单与用法说明,不含正文(渐进式披露)。
-// 把它并进 llm.Request.System 或作为一条 system 消息。无技能时返回空串。
+// SystemPrompt 生成技能目录快照:只含 name / description / location(路径),不含正文(渐进式披露)。
+// DisableModelInvocation 的技能会被排除(仅保留斜杠/显式调用)。
+// 把它并进 llm.Request.System 或作为一条 system 消息。无可见技能时返回空串。
 func (s *Skills) SystemPrompt() string {
-	if len(s.order) == 0 {
+	visible := s.modelVisible()
+	if len(visible) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("<skills>\n")
-	b.WriteString("你可以使用下列“技能”(领域知识包)。技能名不是可调用函数,必须用工具访问:\n")
+	b.WriteString("<available_skills>\n")
+	b.WriteString("你可以使用下列技能(领域知识包)。目录只含名称与描述;完整说明需按需加载:\n")
 	b.WriteString("1. get_skill_instructions(skill_name):命中任务时先取该技能的完整说明;\n")
 	b.WriteString("2. get_skill_reference(skill_name, reference_path):按需读引用文档;\n")
 	b.WriteString("3. get_skill_script(skill_name, script_path, execute):读或(允许时)执行脚本。\n")
 	b.WriteString("仅在需要时才加载详情。可用技能:\n")
-	for _, n := range s.order {
-		sk := s.byName[n]
+	for _, sk := range visible {
 		b.WriteString("<skill>\n")
 		fmt.Fprintf(&b, "  <name>%s</name>\n", sk.Name)
 		fmt.Fprintf(&b, "  <description>%s</description>\n", sk.Description)
-		if len(sk.Scripts) > 0 {
-			fmt.Fprintf(&b, "  <scripts>%s</scripts>\n", strings.Join(sk.Scripts, ", "))
-		} else {
-			b.WriteString("  <scripts>none</scripts>\n")
-		}
-		if len(sk.References) > 0 {
-			fmt.Fprintf(&b, "  <references>%s</references>\n", strings.Join(sk.References, ", "))
-		} else {
-			b.WriteString("  <references>none</references>\n")
+		if sk.SourcePath != "" {
+			fmt.Fprintf(&b, "  <location>%s</location>\n", sk.SourcePath)
 		}
 		b.WriteString("</skill>\n")
 	}
-	b.WriteString("</skills>")
+	b.WriteString("</available_skills>")
 	return b.String()
 }
+
+// modelVisible 返回可被模型自动发现的技能(排除 DisableModelInvocation)。
+func (s *Skills) modelVisible() []Skill {
+	out := make([]Skill, 0, len(s.order))
+	for _, n := range s.order {
+		sk := s.byName[n]
+		if sk.DisableModelInvocation {
+			continue
+		}
+		out = append(out, sk)
+	}
+	return out
+}
+
+// Expand 按名返回技能正文(供斜杠命令 /skill-name 显式展开)。
+// 含 DisableModelInvocation 的技能也可展开。不存在返回 false。
+func (s *Skills) Expand(name string) (Skill, bool) {
+	return s.Get(name)
+}
+
+// AsContextProvider 把技能集合适配为 agent.ContextProvider:
+// 每次 Invoking 将 SystemPrompt 追加到 req.System,并注入三个元工具。
+func (s *Skills) AsContextProvider() agent.ContextProvider {
+	return &skillsContextProvider{s: s}
+}
+
+type skillsContextProvider struct{ s *Skills }
+
+func (p *skillsContextProvider) Invoking(_ context.Context, req *llm.Request) ([]llm.Message, []agent.Tool, error) {
+	if sp := p.s.SystemPrompt(); sp != "" {
+		if req.System != "" {
+			req.System += "\n\n"
+		}
+		req.System += sp
+	}
+	return nil, p.s.Tools(), nil
+}
+
+func (p *skillsContextProvider) Invoked(context.Context, *agent.RunOutcome) error { return nil }
 
 // Tools 返回三个访问技能的 agent.Tool,直接放进 agent.Runner.Tools。
 func (s *Skills) Tools() []agent.Tool {

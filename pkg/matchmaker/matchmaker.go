@@ -3,6 +3,11 @@
 // 玩家/会话携带 string + numeric 属性注册一张 ticket,匹配器按"桶(bucket,
 // 如 region+mode)+ 最低共同属性"策略聚合候选,凑齐队伍即成匹配。
 //
+// 默认按 skill 数值排序贪心组队;可通过 WithMatchFunc 注入多维质量函数
+// (延迟差、地理距离等,见 MultiDimScore / GeoScore / LatencyScore)。
+// 评分系统(Glicko-2 / TrueSkill)在 pkg/rating 下独立计算,经 RatingStore
+// + ApplyResult 在对局结束后写回 skill,本包不直接依赖评分实现。
+//
 // 与基于 Bluge 全文索引的做法不同,本包用纯标准库实现一个
 // 倒排索引 + 桶分组的轻量匹配器,适合中小规模(单机万级 ticket)。
 // 超过此规模建议接入专用检索引擎。
@@ -83,6 +88,7 @@ type config struct {
 	tickInterval time.Duration // 扫描周期
 	poolCount    int           // worker 数
 	maxWaitSec   int           // ticket 最长等待,超时强匹配(放宽桶)
+	matchFunc    MatchFunc     // 可选:多维匹配质量函数;nil 时按 skill 排序贪心
 }
 
 // Option 配置 Matchmaker。
@@ -101,6 +107,12 @@ func WithTickInterval(d time.Duration) Option {
 // 默认 30。<=0 不放宽。
 func WithMaxWaitSec(sec int) Option {
 	return func(c *config) { c.maxWaitSec = sec }
+}
+
+// WithMatchFunc 设置可插拔的匹配质量函数。未设置时 tryMatch 仍按 skill 排序贪心
+// (向后兼容)。设置后改为按质量评分凑队,0 分视为不兼容。
+func WithMatchFunc(fn MatchFunc) Option {
+	return func(c *config) { c.matchFunc = fn }
 }
 
 // New 创建匹配器。h 在每次匹配成功时被调用。
@@ -293,9 +305,14 @@ func (m *Matchmaker) tick(ctx context.Context) {
 	}
 }
 
-// tryMatch 在一组 ticket 中尝试凑出队伍:贪心按 skill 排序,取相邻最小差凑齐。
+// tryMatch 在一组 ticket 中尝试凑出队伍。
+// 默认贪心按 skill 排序取相邻;设置了 MatchFunc 则按质量评分挑队友。
 func (m *Matchmaker) tryMatch(ctx context.Context, pool string, ts []*Ticket) {
 	if len(ts) == 0 {
+		return
+	}
+	if m.cfg.matchFunc != nil {
+		m.tryMatchByScore(ctx, pool, ts)
 		return
 	}
 	// 按 skill 排序(若有),便于凑相近水平。
@@ -321,25 +338,81 @@ func (m *Matchmaker) tryMatch(ctx context.Context, pool string, ts []*Ticket) {
 			}
 			team = append(team, ts[j])
 		}
-		// 凑齐最小人数即成匹配。
 		if len(team) >= ts[i].MinCount {
 			for _, t := range team {
 				used[t.ID] = true
 			}
-			matched := make([]*Ticket, len(team))
-			copy(matched, team)
-			// 先同步移除票据，防止下次 tick 重复匹配
-			for _, t := range matched {
-				m.Remove(t.ID)
-			}
-			match := Match{Tickets: matched, Pool: pool}
-			go func() {
-				m.handlerSem <- struct{}{}
-				defer func() { <-m.handlerSem }()
-				m.handler(ctx, match)
-			}()
+			m.emitMatch(ctx, pool, team)
 		}
 	}
+}
+
+// tryMatchByScore 用 MatchFunc 贪心凑队:对每个未匹配 ticket,反复挑选与当前队伍
+// 平均质量最高的候选(质量为 0 视为不兼容),直到 MaxCount 或无人可加。
+func (m *Matchmaker) tryMatchByScore(ctx context.Context, pool string, ts []*Ticket) {
+	fn := m.cfg.matchFunc
+	used := make(map[string]bool)
+	for i := 0; i < len(ts); i++ {
+		if used[ts[i].ID] {
+			continue
+		}
+		team := []*Ticket{ts[i]}
+		inTeam := map[string]bool{ts[i].ID: true}
+		for len(team) < ts[i].MaxCount {
+			bestJ := -1
+			bestScore := 0.0
+			for j := 0; j < len(ts); j++ {
+				if used[ts[j].ID] || inTeam[ts[j].ID] {
+					continue
+				}
+				if !countCompatible(team, ts[j]) {
+					continue
+				}
+				score := teamScore(fn, team, ts[j])
+				if score > bestScore {
+					bestScore = score
+					bestJ = j
+				}
+			}
+			if bestJ < 0 {
+				break
+			}
+			team = append(team, ts[bestJ])
+			inTeam[ts[bestJ].ID] = true
+		}
+		if len(team) >= ts[i].MinCount {
+			for _, t := range team {
+				used[t.ID] = true
+			}
+			m.emitMatch(ctx, pool, team)
+		}
+	}
+}
+
+func teamScore(fn MatchFunc, team []*Ticket, cand *Ticket) float64 {
+	var sum float64
+	for _, t := range team {
+		s := fn(t, cand)
+		if s <= 0 {
+			return 0
+		}
+		sum += s
+	}
+	return sum / float64(len(team))
+}
+
+func (m *Matchmaker) emitMatch(ctx context.Context, pool string, team []*Ticket) {
+	matched := make([]*Ticket, len(team))
+	copy(matched, team)
+	for _, t := range matched {
+		m.Remove(t.ID)
+	}
+	match := Match{Tickets: matched, Pool: pool}
+	go func() {
+		m.handlerSem <- struct{}{}
+		defer func() { <-m.handlerSem }()
+		m.handler(ctx, match)
+	}()
 }
 
 // countCompatible 判断把 cand 加入 team 后,team 大小是否落在所有成员的 [Min,Max] 区间。

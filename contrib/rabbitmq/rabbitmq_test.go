@@ -6,7 +6,7 @@ import (
 
 	amqp "github.com/rabbitmq/amqp091-go"
 
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 func TestFromDelivery(t *testing.T) {

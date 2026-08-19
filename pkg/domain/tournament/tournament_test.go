@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/pkg/domain/tournament"
-	"github.com/rushteam/beauty/pkg/leaderboard"
+	"github.com/rushteam/beauty/pkg/game/leaderboard"
 )
 
 func TestTournament_Basic(t *testing.T) {

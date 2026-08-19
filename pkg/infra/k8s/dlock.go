@@ -64,7 +64,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 // Elector 基于 k8s Lease 资源实现 dlock.Elector。零值不可用,用 NewElector 构造。

@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/rushteam/beauty/pkg/kvstore"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 func ok200(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }

@@ -21,3 +21,5 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
+
+replace github.com/rushteam/beauty => ../../

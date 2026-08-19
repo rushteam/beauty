@@ -162,7 +162,7 @@ spec:
 - **计量** — `contrib/llm`(`Metered` 回调 token/延迟)
 - **Agent** — `contrib/llm/agent`(`Runner` 工具循环)
 - **MCP** — `contrib/mcp`(`HTTPHandler` Streamable HTTP)
-- **SSE** — `pkg/sse`(流式事件推送)
+- **SSE** — `pkg/transport/sse`(流式事件推送)
 - **生命周期** — beauty 核心(`WithWebServer` 优雅启停)
 
 ## 相关文档

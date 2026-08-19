@@ -3,14 +3,14 @@
 beauty 的 P2P 能力把 WebRTC 从"媒体通话工具"变为**通用 P2P 数据管道**——
 peers 之间建立 DataChannel 直连,数据不经服务器,延迟更低、带宽成本更低。
 
-在 beauty 已有的 WebRTC(pion)、WebSocket(pkg/ws)、QUIC(pkg/quic)、
-presence(pkg/presence)基础上,补齐了**信令编排 + peer 发现 + 拓扑策略 + 双通道抽象**
+在 beauty 已有的 WebRTC(pion)、WebSocket(pkg/transport/ws)、QUIC(pkg/transport/quic)、
+presence(pkg/transport/presence)基础上,补齐了**信令编排 + peer 发现 + 拓扑策略 + 双通道抽象**
 这一层。
 
 ## 包结构
 
 ```
-pkg/p2p/
+pkg/transport/p2p/
 ├── p2p.go           # PeerConn / Message / Network / Transport 核心接口
 ├── network.go       # LocalNetwork: 内存实现,管理多条 PeerConn
 ├── topology/
@@ -31,12 +31,12 @@ pkg/p2p/
 ├────────────────────────────────┴────────────────────────────────┤
 │                       传输层(可插拔)                             │
 │  ┌──────────────────┐  ┌──────────────────┐                    │
-│  │ WebRTC DataChannel│  │  QUIC(pkg/quic) │                    │
+│  │ WebRTC DataChannel│  │  QUIC(pkg/transport/quic) │                    │
 │  │  (浏览器可达)     │  │  (原生/服务端)   │                    │
 │  └──────────────────┘  └──────────────────┘                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                     信令 & 拓扑层                                 │
-│  pkg/p2p/signaling      pkg/p2p/topology                        │
+│  pkg/transport/p2p/signaling      pkg/transport/p2p/topology                        │
 │  (WS 信令中继)          (FullMesh / Star / MatchPairs)          │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -121,12 +121,12 @@ Client A                    Server                    Client B
 
 | 包 | 角色 |
 |---|---|
-| `pkg/ws` | 承载信令的 WebSocket 连接 |
-| `pkg/presence` | 可选——跨节点 peer 发现(分布式部署时) |
+| `pkg/transport/ws` | 承载信令的 WebSocket 连接 |
+| `pkg/transport/presence` | 可选——跨节点 peer 发现(分布式部署时) |
 | `pkg/media/webrtc` | 共享 pion 依赖;P2P 用 DataChannel 而非 media track |
 | `pkg/media/webrtc/sfu` | 对比:SFU 是 peer↔server;P2P 是 peer↔peer |
-| `pkg/quic` | 可选——原生客户端间的可靠/不可靠双通道替代方案 |
-| `pkg/gameloop` | 可选——挂在 PeerConn 上做固定帧率游戏同步 |
+| `pkg/transport/quic` | 可选——原生客户端间的可靠/不可靠双通道替代方案 |
+| `pkg/game/gameloop` | 可选——挂在 PeerConn 上做固定帧率游戏同步 |
 
 ## 使用方式
 
@@ -158,19 +158,19 @@ beauty 同时拥有 P2P 和 SFU,可以做**自动降级**:
 ```
 ≤4 人 → FullMesh P2P(延迟最低、零服务器带宽)
 5~50 人 → SFU 转发(pkg/media/webrtc/sfu)
-50+ 人 → 级联 SFU / CDN 分发(pkg/hls)
+50+ 人 → 级联 SFU / CDN 分发(pkg/media/hls)
 ```
 
 ### 分布式信令
 
-单节点 `signaling.Server` 可通过 `pkg/presence` + `pkg/router` 扩展为多节点:
+单节点 `signaling.Server` 可通过 `pkg/transport/presence` + `pkg/transport/router` 扩展为多节点:
 - presence 追踪"peer 在哪个信令节点"
 - router 跨节点转发 relay 消息
 - 每个节点仍用本地 `signaling.Server` 处理本节点的 peer
 
 ### QUIC 传输后端
 
-原生客户端(非浏览器)可跳过 WebRTC,直接用 `pkg/quic`:
+原生客户端(非浏览器)可跳过 WebRTC,直接用 `pkg/transport/quic`:
 - Stream = 可靠通道
 - Datagram = 不可靠通道
 - 实现 `p2p.PeerConn` 接口即可无缝对接上层

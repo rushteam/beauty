@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/versus"
+	"github.com/rushteam/beauty/pkg/game/versus"
 )
 
 func main() {

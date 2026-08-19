@@ -11,4 +11,4 @@
 go run ./examples/statesync-quic
 ```
 
-端口 `127.0.0.1:8443`。Ack/CatchUp 语义见 `pkg/replicate/catchup.go`。
+端口 `127.0.0.1:8443`。Ack/CatchUp 语义见 `pkg/game/replicate/catchup.go`。

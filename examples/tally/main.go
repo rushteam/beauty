@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/tally"
+	"github.com/rushteam/beauty/pkg/store/tally"
 )
 
 func main() {

@@ -23,3 +23,5 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/rushteam/beauty => ../../

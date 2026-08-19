@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 func main() {

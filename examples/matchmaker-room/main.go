@@ -19,7 +19,7 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/contrib/agones"
-	"github.com/rushteam/beauty/pkg/matchmaker"
+	"github.com/rushteam/beauty/pkg/game/matchmaker"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

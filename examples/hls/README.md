@@ -1,6 +1,6 @@
-# hls —— 用 pkg/hls 起一个直播 origin
+# hls —— 用 pkg/media/hls 起一个直播 origin
 
-演示 [`pkg/hls`](../../pkg/hls):把一路 HLS 流挂在 `webserver` 上分发,后台每 2s 喂一个
+演示 [`pkg/media/hls`](../../pkg/media/hls):把一路 HLS 流挂在 `webserver` 上分发,后台每 2s 喂一个
 **合成分片**(占位字节,非真实 TS——本示例只演示 origin 的「播放列表 + 分片分发」,不碰编解码)。
 
 ## 运行
@@ -36,11 +36,11 @@ seg4.ts
 本示例的分片是假的。真实场景:
 
 ```
-推流端(OBS/ffmpeg) ──RTMP──▶ pkg/media/rtmp 采集 ──remux──▶ pkg/hls.Append ──HTTP──▶ 播放端
+推流端(OBS/ffmpeg) ──RTMP──▶ pkg/media/rtmp 采集 ──remux──▶ pkg/media/hls.Append ──HTTP──▶ 播放端
                               (或直接 ffmpeg 切片喂 Append)
 ```
 
 - 采集:见 [`pkg/media/rtmp`](../../pkg/media/rtmp)(接 OBS/ffmpeg 推流,拿到 FLV 音视频)。
 - remux(FLV→TS/fMP4 分片,不转码):目前需自行接入(astits / gohlslib 等),是把两端
   串成端到端直播的最后一环。
-- 分发:`pkg/hls`(本示例)。
+- 分发:`pkg/media/hls`(本示例)。

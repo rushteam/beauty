@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/rushteam/beauty/pkg/metadata"
+	"github.com/rushteam/beauty/pkg/api/metadata"
 	"github.com/rushteam/beauty/pkg/middleware/tenant"
 )
 

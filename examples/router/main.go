@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/presence"
-	"github.com/rushteam/beauty/pkg/router"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"github.com/rushteam/beauty/pkg/transport/presence"
+	"github.com/rushteam/beauty/pkg/transport/router"
 )
 
 // sinkRegistry 把 sessionID 映射到一个本地投递函数(模拟 WebSocket Send)。

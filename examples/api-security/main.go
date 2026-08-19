@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/kvstore"
 	"github.com/rushteam/beauty/pkg/middleware/antireplay"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/recovery"
 	"github.com/rushteam/beauty/pkg/middleware/signverify"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 // ---- 业务 handler ----

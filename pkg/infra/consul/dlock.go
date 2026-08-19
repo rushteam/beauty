@@ -10,7 +10,7 @@ import (
 
 	"github.com/hashicorp/consul/api"
 
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 // DLock 基于 Consul session + KV Acquire 实现 pkg/dlock 的 Locker 与 Elector,

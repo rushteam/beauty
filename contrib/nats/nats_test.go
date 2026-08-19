@@ -10,7 +10,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 
 	bnats "github.com/rushteam/beauty/contrib/nats"
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 // runServer 起一个内嵌 NATS 服务,返回其客户端地址与关闭函数。

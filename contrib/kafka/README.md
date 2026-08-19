@@ -1,6 +1,6 @@
-# contrib/kafka —— pkg/mq 的 Kafka broker 绑定(独立模块)
+# contrib/kafka —— pkg/messaging/mq 的 Kafka broker 绑定(独立模块)
 
-实现 `pkg/mq` 的 `Publisher`/`Subscriber`,基于 [twmb/franz-go](https://github.com/twmb/franz-go),
+实现 `pkg/messaging/mq` 的 `Publisher`/`Subscriber`,基于 [twmb/franz-go](https://github.com/twmb/franz-go),
 默认挂载官方 OTel 插件 [kotel](https://github.com/twmb/franz-go/tree/master/plugin/kotel)
 (publish / receive / process span + broker metrics)。
 
@@ -13,7 +13,7 @@ go get github.com/rushteam/beauty/contrib/kafka@latest
 ```go
 import (
     bkafka "github.com/rushteam/beauty/contrib/kafka"
-    "github.com/rushteam/beauty/pkg/mq"
+    "github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 pub, err := bkafka.NewPublisher([]string{"127.0.0.1:9092"})
@@ -47,7 +47,7 @@ pub, _ := bkafka.NewPublisher(brokers, bkafka.WithoutOTel())
 sub := bkafka.NewSubscriber(brokers, bkafka.WithoutSubscriberOTel())
 ```
 
-> Kafka 场景用本模块内置 kotel 即可,不必再套 `pkg/mq/otelmq`(避免双重 Inject)。
+> Kafka 场景用本模块内置 kotel 即可,不必再套 `pkg/messaging/mq/otelmq`(避免双重 Inject)。
 > `otelmq` 仍适用于 InProc / NATS 等非 franz 传输。
 
 ## 语义

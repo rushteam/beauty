@@ -67,3 +67,9 @@ require (
 
 // 独立嵌套模块:示例同时用到核心(webserver/SSE)、contrib/llm(agent) 和 contrib/mcp,
 // 用 replace 指向本地联调。核心仓库的 go build ./... 不会编译本模块(模块边界隔离)。
+
+replace github.com/rushteam/beauty => ../../
+
+replace github.com/rushteam/beauty/contrib/llm => ../../contrib/llm
+
+replace github.com/rushteam/beauty/contrib/mcp => ../../contrib/mcp

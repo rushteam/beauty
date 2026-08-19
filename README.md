@@ -173,25 +173,25 @@ See [`docs/grpc-service-discovery.md`](docs/grpc-service-discovery.md),
 |---|---|
 | Config / hot reload | `pkg/conf` (nacos, etcd, consul, k8s configmap/secret) |
 | Service discovery | `pkg/service/discover`, clients `pkg/client/{grpcclient,http}` |
-| Distributed lock / leader | `pkg/dlock` (etcd, consul, redis, k8s Lease, PG Advisory Lock); k8s RBAC guide: [`docs/k8s-rbac.md`](docs/k8s-rbac.md) |
-| TTL-KV & primitives | `pkg/kvstore` (redis, etcd) → counter / cooldown / idempotency |
-| Concurrency | `pkg/syncx` (Map/ForEach, SingleFlight, Batcher, Debounce/Throttle, Future), `pkg/xgo`, `pkg/safe`, `pkg/chanx`, `pkg/keyedmutex` |
-| Resilience | `pkg/ratelimit`, `pkg/governance/{circuitbreaker,overloadctrl}`, `pkg/backoff` |
-| Realtime | `pkg/ws`, `pkg/sse`, `pkg/stream`, `pkg/quic`, `pkg/gameloop`, `pkg/spatial`, `pkg/presence`, `pkg/p2p` (signaling + topology + transport) |
-| Media | `pkg/media/rtmp`, `pkg/hls`, `pkg/media/hlsmux`, `pkg/media/webrtc` (+ `sfu`), `pkg/media` (hub/supervisor/metrics) |
+| Distributed lock / leader | `pkg/store/dlock` (etcd, consul, redis, k8s Lease, PG Advisory Lock); k8s RBAC guide: [`docs/k8s-rbac.md`](docs/k8s-rbac.md) |
+| TTL-KV & primitives | `pkg/store/kvstore` (redis, etcd) → counter / cooldown / idempotency |
+| Concurrency | `pkg/foundation/syncx` (Map/ForEach, SingleFlight, Batcher, Debounce/Throttle, Future), `pkg/foundation/xgo`, `pkg/foundation/safe`, `pkg/foundation/chanx`, `pkg/foundation/keyedmutex` |
+| Resilience | `pkg/resilience/ratelimit`, `pkg/governance/{circuitbreaker,overloadctrl}`, `pkg/resilience/backoff` |
+| Realtime | `pkg/transport/ws`, `pkg/transport/sse`, `pkg/messaging/stream`, `pkg/transport/quic`, `pkg/game/gameloop`, `pkg/game/spatial`, `pkg/transport/presence`, `pkg/transport/p2p` (signaling + topology + transport) |
+| Media | `pkg/media/rtmp`, `pkg/media/hls`, `pkg/media/hlsmux`, `pkg/media/webrtc` (+ `sfu`), `pkg/media` (hub/supervisor/metrics) |
 | WASM / Agent | `contrib/wasm` (middleware + FaaS), `contrib/wasmopa` (OPA/Rego), `contrib/wasmagent` (agent tools/skills); see [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) |
-| Messaging | `pkg/mq`, `pkg/eventbus`, `pkg/webhook`, `pkg/delayqueue`, `pkg/scheduler` |
-| Consistency | `pkg/saga`, `pkg/txn`, `pkg/idempotency` |
-| Observability | `pkg/service/telemetry`, `pkg/service/logger`, `pkg/buildinfo`, `pkg/service/pprof` |
-| Scale-out | `pkg/shard` (consistent-hash routing + reverse proxy) |
-| Auth | `pkg/middleware/auth` (authn), `pkg/authz` (authz: RBAC + HTTP/gRPC middleware), `pkg/token` |
+| Messaging | `pkg/messaging/mq`, `pkg/messaging/eventbus`, `pkg/messaging/webhook`, `pkg/orchestration/delayqueue`, `pkg/orchestration/scheduler` |
+| Consistency | `pkg/orchestration/saga`, `pkg/orchestration/txn`, `pkg/store/idempotency` |
+| Observability | `pkg/service/telemetry`, `pkg/service/logger`, `pkg/foundation/buildinfo`, `pkg/service/pprof` |
+| Scale-out | `pkg/store/shard` (consistent-hash routing + reverse proxy) |
+| Auth | `pkg/middleware/auth` (authn), `pkg/api/authz` (authz: RBAC + HTTP/gRPC middleware), `pkg/api/token` |
 | Domain / game | `pkg/{leaderboard,matchmaker,leveling,questlog,versus,tally,reddot,...}` |
 
 See [`docs/`](docs) and [`examples/`](examples) for details and runnable demos.
 
 ## Messaging
 
-A transport-agnostic queue (`pkg/mq`): `Publisher`/`Subscriber` interfaces + a
+A transport-agnostic queue (`pkg/messaging/mq`): `Publisher`/`Subscriber` interfaces + a
 `Consumer` that runs as a `beauty.Service`, plus `Chain`/`Retry`/`Recover` middleware.
 An in-process implementation ships in core; real brokers are opt-in contrib modules.
 
@@ -211,17 +211,17 @@ independently) — import only what you need; the core dependency graph stays le
 | [`contrib/gorm`](contrib/gorm) | GORM: read/write split, otel tracing, slog, error mapping | `…/contrib/gorm` |
 | [`contrib/sqldb`](contrib/sqldb) | `database/sql` read/write split + otel, pairs with **sqlc** | `…/contrib/sqldb` |
 | [`contrib/elasticsearch`](contrib/elasticsearch) | Elasticsearch v8 search / index / health | `…/contrib/elasticsearch` |
-| [`contrib/nats`](contrib/nats) | `pkg/mq` NATS broker (at-most-once) | `…/contrib/nats` |
-| [`contrib/natsjs`](contrib/natsjs) | `pkg/mq` NATS JetStream (persistent, at-least-once) | `…/contrib/natsjs` |
-| [`contrib/kafka`](contrib/kafka) | `pkg/mq` Kafka broker (franz-go + kotel) | `…/contrib/kafka` |
+| [`contrib/nats`](contrib/nats) | `pkg/messaging/mq` NATS broker (at-most-once) | `…/contrib/nats` |
+| [`contrib/natsjs`](contrib/natsjs) | `pkg/messaging/mq` NATS JetStream (persistent, at-least-once) | `…/contrib/natsjs` |
+| [`contrib/kafka`](contrib/kafka) | `pkg/messaging/mq` Kafka broker (franz-go + kotel) | `…/contrib/kafka` |
 | [`contrib/llm`](contrib/llm) | provider-agnostic LLM client (chat/stream/embed, OpenAI/Anthropic/Azure/compatible) | `…/contrib/llm` |
 | [`contrib/otelllm`](contrib/otelllm) | AI observability: OTel Trace/Metrics (GenAI semconv) + Agent run-tree Hooks → Jaeger/Tempo/Langfuse/LangSmith | `…/contrib/otelllm` |
 | [`contrib/vector`](contrib/vector) | vector store / RAG semantic search | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client (expose services as AI tools) | `…/contrib/mcp` |
 | [`contrib/wasm`](contrib/wasm) | wazero runtime: HTTP middleware, FaaS-lite router, host funcs, pool/cache | `…/contrib/wasm` |
-| [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm policies as `pkg/authz.Enforcer` | `…/contrib/wasmopa` |
+| [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm policies as `pkg/api/authz.Enforcer` | `…/contrib/wasmopa` |
 | [`contrib/wasmagent`](contrib/wasmagent) | sandboxed agent tools / skills (`ScriptExecutor` + `agent.Tool`) | `…/contrib/wasmagent` |
-| [`contrib/p2p-webrtc`](contrib/p2p-webrtc) | WebRTC DataChannel transport for `pkg/p2p` (NAT traversal, browser interop via pion/webrtc) | `…/contrib/p2p-webrtc` |
+| [`contrib/p2p-webrtc`](contrib/p2p-webrtc) | WebRTC DataChannel transport for `pkg/transport/p2p` (NAT traversal, browser interop via pion/webrtc) | `…/contrib/p2p-webrtc` |
 
 Prefix each path with `github.com/rushteam/beauty`. See [`contrib/README.md`](contrib/README.md).
 
@@ -229,7 +229,7 @@ Prefix each path with `github.com/rushteam/beauty`. See [`contrib/README.md`](co
 
 OpenTelemetry is wired through the framework: traces and metrics via
 `pkg/service/telemetry`, logs via `pkg/service/logger` (slog with automatic
-`trace_id`/`span_id` injection), and runtime build info via `pkg/buildinfo`.
+`trace_id`/`span_id` injection), and runtime build info via `pkg/foundation/buildinfo`.
 Configure an exporter once and the media/mq/client layers emit metrics automatically.
 
 ## Documentation

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/gameroom"
+	"github.com/rushteam/beauty/pkg/game/gameroom"
 )
 
 // Lifecycle 抽象 Agones SDK(便于测试与替换)。

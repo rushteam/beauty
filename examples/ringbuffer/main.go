@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/ringbuffer"
+	"github.com/rushteam/beauty/pkg/foundation/ringbuffer"
 )
 
 func main() {

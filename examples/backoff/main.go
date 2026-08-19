@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/backoff"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 )
 
 func main() {

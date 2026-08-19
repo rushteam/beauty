@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/momentum"
+	"github.com/rushteam/beauty/pkg/game/momentum"
 )
 
 func main() {

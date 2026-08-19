@@ -10,8 +10,8 @@ import (
 	"net/http"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/presence"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"github.com/rushteam/beauty/pkg/transport/presence"
 )
 
 func main() {

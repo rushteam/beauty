@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
+	"github.com/rushteam/beauty/pkg/store/loadbalance"
 )
 
 type serviceNode struct {

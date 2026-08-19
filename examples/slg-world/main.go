@@ -30,13 +30,13 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/gameloop"
-	"github.com/rushteam/beauty/pkg/scheduler"
+	"github.com/rushteam/beauty/pkg/game/gameloop"
+	"github.com/rushteam/beauty/pkg/game/spatial"
+	"github.com/rushteam/beauty/pkg/game/spatial/aoi"
+	"github.com/rushteam/beauty/pkg/orchestration/scheduler"
+	"github.com/rushteam/beauty/pkg/orchestration/timerqueue"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/spatial"
-	"github.com/rushteam/beauty/pkg/spatial/aoi"
-	"github.com/rushteam/beauty/pkg/timerqueue"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 // ── 常量 ──────────────────────────────────────────────

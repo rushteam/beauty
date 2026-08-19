@@ -29,7 +29,7 @@ import (
 	"github.com/rushteam/beauty/pkg/domain/relationship"
 	"github.com/rushteam/beauty/pkg/domain/tournament"
 	"github.com/rushteam/beauty/pkg/domain/wallet"
-	"github.com/rushteam/beauty/pkg/leaderboard"
+	"github.com/rushteam/beauty/pkg/game/leaderboard"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

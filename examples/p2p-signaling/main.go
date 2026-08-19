@@ -25,10 +25,10 @@ import (
 	"net/http"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/p2p/signaling"
-	"github.com/rushteam/beauty/pkg/p2p/topology"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/p2p/signaling"
+	"github.com/rushteam/beauty/pkg/transport/p2p/topology"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 //go:embed static

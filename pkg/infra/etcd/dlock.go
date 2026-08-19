@@ -8,7 +8,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 // DLock 基于 etcd 官方 client/v3/concurrency 包(Session + Mutex/Election)实现

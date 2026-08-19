@@ -23,10 +23,10 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/contrib/agones"
-	"github.com/rushteam/beauty/pkg/gameloop"
-	"github.com/rushteam/beauty/pkg/gameroom"
+	"github.com/rushteam/beauty/pkg/game/gameloop"
+	"github.com/rushteam/beauty/pkg/game/gameroom"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 const addr = "127.0.0.1:8130"

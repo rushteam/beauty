@@ -13,7 +13,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/rushteam/beauty/pkg/ctxkey"
+	"github.com/rushteam/beauty/pkg/foundation/ctxkey"
 )
 
 // bannedList 单次请求内的禁用节点集合。通过 ctx 传递,并发安全。

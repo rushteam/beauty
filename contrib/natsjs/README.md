@@ -1,6 +1,6 @@
-# contrib/natsjs —— pkg/mq 的 NATS JetStream 绑定(持久化,独立模块)
+# contrib/natsjs —— pkg/messaging/mq 的 NATS JetStream 绑定(持久化,独立模块)
 
-实现 `pkg/mq` 的 `Publisher`/`Subscriber`,用 **JetStream** 提供**持久化 + at-least-once**:
+实现 `pkg/messaging/mq` 的 `Publisher`/`Subscriber`,用 **JetStream** 提供**持久化 + at-least-once**:
 消息落盘、消费确认、失败重投、断线可续。是 [`contrib/nats`](../nats)(core NATS,at-most-once)
 的"可靠"版。
 
@@ -13,7 +13,7 @@ go get github.com/rushteam/beauty/contrib/natsjs@latest
 ```go
 import (
     bjs "github.com/rushteam/beauty/contrib/natsjs"
-    "github.com/rushteam/beauty/pkg/mq"
+    "github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 conn, _ := bjs.Connect("nats://127.0.0.1:4222")
@@ -38,7 +38,7 @@ beauty.New(beauty.WithService(consumer))
   **ephemeral consumer**(每订阅者各一份 → 扇出)。
 - `Headers` → 消息头;`Key` 走 `X-MQ-Key` 头透传。
 - 投递:**at-least-once**,AckExplicit——handler 成功 `Ack`、失败 `Nak`(立即重投)。故 handler 应
-  **幂等**(可配 `pkg/idempotency`)。订阅随 ctx 取消停止。
+  **幂等**(可配 `pkg/store/idempotency`)。订阅随 ctx 取消停止。
 
 ## 何时选它 vs contrib/nats
 

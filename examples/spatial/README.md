@@ -1,6 +1,6 @@
 # spatial —— 空间 AOI
 
-演示 `pkg/spatial` 的网格空间索引：`Nearby` 范围查询与 `KNN` 最近 N 个实体。
+演示 `pkg/game/spatial` 的网格空间索引：`Nearby` 范围查询与 `KNN` 最近 N 个实体。
 
 ## 运行
 

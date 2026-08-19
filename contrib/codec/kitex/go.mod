@@ -9,3 +9,5 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 )
+
+replace github.com/rushteam/beauty => ../../../

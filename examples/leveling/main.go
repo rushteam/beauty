@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/leveling"
+	"github.com/rushteam/beauty/pkg/game/leveling"
 )
 
 func main() {

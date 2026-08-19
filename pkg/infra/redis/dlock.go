@@ -12,7 +12,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 // 释放/续期都用 Lua 做 CAS(compare-and-set):只有 value 仍等于本次持有的 token 时

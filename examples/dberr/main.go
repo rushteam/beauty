@@ -11,8 +11,8 @@ import (
 	"net/http"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/dberr"
-	perr "github.com/rushteam/beauty/pkg/errors"
+	"github.com/rushteam/beauty/pkg/api/dberr"
+	perr "github.com/rushteam/beauty/pkg/api/errors"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

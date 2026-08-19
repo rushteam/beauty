@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 // TestStart_NoElector_RunsImmediately 不配置选主时,行为与之前一致:立即注册并运行。

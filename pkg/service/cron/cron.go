@@ -12,8 +12,8 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/rushteam/beauty/pkg/dlock"
 	"github.com/rushteam/beauty/pkg/service/logger"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 type cronHandler struct {

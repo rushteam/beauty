@@ -3,13 +3,13 @@
 Beauty's P2P capability turns WebRTC from a "media call tool" into a **general-purpose P2P data pipe** —
 peers establish DataChannel connections directly; data does not pass through the server, yielding lower latency and bandwidth cost.
 
-Building on Beauty's existing WebRTC (pion), WebSocket (`pkg/ws`), QUIC (`pkg/quic`), and
-presence (`pkg/presence`), this layer adds **signaling orchestration + peer discovery + topology strategies + dual-channel abstraction**.
+Building on Beauty's existing WebRTC (pion), WebSocket (`pkg/transport/ws`), QUIC (`pkg/transport/quic`), and
+presence (`pkg/transport/presence`), this layer adds **signaling orchestration + peer discovery + topology strategies + dual-channel abstraction**.
 
 ## Package Layout
 
 ```
-pkg/p2p/
+pkg/transport/p2p/
 ├── p2p.go           # PeerConn / Message / Network / Transport core interfaces
 ├── network.go       # LocalNetwork: in-memory impl managing multiple PeerConns
 ├── topology/
@@ -31,12 +31,12 @@ pkg/p2p/
 ├────────────────────────────────┴────────────────────────────────┤
 │                       Transport Layer (pluggable)                │
 │  ┌──────────────────┐  ┌──────────────────┐                    │
-│  │ WebRTC DataChannel│  │  QUIC(pkg/quic) │                    │
+│  │ WebRTC DataChannel│  │  QUIC(pkg/transport/quic) │                    │
 │  │  (browser-ready)  │  │  (native/server) │                    │
 │  └──────────────────┘  └──────────────────┘                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                     Signaling & Topology Layer                   │
-│  pkg/p2p/signaling      pkg/p2p/topology                        │
+│  pkg/transport/p2p/signaling      pkg/transport/p2p/topology                        │
 │  (WS signal relay)      (FullMesh / Star / MatchPairs)          │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -121,12 +121,12 @@ Client A                    Server                    Client B
 
 | Package | Role |
 |---|---|
-| `pkg/ws` | WebSocket connection carrying signaling |
-| `pkg/presence` | Optional — cross-node peer discovery (distributed deployment) |
+| `pkg/transport/ws` | WebSocket connection carrying signaling |
+| `pkg/transport/presence` | Optional — cross-node peer discovery (distributed deployment) |
 | `pkg/media/webrtc` | Shared pion dependency; P2P uses DataChannel, not media tracks |
 | `pkg/media/webrtc/sfu` | Contrast: SFU is peer↔server; P2P is peer↔peer |
-| `pkg/quic` | Optional — reliable/unreliable dual-channel alternative for native clients |
-| `pkg/gameloop` | Optional — attach to PeerConn for fixed tick-rate game sync |
+| `pkg/transport/quic` | Optional — reliable/unreliable dual-channel alternative for native clients |
+| `pkg/game/gameloop` | Optional — attach to PeerConn for fixed tick-rate game sync |
 
 ## Usage
 
@@ -158,19 +158,19 @@ Beauty has both P2P and SFU, enabling **automatic fallback**:
 ```
 ≤4 people  → FullMesh P2P (lowest latency, zero server bandwidth)
 5~50 people → SFU relay (pkg/media/webrtc/sfu)
-50+ people → cascaded SFU / CDN distribution (pkg/hls)
+50+ people → cascaded SFU / CDN distribution (pkg/media/hls)
 ```
 
 ### Distributed Signaling
 
-A single-node `signaling.Server` can scale to multiple nodes via `pkg/presence` + `pkg/router`:
+A single-node `signaling.Server` can scale to multiple nodes via `pkg/transport/presence` + `pkg/transport/router`:
 - presence tracks "which signaling node a peer is on"
 - router forwards relay messages across nodes
 - each node still uses a local `signaling.Server` for its own peers
 
 ### QUIC Transport Backend
 
-Native clients (non-browser) can skip WebRTC and use `pkg/quic` directly:
+Native clients (non-browser) can skip WebRTC and use `pkg/transport/quic` directly:
 - Stream = reliable channel
 - Datagram = unreliable channel
 - Implement the `p2p.PeerConn` interface to plug into the upper layer seamlessly

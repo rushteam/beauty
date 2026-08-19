@@ -4,7 +4,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/featureflag"
+	"github.com/rushteam/beauty/pkg/api/featureflag"
 )
 
 func main() {

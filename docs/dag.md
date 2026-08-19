@@ -1,13 +1,13 @@
-# DAG 执行器（pkg/dag）
+# DAG 执行器（pkg/foundation/dag）
 
-`pkg/dag` 是一个零外部依赖的有向无环图执行器：按依赖关系将节点拓扑分层，
+`pkg/foundation/dag` 是一个零外部依赖的有向无环图执行器：按依赖关系将节点拓扑分层，
 **同一层内的节点并行执行，层与层之间串行**。不绑定任何数据库 / 调度器 / 任务体系，
 每个节点的工作由 `Node.Run` 闭包描述。
 
 ## 快速开始
 
 ```go
-import "github.com/rushteam/beauty/pkg/dag"
+import "github.com/rushteam/beauty/pkg/foundation/dag"
 
 d := dag.New().Add(
     dag.Node{Name: "build", Run: build},

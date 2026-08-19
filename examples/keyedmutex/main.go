@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/rushteam/beauty/pkg/keyedmutex"
+	"github.com/rushteam/beauty/pkg/foundation/keyedmutex"
 )
 
 func main() {

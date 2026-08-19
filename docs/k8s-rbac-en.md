@@ -194,7 +194,7 @@ kubectl auth can-i watch configmaps \
 import (
     "context"
     k8sdlock "github.com/rushteam/beauty/pkg/infra/k8s"
-    "github.com/rushteam/beauty/pkg/dlock"
+    "github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 // Option 1: direct construction

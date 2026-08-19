@@ -1,6 +1,6 @@
-# contrib/nats —— pkg/mq 的 NATS broker 绑定(独立模块)
+# contrib/nats —— pkg/messaging/mq 的 NATS broker 绑定(独立模块)
 
-实现 `pkg/mq` 的 `Publisher`/`Subscriber`,用 NATS 承载跨服务异步。核心出接口、本模块出实现。
+实现 `pkg/messaging/mq` 的 `Publisher`/`Subscriber`,用 NATS 承载跨服务异步。核心出接口、本模块出实现。
 
 ```bash
 go get github.com/rushteam/beauty/contrib/nats@latest
@@ -11,7 +11,7 @@ go get github.com/rushteam/beauty/contrib/nats@latest
 ```go
 import (
     bnats "github.com/rushteam/beauty/contrib/nats"
-    "github.com/rushteam/beauty/pkg/mq"
+    "github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 conn, _ := bnats.Connect("nats://127.0.0.1:4222")

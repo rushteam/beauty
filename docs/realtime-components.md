@@ -1,6 +1,6 @@
 # 实时服务组件库（pkg/ · pkg/domain/）
 
-beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,提供了一组
+beauty 在 `pkg/transport/ws`（WebSocket 薄封装）和 `pkg/transport/sse`（SSE 封装）之上,提供了一组
 **可独立组合**的实时服务原语,覆盖长连接会话、在线状态、消息路由、匹配组队、
 排行榜缓存、任务调度、虚拟账户、操作审计、离线通知、周期榜单、临时小队、
 版本化存储、社交图谱、会话令牌、DB 错误翻译、可靠 Webhook、断线重连、状态广播、
@@ -29,26 +29,26 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 
 | 包 | 一句话 | 典型场景 | demo 端口 |
 |----|--------|----------|-----------|
-| `pkg/match` | 有状态实时会话原语(actor 模型) | 游戏房间 / 权威对战 / 协作编辑 | 8181 |
-| `pkg/ws/session` | WebSocket 有状态会话高阶封装 | 长连接业务 / IM 单聊 | 8282 |
-| `pkg/presence` | 在线状态双索引 + 事件总线 | 频道成员 / 在线广播 / 候选池 | 8283 |
-| `pkg/router` | 多语义消息路由 + 攒批 | 群发 / 定点投递 / 批量下发 | 8284 |
-| `pkg/leaderboard` | 排行榜内存排名缓存(堆排序) | "我的名次" / TopN 高频读 | 8285 |
-| `pkg/scheduler` | 工作池 + 运行时 Pause/Resume | 发奖 / 批量通知 / 过期清理 | 8286 |
-| `pkg/matchmaker` | 基于属性匹配的组队 | PVP 组队 / 匹配大厅 | 8287 |
-| `pkg/audit` | 操作审计(仅记成功 + 异步落盘) | 合规 / 运维审计 | 8289 |
-| `pkg/token` | dual token(JWT HS256)+ 黑名单注销 | 登录态签发 / 续签 / 踢出 | 8295 |
-| `pkg/dberr` | DB 错误码翻译(DB-agnostic → *Status) | 仓储层错误归一为业务码 | 8296 |
-| `pkg/webhook` | 事件通知 + 幂等去重 + DLQ | 外部系统回调 / at-least-once | 8297 |
-| `pkg/resume` | 断线重连在场还原(token+presence) | 掉线不掉状态 / 自动重连 | 8298 |
-| `pkg/presence/status` | 状态变化广播给关注者 | 好友上下线通知 / status event | 8299 |
-| `pkg/ephemeral` | 短期 TTL KV(纯内存 + 过期清扫) | 验证码 / 临时数据 / 缓存 | 8302 |
-| `pkg/afterwork` | 请求级后台任务延寿(waitUntil 语义) | 响应后发邮件 / 写审计 / 触发 webhook | 8303 |
-| `pkg/handler` | 声明式 HTTP handler 包装器(auth+inject+afterwork+错误归一化) | 业务函数只写 (ctx,req)=>(resp,err) | 8303 |
-| `pkg/ratelimit` | 按键限流(令牌桶 + 滑动窗口)+ HTTP 中间件 | 防刷屏 / API 限流 / 按用户/IP 隔离 | 8304 |
-| `pkg/txn` | 跨域事务协调(两阶段提交 Prepare/Commit/Rollback) | 扣钱包+写存档 原子化 / 任一失败全回滚 | 8305 |
-| `pkg/loadbalance` | 负载均衡算法(一致性哈希 + 平滑加权轮询 + 轮询) | 会话粘性 / 带状态分片 / 按容量分发 | 8306 |
-| `pkg/ctxkey` | 类型安全 context key(泛型 Key[T]) | 统一各包 contextKey 定义 / 防 key 冲突 | — |
+| `pkg/game/match` | 有状态实时会话原语(actor 模型) | 游戏房间 / 权威对战 / 协作编辑 | 8181 |
+| `pkg/transport/ws/session` | WebSocket 有状态会话高阶封装 | 长连接业务 / IM 单聊 | 8282 |
+| `pkg/transport/presence` | 在线状态双索引 + 事件总线 | 频道成员 / 在线广播 / 候选池 | 8283 |
+| `pkg/transport/router` | 多语义消息路由 + 攒批 | 群发 / 定点投递 / 批量下发 | 8284 |
+| `pkg/game/leaderboard` | 排行榜内存排名缓存(堆排序) | "我的名次" / TopN 高频读 | 8285 |
+| `pkg/orchestration/scheduler` | 工作池 + 运行时 Pause/Resume | 发奖 / 批量通知 / 过期清理 | 8286 |
+| `pkg/game/matchmaker` | 基于属性匹配的组队 | PVP 组队 / 匹配大厅 | 8287 |
+| `pkg/api/audit` | 操作审计(仅记成功 + 异步落盘) | 合规 / 运维审计 | 8289 |
+| `pkg/api/token` | dual token(JWT HS256)+ 黑名单注销 | 登录态签发 / 续签 / 踢出 | 8295 |
+| `pkg/api/dberr` | DB 错误码翻译(DB-agnostic → *Status) | 仓储层错误归一为业务码 | 8296 |
+| `pkg/messaging/webhook` | 事件通知 + 幂等去重 + DLQ | 外部系统回调 / at-least-once | 8297 |
+| `pkg/transport/resume` | 断线重连在场还原(token+presence) | 掉线不掉状态 / 自动重连 | 8298 |
+| `pkg/transport/presence/status` | 状态变化广播给关注者 | 好友上下线通知 / status event | 8299 |
+| `pkg/store/ephemeral` | 短期 TTL KV(纯内存 + 过期清扫) | 验证码 / 临时数据 / 缓存 | 8302 |
+| `pkg/api/afterwork` | 请求级后台任务延寿(waitUntil 语义) | 响应后发邮件 / 写审计 / 触发 webhook | 8303 |
+| `pkg/api/handler` | 声明式 HTTP handler 包装器(auth+inject+afterwork+错误归一化) | 业务函数只写 (ctx,req)=>(resp,err) | 8303 |
+| `pkg/resilience/ratelimit` | 按键限流(令牌桶 + 滑动窗口)+ HTTP 中间件 | 防刷屏 / API 限流 / 按用户/IP 隔离 | 8304 |
+| `pkg/orchestration/txn` | 跨域事务协调(两阶段提交 Prepare/Commit/Rollback) | 扣钱包+写存档 原子化 / 任一失败全回滚 | 8305 |
+| `pkg/store/loadbalance` | 负载均衡算法(一致性哈希 + 平滑加权轮询 + 轮询) | 会话粘性 / 带状态分片 / 按容量分发 | 8306 |
+| `pkg/foundation/ctxkey` | 类型安全 context key(泛型 Key[T]) | 统一各包 contextKey 定义 / 防 key 冲突 | — |
 
 ### 扩展原语:并发 / 可靠性 / 游戏 & 直播(pkg/)
 
@@ -57,31 +57,31 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 | 包 | 一句话 | 典型场景 | demo |
 |----|--------|----------|------|
 | **并发 & 可靠性** | | | |
-| `pkg/idempotency` | 幂等执行(去重 + singleflight 并发合并 + TTL) | 防重复扣款/发奖 · 请求去重 · 缓存击穿保护 | ✓ |
-| `pkg/keyedmutex` | 按 key 的细粒度锁(引用计数自动回收) | 同账户/房间/订单串行 · 不同实体并行 | ✓ |
-| `pkg/backoff` | 指数退避 + 抖动(Full/Equal/None/比例) | 重试可靠性 · 打散重试风暴 | ✓ |
-| `pkg/saga` | 跨服务 Saga 编排(顺序正向 + 逆序补偿 + 重试) | 抽卡/下单/兑换 跨服务最终一致 | ✓ |
-| `pkg/eventbus` | 泛型进程内事件总线(按主题 + 回调) | 模块间事件解耦 · 一事件多订阅者 | ✓ |
+| `pkg/store/idempotency` | 幂等执行(去重 + singleflight 并发合并 + TTL) | 防重复扣款/发奖 · 请求去重 · 缓存击穿保护 | ✓ |
+| `pkg/foundation/keyedmutex` | 按 key 的细粒度锁(引用计数自动回收) | 同账户/房间/订单串行 · 不同实体并行 | ✓ |
+| `pkg/resilience/backoff` | 指数退避 + 抖动(Full/Equal/None/比例) | 重试可靠性 · 打散重试风暴 | ✓ |
+| `pkg/orchestration/saga` | 跨服务 Saga 编排(顺序正向 + 逆序补偿 + 重试) | 抽卡/下单/兑换 跨服务最终一致 | ✓ |
+| `pkg/messaging/eventbus` | 泛型进程内事件总线(按主题 + 回调) | 模块间事件解耦 · 一事件多订阅者 | ✓ |
 | **调度 & 计数** | | | |
-| `pkg/delayqueue` | 定点单次延迟触发(最小堆 + 可取消/改期) | 开局倒计时 · buff 到期 · 订单超时 · 匹配兜底 | ✓ |
-| `pkg/counter` | 滑动窗口计数 / 时间窗配额 | 每日抽卡上限 · 分钟弹幕限频 · 防刷 | ✓ |
-| `pkg/tally` | 高频累计聚合 + 批量刷写 | 直播点赞/刷礼物 · 埋点计数(削写放大) | ✓ |
+| `pkg/orchestration/delayqueue` | 定点单次延迟触发(最小堆 + 可取消/改期) | 开局倒计时 · buff 到期 · 订单超时 · 匹配兜底 | ✓ |
+| `pkg/resilience/counter` | 滑动窗口计数 / 时间窗配额 | 每日抽卡上限 · 分钟弹幕限频 · 防刷 | ✓ |
+| `pkg/store/tally` | 高频累计聚合 + 批量刷写 | 直播点赞/刷礼物 · 埋点计数(削写放大) | ✓ |
 | `pkg/idgen` | 分布式唯一 ID(Snowflake,64 位趋势递增) | 对局 ID · 订单号 · 消息序号 · 数据库主键 | ✓ |
 | **状态机 & 游戏玩法** | | | |
-| `pkg/fsm` | 泛型有限状态机(转移校验 + Enter/Leave 钩子) | 对局/房间/订单状态流转 · 防非法跳转 | ✓ |
-| `pkg/versus` | 限时多方对抗计分(倒计时 + 定胜负 + 事件流) | 直播 PK · 团战 · 答题赛 · 拉票 | ✓ |
-| `pkg/momentum` | 连击 + 热度时间衰减(半衰期指数冷却) | 直播连击特效 · 实时热度榜 | ✓ |
+| `pkg/foundation/fsm` | 泛型有限状态机(转移校验 + Enter/Leave 钩子) | 对局/房间/订单状态流转 · 防非法跳转 | ✓ |
+| `pkg/game/versus` | 限时多方对抗计分(倒计时 + 定胜负 + 事件流) | 直播 PK · 团战 · 答题赛 · 拉票 | ✓ |
+| `pkg/game/momentum` | 连击 + 热度时间衰减(半衰期指数冷却) | 直播连击特效 · 实时热度榜 | ✓ |
 | **空间 & 地理** | | | |
-| `pkg/pathfind` | 网格 A* 寻路(障碍 + 权重 + 对角) | 塔防 · SLG · 点击移动 · 怪物追击 | ✓ |
-| `pkg/spatial` | 网格空间索引(Nearby / KNN) | 附近的人 · MMO AOI · 大地图分区 | ✓ |
-| `pkg/spatial/aoi` | AOI 可见集 diff(enter/leave/stay) | 增量同步兴趣管理 | — |
-| `pkg/replicate` | DirtySet + Delta 投影(baseline/增量) | 状态同步出口 | — |
-| `pkg/snapbuf` | 环形快照缓冲 | 延迟补偿 rewind | — |
-| `pkg/inputclock` | 客户端帧映射 + RTT | 延迟补偿 | — |
-| `pkg/lagcomp` | 补偿帧查询 WorldAt | FPS 命中判定 | — |
-| `pkg/gameroom` | Dedicated 房间 FSM | Waiting→Running→Draining | — |
-| `pkg/gameloop` | 定步 tick + 输入扇出 | lockstep / 状态同步骨架 | ✓ |
-| `pkg/geohash` | 经纬度地理编码(编码/邻居/覆盖查询/距离) | LBS 附近的人/店铺(前缀检索) | ✓ |
+| `pkg/game/pathfind` | 网格 A* 寻路(障碍 + 权重 + 对角) | 塔防 · SLG · 点击移动 · 怪物追击 | ✓ |
+| `pkg/game/spatial` | 网格空间索引(Nearby / KNN) | 附近的人 · MMO AOI · 大地图分区 | ✓ |
+| `pkg/game/spatial/aoi` | AOI 可见集 diff(enter/leave/stay) | 增量同步兴趣管理 | — |
+| `pkg/game/replicate` | DirtySet + Delta 投影(baseline/增量) | 状态同步出口 | — |
+| `pkg/game/snapbuf` | 环形快照缓冲 | 延迟补偿 rewind | — |
+| `pkg/game/inputclock` | 客户端帧映射 + RTT | 延迟补偿 | — |
+| `pkg/game/lagcomp` | 补偿帧查询 WorldAt | FPS 命中判定 | — |
+| `pkg/game/gameroom` | Dedicated 房间 FSM | Waiting→Running→Draining | — |
+| `pkg/game/gameloop` | 定步 tick + 输入扇出 | lockstep / 状态同步骨架 | ✓ |
+| `pkg/game/geohash` | 经纬度地理编码(编码/邻居/覆盖查询/距离) | LBS 附近的人/店铺(前缀检索) | ✓ |
 
 > 这批原语的 demo 均在 `examples/<pkg>/main.go`,单文件可直接 `go run`。
 
@@ -128,14 +128,14 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 ```
         ┌─────────────── WebSocket / gRPC 长连接 ───────────────┐
         │                                                        │
-   pkg/ws/session  ──(Handler.OnOpen/OnMessage/OnClose)──►  业务层
+   pkg/transport/ws/session  ──(Handler.OnOpen/OnMessage/OnClose)──►  业务层
         │                                                        │
         │  Track/Untrack                  Send/QueueDeferred
         ▼                                ▼
-   pkg/presence  ◄────── Lookup ──────  pkg/router
+   pkg/transport/presence  ◄────── Lookup ──────  pkg/router
    (会话↔流 双索引)                    (按 presence ID / 流 / 全员 路由)
 
-   pkg/match          pkg/matchmaker         pkg/leaderboard     pkg/scheduler
+   pkg/game/match          pkg/game/matchmaker         pkg/game/leaderboard     pkg/orchestration/scheduler
    (有状态房间)        (组队匹配)             (排名缓存)          (后台工作池)
         │                   │                      │                   │
         └─── Subscribe ───► 业务层 ◄── Match 回调 ─┘ ── Insert ───────┘
@@ -171,10 +171,10 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 把队员加入同一流并 `match.Start` 开房,房间产出经 `router.SendToStream` 下发。
 
 **HTTP 支线:声明式 handler + 响应后副作用**——业务函数只写
-`(ctx, req) => (resp, error)`,`pkg/handler` 负责认证策略(`WithAuth`)、
+`(ctx, req) => (resp, error)`,`pkg/api/handler` 负责认证策略(`WithAuth`)、
 依赖注入(`WithInject`)、错误归一化(`errors.WriteHTTP`);响应返回后
-`pkg/afterwork` 的 `Wait()` 把 `Defer` 投递的副作用(发邮件 / 写审计 /
-触发 `pkg/webhook`)跑完。见 `examples/afterwork`。
+`pkg/api/afterwork` 的 `Wait()` 把 `Defer` 投递的副作用(发邮件 / 写审计 /
+触发 `pkg/messaging/webhook`)跑完。见 `examples/afterwork`。
 
 **直播玩法组合:多房间 PK**——用扩展原语搭一个多房间直播 PK 后端:每局
 `versus` 管双方倒计时对抗计分与胜负判定,多局用 roomID→Match 的 map 并行,
@@ -185,7 +185,7 @@ beauty 在 `pkg/ws`（WebSocket 薄封装）和 `pkg/sse`（SSE 封装）之上,
 事件流(内部复用 `stream`)桥接到 SSE 推给客户端,全局 PK 生命周期(开始/结束)
 经 `eventbus` 广播给通知/榜单等下游模块解耦接入。见 `examples/live-pk`(组合 demo)。
 
-## 速查:pkg/match（有状态实时会话）
+## 速查:pkg/game/match（有状态实时会话）
 
 每个会话由独立 goroutine 驱动,固定帧率 tick,输入/成员/信号经 channel
 串行消费,状态封装在 goroutine 内无需锁。
@@ -205,9 +205,9 @@ m.Stop(); m.Wait()                   // 优雅停止
 业务实现 `Handler.Init/Tick`。背压:`QueueInput` 满则丢弃+告警,call 队列满则
 视为过载停止。详见 `examples/match`。
 
-## 速查:pkg/ws/session（WebSocket 会话封装）
+## 速查:pkg/transport/ws/session（WebSocket 会话封装）
 
-在 `pkg/ws` 薄封装之上补齐生产级能力:双 goroutine 读写分离、周期 Ping 心跳、
+在 `pkg/transport/ws` 薄封装之上补齐生产级能力:双 goroutine 读写分离、周期 Ping 心跳、
 关闭握手、写超时保护。
 
 ```go
@@ -220,7 +220,7 @@ mux.Handle("/ws", ws.Handler(session.Accept(&myHandler{},
 业务实现 `Handler.OnOpen/OnMessage/OnClose`,用 `s.Send/SendText/SendJSON` 投递写。
 队列满自动关闭慢客户端。详见 `examples/session`。
 
-## 速查:pkg/presence（在线状态双索引）
+## 速查:pkg/transport/presence（在线状态双索引）
 
 维护"谁在哪个流"的双向索引:按流查成员(广播用)、按会话查所在流(下线清理用),
 双向均 O(1)。附 join/leave 事件总线。
@@ -236,7 +236,7 @@ tr.UntrackAll(sid)                    // 会话下线一键清理
 
 并发安全。事件队列满丢弃(非阻塞)。详见 `examples/presence`。
 
-## 速查:pkg/router（多语义消息路由）
+## 速查:pkg/transport/router（多语义消息路由）
 
 `Broadcaster` 的增强版:按 presence ID 定点投递、按流群发、攒批下发。
 
@@ -251,7 +251,7 @@ rtr.SendToAll(msg)
 
 `FlushDeferred` 按 session 批量下发,减少 Lookup。详见 `examples/router`。
 
-## 速查:pkg/leaderboard（排行榜排名缓存）
+## 速查:pkg/game/leaderboard（排行榜排名缓存）
 
 用堆排序维护每个榜的有序结构,O(log N) 查"我的名次"、TopN、按名次取记录,
 黑名单可排除写频繁的榜。
@@ -267,7 +267,7 @@ rc.Delete("score", 0, userID)
 
 并发安全。`Fill` 幂等(可重复加载)。详见 `examples/leaderboard`。
 
-## 速查:pkg/scheduler（工作池 + Pause/Resume）
+## 速查:pkg/orchestration/scheduler（工作池 + Pause/Resume）
 
 N 个 worker 并发消费队列,支持运行时 Pause/Resume 与优雅停止,worker panic 自动恢复。
 与 `pkg/service/cron`(按表达式定时)互补——本包按事件 Submit。
@@ -286,7 +286,7 @@ s.Stop(); s.Wait()                   // 优雅停止
 
 `WithWorkers(0)` 允许纯队列模式(只排队不消费)。详见 `examples/scheduler`。
 
-## 速查:pkg/matchmaker（属性组队匹配）
+## 速查:pkg/game/matchmaker（属性组队匹配）
 
 玩家带 string+numeric 属性注册 ticket,匹配器按"桶(region+mode)+ skill
 排序贪心"凑队,凑齐回调。纯标准库实现,适合单机万级 ticket。
@@ -323,7 +323,7 @@ w.SetBalance("u1", WalletMap{"gold": 999}) // 启动时从 DB 恢复,不产账�
 
 并发安全。详见 `examples/wallet`。
 
-## 速查:pkg/audit（操作审计,仅记成功）
+## 速查:pkg/api/audit（操作审计,仅记成功）
 
 结构化记录"谁对什么资源做了什么",仅记 `err==nil` 且状态码 < 500 的成功操作
 (失败走 logger),异步落盘不阻塞业务。
@@ -345,7 +345,7 @@ mux.Use(a.HTTPMiddleware(func(r *http.Request) (audit.Resource, string, string) 
 
 ## 速查:pkg/domain/notification（持久/瞬时二分 + 离线拉取）
 
-与 `pkg/router` 互补:router 投在线者,notification 投离线者(存库 + 上线拉取)。
+与 `pkg/transport/router` 互补:router 投在线者,notification 投离线者(存库 + 上线拉取)。
 `persistent` 标志区分二分,seq 游标分页避免重复。
 
 ```go
@@ -364,7 +364,7 @@ store.Delete("u1", id)                  // 删除即已读,无状态机
 
 ## 速查:pkg/domain/tournament（锦标赛:cron 重置 + 时间窗）
 
-薄层封装 `pkg/leaderboard.RankCache`:每周期用 `expiry`(下一次重置点)作
+薄层封装 `pkg/game/leaderboard.RankCache`:每周期用 `expiry`(下一次重置点)作
 时间窗 key,天然实现"每周期独立榜单",无需显式清榜。
 
 ```go
@@ -383,7 +383,7 @@ cron 解析复用 `robfig/cron/v3`(5 字段:分 时 日 月 周)。详见 `examp
 
 ## 速查:pkg/domain/party（无权威小队）
 
-Leader + Members + JoinRequests + 座位预留,成员变更广播快照。与 `pkg/match`
+Leader + Members + JoinRequests + 座位预留,成员变更广播快照。与 `pkg/game/match`
 (权威状态机、固定 tick)互补——party 是用户意愿驱动的临时协作组,无 tick。
 
 
@@ -442,7 +442,7 @@ g.IsBlocked("a", "d"); g.Edge("a", "b"); g.Count("a", -1)
 
 state 常量:Active/Pending/Admin/Owner/Blocked(业务可自定义扩展)。详见 `examples/relationship`。
 
-## 速查:pkg/token（dual token + 黑名单注销）
+## 速查:pkg/api/token（dual token + 黑名单注销）
 
 补齐 `pkg/middleware/auth`(只做验证)缺失的"签发/续签/注销"半边。采用 dual token
 模式:短命 session(1h)+ 长命 refresh(7d),**独立密钥**签名,泄露 refresh ≠ 伪造 session。
@@ -472,9 +472,9 @@ newSess, _ = m.Refresh(refresh, &map[string]string{"role":"user"}) // 覆盖 var
 错误:`ErrInvalidToken` / `ErrExpired` / `ErrRevoked` / `ErrKicked`。
 与 `pkg/middleware/auth` 组合即完整登录态。详见 `examples/token`。
 
-## 速查:pkg/dberr（DB 错误码翻译）
+## 速查:pkg/api/dberr（DB 错误码翻译）
 
-把数据库驱动错误翻译为 `pkg/errors` 的 `*Status`,让仓储层只抛原生 driver error,
+把数据库驱动错误翻译为 `pkg/api/errors` 的 `*Status`,让仓储层只抛原生 driver error,
 中间件/网关层统一拿到带业务码的错误。翻译分两步:`Driver.Classify(err) → ErrClass`
 (DB 无关枚举),再按表映射到 `Code`。各 driver 适配器各自实现 `Classify`,业务层只认 `ErrClass`。
 
@@ -509,7 +509,7 @@ tr.Is(err, dberr.ClassDeadlock)        // 条件判断
 `ErrNoRows`/`ErrConnDone`)、`dberr.NoopDriver`(全归 Unknown)。
 默认映射:冲突→409、不存在→404、超时→504、连接→503、未知→500。详见 `examples/dberr`。
 
-## 速查:pkg/webhook（事件通知 + 幂等去重 + DLQ）
+## 速查:pkg/messaging/webhook（事件通知 + 幂等去重 + DLQ）
 
 事件驱动 Webhook:按事件类型过滤、自定义 header、可选 body 模板、可选 HMAC 签名,
 异步触发并带指数退避重试。可靠投递增强(可选):**幂等去重**(`EventID` 非空时同一
@@ -545,9 +545,9 @@ store.Records()                       // 投递状态快照
 接口:`Store`(MarkDelivered/RecordDelivered/RecordFailed)、`DLQ`(Push/Pop/Len)。
 内存实现 `MemStore`/`MemDLQ` 开箱即用。详见 `examples/webhook`。
 
-## 速查:pkg/resume（断线重连在场还原）
+## 速查:pkg/transport/resume（断线重连在场还原）
 
-补齐登录态的最后一块:把 `pkg/token` 与 `pkg/presence` 织成"掉线不掉状态"。
+补齐登录态的最后一块:把 `pkg/api/token` 与 `pkg/transport/presence` 织成"掉线不掉状态"。
 客户端用 refresh token 重连 → 服务端换出 userID + 查还在哪些流 → 回给客户端自动重连。
 约定:业务在 `Issue` 时把 `tokenID` 作为 `presence.Track` 的 sessionID(或建立映射),
 本包按此约定查询。
@@ -568,9 +568,9 @@ info, _ = r.ResolveBySessionID("sess-99")
 错误透传:`ErrInvalidToken` / `ErrExpired` / `ErrRevoked` / `ErrKicked`(均为 token 包
 同名错误别名)+ `ErrNotConfigured`。详见 `examples/resume`。
 
-## 速查:pkg/presence/status（状态变化广播给关注者）
+## 速查:pkg/transport/presence/status（状态变化广播给关注者）
 
-`pkg/presence.Listener` 只在同流内广播 join/leave;本包订阅 presence 事件,查"谁关注了
+`pkg/transport/presence.Listener` 只在同流内广播 join/leave;本包订阅 presence 事件,查"谁关注了
 状态变化的人"(走 `relationship.Watchers` 反向查询),把 status notification 走 `router`
 投递给关注者会话。串起 `relationship + presence + router`。
 
@@ -599,7 +599,7 @@ disp.Dispatch("alice", status.StateOffline, nil)
 
 与 `pkg/domain/notification` 互补:notification 按 userID 游标(个人离线信),
 chat 按 channelID 游标(频道历史)。IM 频道消息需要持久化 + 历史拉取 + 翻页,
-区别于 `pkg/match` 的实时(不持久)与 `pkg/router` 的投递(不存历史)。
+区别于 `pkg/game/match` 的实时(不持久)与 `pkg/transport/router` 的投递(不存历史)。
 
 ```go
 s := chat.New(chat.WithMaxPerChannel(500))
@@ -614,9 +614,9 @@ s.Count("room1"); s.Delete("room1", m.ID)
 ```
 
 `MsgID` 频道内单调,超容量删最旧也不回退(参考 notification 的 seq 设计)。
-实时投递与持久化解耦:本包只存历史,实时扇出由 `pkg/router` 负责。详见 `examples/chat`。
+实时投递与持久化解耦:本包只存历史,实时扇出由 `pkg/transport/router` 负责。详见 `examples/chat`。
 
-## 速查:pkg/ephemeral（短期 TTL KV）
+## 速查:pkg/store/ephemeral（短期 TTL KV）
 
 `pkg/domain/storage` 的轻量版:不版本化、不持久,纯内存 + 到点自动过期。
 用于验证码 / 匹配房间临时数据 / 短期 token 缓存 / 排行榜快照。
@@ -630,13 +630,13 @@ s.Delete("code:138xxxx"); s.Len()
 // ttl<=0 不存储;overwrite 用更短 TTL 会按新 TTL 过期。
 ```
 
-底层 `map + 单 goroutine 定时清扫 + Get 惰性删除`(参考 `pkg/token` 的 gc 模式)。
+底层 `map + 单 goroutine 定时清扫 + Get 惰性删除`(参考 `pkg/api/token` 的 gc 模式)。
 value 类型 `any`(像 sync.Map,一个 Store 存多种类型)。详见 `examples/ephemeral`。
 
-## 速查:pkg/afterwork（请求级后台任务延寿 / waitUntil）
+## 速查:pkg/api/afterwork（请求级后台任务延寿 / waitUntil）
 
 响应可以立即返回,但被 `Defer` 注册的后台任务会继续跑完——运行时不会在响应后立刻杀掉它。
-与 `pkg/safe.Go` 的区别:safe.Go 是全局 fire-and-forget,无生命周期绑定;
+与 `pkg/foundation/safe.Go` 的区别:safe.Go 是全局 fire-and-forget,无生命周期绑定;
 afterwork 把任务绑定到请求 ctx,响应返回后由框架调用 `Wait()` 等待全部跑完(带上限)。
 
 ```go
@@ -655,15 +655,15 @@ afterwork.Defer(ctx, func(context.Context) { /* ... */ })
 reg.Wait() // 阻塞至全部完成或 drain timeout
 ```
 
-要点:任务 panic 被 `pkg/safe` 恢复(可接 `WithPanicHandler`);任务 ctx 用
+要点:任务 panic 被 `pkg/foundation/safe` 恢复(可接 `WithPanicHandler`);任务 ctx 用
 `context.WithoutCancel` 派生——请求 ctx 取消时任务**不应**被立即杀死,响应后仍跑完。
 `Wait()` 幂等;`Stop()` 是 `Wait()` 的别名。详见 `examples/afterwork`。
 
-## 速查:pkg/handler（声明式 HTTP handler 包装器）
+## 速查:pkg/api/handler（声明式 HTTP handler 包装器）
 
 把 auth 策略 + 资源注入 +
 错误归一化从业务 handler 上移到包装器,业务函数只写 `(ctx, req) => (resp, error)`。
-是 `pkg/middleware/auth` + `pkg/afterwork` + `pkg/errors` + DI 组合成的 ergonomic 装饰器。
+是 `pkg/middleware/auth` + `pkg/api/afterwork` + `pkg/api/errors` + DI 组合成的 ergonomic 装饰器。
 
 ```go
 type CreateReq struct{ Sku string `json:"sku"` }
@@ -691,11 +691,11 @@ mux.Handle("/orders", h)                  // h 即 http.Handler
 `Get[T](ctx, name)` 取依赖(类型不符返回 ok=false),`MustGet` 启动期早炸。
 `WithMethod` 校验方法;nil 响应返回 204。详见 `examples/afterwork`。
 
-## 速查:pkg/ratelimit（按键限流 + HTTP 中间件）
+## 速查:pkg/resilience/ratelimit（按键限流 + HTTP 中间件）
 
 通用横切限流原语,两种算法:`TokenBucket`(固定速率补令牌,允许突发)与
 `SlidingWindow`(滑动窗口精确计数)。按 key 隔离(每用户/IP 独立计数),
-超限返回 429 + `Retry-After`。与 `pkg/handler` 声明式组合:`WithRatelimit`。
+超限返回 429 + `Retry-After`。与 `pkg/api/handler` 声明式组合:`WithRatelimit`。
 
 ```go
 tb := ratelimit.NewTokenBucket(5, 1)         // 突发5,1/s 补
@@ -705,7 +705,7 @@ tb.Allow("user:alice")                       // (true,0) 突发内放行;超限 
 // HTTP 中间件:按客户端 IP 限流。
 h := ratelimit.Middleware(tb, ratelimit.ClientIP)(myHandler)
 
-// 声明式接入 pkg/handler:限流在 auth 之前(超限不解析 body)。
+// 声明式接入 pkg/api/handler:限流在 auth 之前(超限不解析 body)。
 handler.New("POST", fn, handler.WithRatelimit(tb, byUserID))
 
 // 滑动窗口:50ms 内最多 3 次。
@@ -761,9 +761,9 @@ owners, admins, members, _ := s.Members("g1") // 按角色分组
 
 角色编码复用 relationship 常量(`RoleOwner`/`RoleAdmin`/`RoleMember`/`RolePending`)。
 owner 不能直接退出(须先 `TransferOwner`)。详见 `examples/group`——
-该 demo 还组合了 `pkg/domain/inbox`(成员间离线私聊)+ `pkg/ratelimit`(发消息限流)。
+该 demo 还组合了 `pkg/domain/inbox`(成员间离线私聊)+ `pkg/resilience/ratelimit`(发消息限流)。
 
-## 速查:pkg/txn（跨域事务协调 / 两阶段提交）
+## 速查:pkg/orchestration/txn（跨域事务协调 / 两阶段提交）
 
 让 wallet/storage/notification 等域包在一个逻辑事务边界内原子提交或全部回滚。
 各域无需感知 txn——业务层实现 `Participant` 接口(Prepare/Commit/Rollback)
@@ -787,7 +787,7 @@ err := coord.Run(ctx, func() error {
 best-effort:某域 Commit 失败仍继续后续,返回聚合错误供补偿)。Run 串行(一次一事务)。
 `ParticipantFunc` 是函数形式(轻量)。`examples/txn` 演示内存快照 staging。
 
-## 速查:pkg/ctxkey（类型安全 context key）
+## 速查:pkg/foundation/ctxkey（类型安全 context key）
 
 统一各包重复的 `type contextKey struct{}` + `ctx.Value(k).(T)` 模式。泛型
 `Key[T]` 编译期约束存取类型,`New[T]()` 每次分配独立标识(同 T 多 Key 不冲突):
@@ -816,7 +816,7 @@ beauty 的 auth/requestid/callbacks/ratelimit/audit/afterwork/metadata/errors
 
 # 扩展原语速查(并发 / 可靠性 / 游戏 & 直播 / 空间地理)
 
-## 速查:pkg/idempotency（幂等执行)
+## 速查:pkg/store/idempotency（幂等执行)
 
 按 key 去重 + 并发合并(singleflight)二合一:同 key 重复只执行一次,结果按 TTL 缓存。
 
@@ -833,7 +833,7 @@ val, err, shared := store.Do("order:"+id, func() (int64, error) {
 - `fn` panic 会清理占位记录、允许重试;
 - 幂等键须**稳定**(来自业务/消息 ID),不可用 `idgen`/`uuid` 现场生成。详见 `examples/idempotency`。
 
-## 速查:pkg/keyedmutex（按 key 的细粒度锁)
+## 速查:pkg/foundation/keyedmutex（按 key 的细粒度锁)
 
 同 key 串行、不同 key 并行。引用计数归零自动回收锁,不随 key 增长泄漏。
 
@@ -850,7 +850,7 @@ km.Do(k, func() { ... })                     // 便捷封装
 - `Lock` 返回 `unlock` 闭包(不是 `Unlock(key)`),`sync.Once` 防重复解锁;
 - 与 `idempotency` 区分:后者"只执行一次",本包"每次都执行,只是串行"。详见 `examples/keyedmutex`。
 
-## 速查:pkg/backoff（指数退避 + 抖动)
+## 速查:pkg/resilience/backoff（指数退避 + 抖动)
 
 统一的退避策略:`Duration(n)` 算第 n 次等待,`Retry`/`RetryIf` 包住可重试操作。
 
@@ -867,7 +867,7 @@ err := p.RetryIf(ctx, callRemote, func(e error) bool {
 - 四种抖动:`JitterFull`(默认,打散最彻底)/ `Equal` / `None` / `Proportional`(±ratio,默认 ±25%);
 - `Retry` 遇 ctx 取消立即返回;已被 webhook/saga/grpcclient 复用。详见 `examples/backoff`。
 
-## 速查:pkg/saga（跨服务 Saga 编排)
+## 速查:pkg/orchestration/saga（跨服务 Saga 编排)
 
 顺序执行正向操作,任一步失败逆序补偿已成功步骤,达成最终一致。
 
@@ -887,7 +887,7 @@ case saga.StatusCompensationFailed: /* 补偿也失败,须告警人工介入 */
 - 补偿须幂等(推荐配 `wallet.ApplyTx`),补偿阶段用 `WithoutCancel` 不受原 ctx 取消影响;
 - 纯内存不持久化,依赖可重投触发源做崩溃恢复。详见 `examples/saga`。
 
-## 速查:pkg/eventbus（进程内事件总线)
+## 速查:pkg/messaging/eventbus（进程内事件总线)
 
 按 topic 订阅 + 回调分发,解耦"谁发"与"谁收"。
 
@@ -898,10 +898,10 @@ defer unsub()
 bus.Publish("user.login", UserEvent{UserID: "u1"}) // 通知该 topic 所有订阅者
 ```
 
-- 同步(默认,`Publish` 返回即处理完)或异步(`WithAsync`);handler panic 经 `pkg/safe` 恢复;
+- 同步(默认,`Publish` 返回即处理完)或异步(`WithAsync`);handler panic 经 `pkg/foundation/safe` 恢复;
 - 与 `stream`(channel 单源扇出、所有订阅者同一份流)区分:eventbus 是多主题、回调式。详见 `examples/eventbus`。
 
-## 速查:pkg/delayqueue（定点单次延迟触发)
+## 速查:pkg/orchestration/delayqueue（定点单次延迟触发)
 
 最小堆 + 单 goroutine 驱动,到点跑回调,支持按 key 取消 / 改期。
 
@@ -914,9 +914,9 @@ q.Cancel("order:"+id)                                // 支付了 → 取消
 ```
 
 - 填 `scheduler`(即时)与 `cron`(周期)之间缺的"一次性触发":开局倒计时/buff 到期/超时兜底;
-- 回调独立 goroutine 执行,panic 经 `pkg/safe` 恢复。详见 `examples/delayqueue`。
+- 回调独立 goroutine 执行,panic 经 `pkg/foundation/safe` 恢复。详见 `examples/delayqueue`。
 
-## 速查:pkg/counter（滑动窗口计数 / 配额)
+## 速查:pkg/resilience/counter（滑动窗口计数 / 配额)
 
 按 key 的时间窗累计,`Allow` 做窗口内配额判断。
 
@@ -930,7 +930,7 @@ if !c.Allow("user:"+uid, 1, 60) { /* 1 分钟超 60 条,拒绝 */ }
 - 环形桶 + 分片锁;与 `ratelimit` 互补:ratelimit 控**速率**(令牌桶),counter 控**窗口内总量**;
 - 空闲 key 由 gc 回收。详见 `examples/counter`。
 
-## 速查:pkg/tally（高频累计聚合 + 批量刷写)
+## 速查:pkg/store/tally（高频累计聚合 + 批量刷写)
 
 海量小额 +1 在内存合并,定时/攒够阈值批量交给 flush,削平写放大。
 
@@ -943,7 +943,7 @@ t.Add("room:1:like", 1) // 高频路径,只做内存累加
 ```
 
 - 泛型数值类型;与 `wallet`(逐笔精确账本)互补:tally 是可聚合、容忍丢尾的计数(点赞/人气);
-- `flush` panic 经 `pkg/safe` 恢复,不影响后续。详见 `examples/tally`。
+- `flush` panic 经 `pkg/foundation/safe` 恢复,不影响后续。详见 `examples/tally`。
 
 ## 速查:pkg/idgen（分布式唯一 ID / Snowflake)
 
@@ -958,7 +958,7 @@ ts, node, seq := idgen.Parse(id)
 - 纪元可配(`WithEpoch`,上线后不可改);处理**时钟回拨**(容忍内自旋,超阈报错,绝不静默出重复 ID);
 - 与 `uuid`(128 位字符串)互补:idgen 紧凑、可排序,适合主键/对局 ID。详见 `examples/idgen`。
 
-## 速查:pkg/fsm（泛型有限状态机)
+## 速查:pkg/foundation/fsm（泛型有限状态机)
 
 声明式转移表,非法转移报错而非静默改状态,带 Enter/Leave/Transition 钩子。
 
@@ -975,7 +975,7 @@ m.Can(Finish); m.Current()
 - S/E 为 comparable 枚举;钩子返回 error 可否决转移(OnLeave/OnTransition);并发安全。
 - 对局/房间/订单状态流转,防非法跳转。详见 `examples/fsm`。
 
-## 速查:pkg/versus（限时多方对抗计分 / 直播 PK)
+## 速查:pkg/game/versus（限时多方对抗计分 / 直播 PK)
 
 组合 `fsm`(状态)+ `stream`(事件流)+ 倒计时,双方/多方限时比拼、到点定胜负。
 
@@ -991,7 +991,7 @@ ch, unsub := m.Subscribe(ctx)   // 订阅分数变化事件(→ SSE/WS)
 - pending→running→ended 状态机,ended 幂等;到点自动结算或 `Finish` 手动结束;
 - 事件流内部复用 `stream.Broadcaster`。详见 `examples/versus` 与 `examples/live-pk`(多房间组合)。
 
-## 速查:pkg/momentum（连击 + 热度时间衰减)
+## 速查:pkg/game/momentum（连击 + 热度时间衰减)
 
 连击窗口内递增/断连重置,热度按半衰期指数衰减(惰性,无后台 goroutine)。
 
@@ -1005,7 +1005,7 @@ tr.GC(1e-3)                 // 按需回收已冷却的 key
 - 与 `counter`/`leaderboard`(不衰减)区分:momentum 反映"当下有多热";
 - 直播连击特效、实时热度榜。详见 `examples/momentum`。
 
-## 速查:pkg/pathfind（网格 A* 寻路)
+## 速查:pkg/game/pathfind（网格 A* 寻路)
 
 网格地图上求最短路径,支持障碍、移动代价、对角(可禁止穿墙角)。
 
@@ -1019,7 +1019,7 @@ path := g.FindPath(from, to, pathfind.WithDiagonal(true))
 - octile 启发保证最优;纯计算,同一 Grid 可并发 `FindPath`;
 - 塔防/SLG/点击移动/怪物追击。详见 `examples/pathfind`。
 
-## 速查:pkg/spatial（网格空间索引 / 附近的人)
+## 速查:pkg/game/spatial（网格空间索引 / 附近的人)
 
 实体按坐标分桶,`Nearby`/`KNN` 只扫近邻单元 + 精确距离过滤,避免全表遍历。
 
@@ -1035,9 +1035,9 @@ top := ix.KNN(0, 0, 5, 500)          // 最近 5 个
   半径 50)显示 10k 实体时与全表扫描相当(map 开销 ~ 抵消候选缩减),250k 时
   网格 ~10µs、全表 ~171µs(约 17×)。实体少时全表扫描反而更简单;
 - 附近的人/MMO AOI/大地图分区。详见 `examples/spatial`。
-- **增量同步**在 `spatial.Nearby` 出口叠加 `spatial/aoi` diff + `pkg/replicate.Projector`,见 `examples/statesync`。
+- **增量同步**在 `spatial.Nearby` 出口叠加 `spatial/aoi` diff + `pkg/game/replicate.Projector`,见 `examples/statesync`。
 
-## 速查:pkg/spatial/aoi + pkg/replicate（AOI 增量同步）
+## 速查:pkg/game/spatial/aoi + pkg/game/replicate（AOI 增量同步）
 
 `aoi.Set` 对上一帧可见集做 enter/leave/stay diff;`replicate.Projector` 结合 DirtySet 生成 per-viewer `Delta`(spawn/update/despawn/baseline)。
 
@@ -1051,7 +1051,7 @@ batch := track.OnAck(ack) // 可靠通道补 CatchUp
 - `Journal` + `ViewerTrack` + `Ack` / `CatchUpBatch` 支持丢包追帧;
 - 详见 `examples/statesync`、`examples/statesync-quic`;Agones 托管见 `examples/agones-room` + `examples/matchmaker-room` + `contrib/agones`。
 
-## 速查:pkg/snapbuf + inputclock + lagcomp（延迟补偿）
+## 速查:pkg/game/snapbuf + inputclock + lagcomp（延迟补偿）
 
 | 包 | 作用 |
 |---|---|
@@ -1067,7 +1067,7 @@ snap, atFrame, ok := comp.WorldAt(shooter, clientFrame) // 命中判定用 snap
 
 - `gameloop.PushInput` 携带 `ClientFrame`;客户端预测/回滚仍在业务侧。
 
-## 速查:pkg/gameroom + contrib/agones（房间编排）
+## 速查:pkg/game/gameroom + contrib/agones（房间编排）
 
 `gameroom.Manager` FSM:`Waiting → Ready → Running → Draining → Closed`,支持 Join/Leave、`ScheduleStart`、`Drain`。
 
@@ -1082,7 +1082,7 @@ _ = ctrl.Run(ctx) // Watcher: Agones Shutdown → Drain → SDK.Shutdown
 
 - K8s 上每 Pod 单房;匹配服 Allocator 返回 address 后客户端直连 WS。详见 `examples/agones-room`;本地 mock 匹配→分配见 `examples/matchmaker-room`。
 
-## 速查:pkg/geohash（经纬度地理编码)
+## 速查:pkg/game/geohash（经纬度地理编码)
 
 经纬度编码成 base32 字符串,前缀相同即地理相邻——"附近"退化为字符串前缀检索。
 
@@ -1095,7 +1095,7 @@ d := geohash.Distance(lat1, lng1, lat2, lng2)  // Haversine 米
 - 邻近搜索:按 `CoverNeighbors` 的前缀集在 DB/Redis 检索,再用 `Distance` 精确过滤;
 - 与 `spatial`(平面网格)互补,面向真实地球坐标的 LBS。详见 `examples/geohash`。
 
-## 速查:pkg/loot（加权随机抽取 / 抽卡)
+## 速查:pkg/game/loot（加权随机抽取 / 抽卡)
 
 按权重抽取,Alias Method 建表后每次 O(1);可选保底(pity)与不放回抽取。
 
@@ -1113,7 +1113,7 @@ it, pity := p.Draw()            // pity=true 表示本次由保底触发
 - Alias 表构建后只读、并发安全;`WithRand` 可注入可复现随机源;
 - `Puller` 有 pity 计数状态,非并发安全(每玩家一个)。详见 `examples/loot`。
 
-## 速查:pkg/semaphore（加权信号量 / 舱壁隔离）
+## 速查:pkg/foundation/semaphore（加权信号量 / 舱壁隔离）
 
 限制对共享资源的最大并发占用量。支持加权获取(重操作多占、轻操作少占);
 等权场景(bulkhead/舱壁隔离)是 cost=1 的特殊情况。
@@ -1182,7 +1182,7 @@ s.Capacity()        // 总容量
 - `MaxWait=0` 满即拒绝(默认);`MaxWait>0` 排队等待,超时仍拒;
 - `Do`/`DoWithCost` 自动 acquire+release;context 取消感知;并发安全。
 
-## 速查:pkg/throttle（批量聚合触发）
+## 速查:pkg/resilience/throttle（批量聚合触发）
 
 攒满 N 条或到达 T 时间即批量 flush。日志/事件/DB 批量写入场景标配。
 
@@ -1204,7 +1204,7 @@ th.Len()                // 当前缓冲量
 - `Stop` 保证剩余数据不丢;context 取消后 Stop 仍 flush;
 - 并发安全。
 
-## 速查:pkg/priority（优先级队列）
+## 速查:pkg/foundation/priority（优先级队列）
 
 泛型二叉堆,支持 Push/Pop/Peek/Update/Remove。两个变体:零开销非并发安全 + Mutex 并发安全。
 
@@ -1228,7 +1228,7 @@ v, ok := sq.Pop()      // (1, true)
 - `SyncQueue[T]`:内置 Mutex,Pop/Peek 返回 (T, bool) 安全处理空队列;
 - `PushPop`:一次操作完成 Push+Pop,比分开调用少一次堆调整。
 
-## 速查:pkg/timeout（超时执行 + panic 恢复）
+## 速查:pkg/resilience/timeout（超时执行 + panic 恢复）
 
 给任意函数加超时 + panic 自动恢复 + 错误分类(超时/panic/业务错误 三类 errors.Is 可判)。
 
@@ -1250,7 +1250,7 @@ val, err := timeout.DoValue(ctx, time.Second, func(ctx context.Context) (Result,
 - fn 运行在独立 goroutine;超时后调用方立即返回(fn 内应检查 ctx 配合退出);
 - 无状态、并发安全。
 
-## 速查:pkg/pipeline（多阶段流水线）
+## 速查:pkg/foundation/pipeline（多阶段流水线）
 
 类型安全的 Stage 链:每阶段可配并发 worker + 有界 channel 背压 + 扇入扇出。
 
@@ -1291,7 +1291,7 @@ pipeline.Run(ctx, src, stage)      // 单阶段快捷运行,收集结果
 - 任一阶段返回 error 终止整个 pipeline;context 取消全链停止;
 - emit 可输出 0~N 条(过滤/展开);泛型保证阶段间类型安全。
 
-## 速查:pkg/circuitbreaker（熔断器）
+## 速查:pkg/resilience/circuitbreaker（熔断器）
 
 三态保护:Closed(正常)→ Open(快速失败)→ HalfOpen(探测)→ Closed/Open。
 滑动窗口统计错误率,超阈值自动熔断;冷却后放少量探测请求验证恢复。
@@ -1318,9 +1318,9 @@ if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
 
 - 与 `backoff`(退避)/`ratelimit`(限速)/`cooldown`(冷却)互补,组成弹性四件套;
 - `Do` 包一次调用:Closed 执行并统计;Open 立即 `ErrCircuitOpen`;HalfOpen 探测;
-- 并发安全(单锁)。详见 `pkg/circuitbreaker`。
+- 并发安全(单锁)。详见 `pkg/resilience/circuitbreaker`。
 
-## 速查:pkg/cooldown（冷却 / 操作限时)
+## 速查:pkg/resilience/cooldown（冷却 / 操作限时)
 
 per-key 的"下次可用时刻",到点才能再触发。
 
@@ -1337,7 +1337,7 @@ cd.TriggerFor("p1:daily", 24*time.Hour) // per-action 覆盖默认 CD
 - 与 `ratelimit`(速率)/`counter`(窗口累计)区分:cooldown 控**两次动作最小间隔**;
 - 分片锁 + gc 回收空闲 key。详见 `examples/cooldown`。
 
-## 速查:pkg/ringbuffer（定长环形缓冲 / 最近 N 条)
+## 速查:pkg/foundation/ringbuffer（定长环形缓冲 / 最近 N 条)
 
 只保留最近 N 个,写满覆盖最旧,O(1) 追加。
 
@@ -1352,7 +1352,7 @@ s := ringbuffer.NewSync[string](50) // 并发安全变体
 - `Ring[T]` 非并发安全(零开销),`SyncRing[T]` 内置 RWMutex;
 - 固定内存不扩容。最近弹幕/战绩/滚动日志。详见 `examples/ringbuffer`。
 
-## 速查:pkg/bitmap（位图 / 签到)
+## 速查:pkg/foundation/bitmap（位图 / 签到)
 
 1 bit 一个布尔状态,大规模标记 + 集合运算,极省内存。
 
@@ -1412,7 +1412,7 @@ r.RetroRemaining(time.Now())          // 本月剩余补签次数
 ```
 
 - 与 `questlog`(目标进度+领取)区分:signin 是"日历打卡 + 连续天数";
-- 补签后自动重算连签;bitmap 零依赖内嵌(不依赖 `pkg/bitmap`);
+- 补签后自动重算连签;bitmap 零依赖内嵌(不依赖 `pkg/foundation/bitmap`);
 - 并发安全。
 
 ## 速查:pkg/domain/mail（游戏内信箱）
@@ -1441,7 +1441,7 @@ mb.DeleteExpired()                         // 清理过期邮件
 - `Store[T]` 接口:Save/Get/Update/Delete/List/CountByStatus/DeleteExpired;
 - 并发安全(依赖 Store 实现)。
 
-## 速查:pkg/questlog（任务 / 成就进度)
+## 速查:pkg/game/questlog（任务 / 成就进度)
 
 朝目标累加进度,达标可领(一次),支持前置依赖与周期重置。
 
@@ -1460,7 +1460,7 @@ log.Reset("u1", "kill")        // 周期任务刷新
 - 四态:Locked(前置未完)→ InProgress → Achieved → Claimed;
 - 与 counter(窗口计数、会过期)区分:questlog 是"朝目标累加 + 领取状态机",进度不随时间减少。详见 `examples/questlog`。
 
-## 速查:pkg/leveling（经验 / 等级曲线)
+## 速查:pkg/game/leveling（经验 / 等级曲线)
 
 给当前经验加一笔,算出新等级/升了几级/级内进度。纯计算无状态。
 
@@ -1474,7 +1474,7 @@ lv.Stat(totalExp)            // 只查不改(展示"距升级还差多少")
 - 三种曲线:`Linear`(等差)/`Poly`(多项式加速)/`Table`(查表,对接策划数值);
 - 满级后经验仍累计但等级不涨;经验为调用方持久化,本包做纯函数换算。详见 `examples/leveling`。
 
-## 速查:pkg/reddot（小红点 / 未读聚合树)
+## 速查:pkg/game/reddot（小红点 / 未读聚合树)
 
 叶子设未读,父节点 = 后代之和,清零向上传播。
 
@@ -1505,24 +1505,24 @@ tr.Clear("me/msg")            // 已读该分类,红点沿父链更新
 `counter`(配额)、`cooldown`(冷却)、`idempotency`(去重)在多实例下若各算各的会出错(配额被绕过、换实例重复领、重试重复执行)。这三个支持 `WithStore(kvstore.Store)`:配置后状态存到共享后端(Redis 等),跨实例一致。
 
 ```go
-store := myRedisStore          // 实现 pkg/kvstore.Store 接口(每方法对应一条 Redis 命令)
+store := myRedisStore          // 实现 pkg/store/kvstore.Store 接口(每方法对应一条 Redis 命令)
 c := counter.New(time.Minute, counter.WithStore(store))     // 配额跨实例
 cd := cooldown.New(8*time.Second, cooldown.WithStore(store)) // 冷却跨实例
 im := idempotency.New[T](idempotency.WithStore(store))       // 去重跨实例
 ```
 
 - 不配置 `WithStore` 时行为、API 完全不变(默认内存,零开销);
-- `pkg/kvstore` 定义接口 + 内存实现(`NewMemory`),Redis 等后端由使用方实现(遵循纯标准库,不引 SDK);
+- `pkg/store/kvstore` 定义接口 + 内存实现(`NewMemory`),Redis 等后端由使用方实现(遵循纯标准库,不引 SDK);
 - **语义差异**须知:counter 的 store 模式用**固定窗口**(非滑动,边界可能 2 倍突发);idempotency 的 store 模式是**去重复用**而非"全局单飞"(跨实例并发同 key 可能各执行一次,靠结果唯一存储保证幂等——所以幂等键要求业务操作本身可安全重试);store 故障一律 **fail-open**(读返回 0 / 放行 / 降级执行)+ `WithOnStoreError` 上报。
 
 见 `examples/kvstore-shared`(单进程内两实例共享 Store,演示跨实例配额/冷却/去重)。
 
-**④ 需跨实例互斥/协调 —— 用 `pkg/dlock`**
+**④ 需跨实例互斥/协调 —— 用 `pkg/store/dlock`**
 `keyedmutex` 是进程内锁,`saga`/`delayqueue` 各自靠"结果幂等"或"MQ 重投"绕开跨进程协调问题;
 但有些场景就是需要**跨进程互斥**本身——最典型是"多实例部署下 Cron 只该有一个实例在跑"。
 这类场景不是给某个原语加 Store 能解决的(互斥/选主是另一个问题维度),需要独立的分布式锁/选主原语,见下节。
 
-## 速查:pkg/dlock（分布式锁 / 选主)
+## 速查:pkg/store/dlock（分布式锁 / 选主)
 
 跨进程互斥(`Locker`)与持续选主(`Elector`)的后端无关接口。核心用途:多实例部署下
 只让一个实例执行某件事(最典型是 Cron 定时任务,见 `pkg/service/cron.WithLeaderElector`)。
@@ -1572,7 +1572,7 @@ elector.Run(ctx, "myservice-cron", func(leaderCtx context.Context) {
 
 二十二个包遵循统一约定,便于混用:
 
-- **纯标准库**——除 `pkg/ws/session` 复用 `pkg/ws`(依赖 `coder/websocket`)、
+- **纯标准库**——除 `pkg/transport/ws/session` 复用 `pkg/transport/ws`(依赖 `coder/websocket`)、
   `pkg/domain/tournament` 复用 `robfig/cron/v3`(cron 解析)外,其余包零第三方依赖,
   可直接复制到任意 Go 项目。
 - **命名空间分层**——`pkg/` 放通用原语(会话/在场/路由/排名/调度/审计),
@@ -1589,12 +1589,12 @@ elector.Run(ctx, "myservice-cron", func(leaderCtx context.Context) {
 
 | 既有包 | 关系 |
 |--------|------|
-| `pkg/ws` | `session` 的底层;不直接用 `pkg/ws` 的 `Handler` 时仍可单独使用 |
-| `pkg/stream` | `Broadcaster` 的扇出语义被 `router` 增强(增加定点/按流/攒批) |
-| `pkg/chanx` | 无界 channel,`match`/`scheduler` 内部按需采用有界 channel + 降级 |
+| `pkg/transport/ws` | `session` 的底层;不直接用 `pkg/transport/ws` 的 `Handler` 时仍可单独使用 |
+| `pkg/messaging/stream` | `Broadcaster` 的扇出语义被 `router` 增强(增加定点/按流/攒批) |
+| `pkg/foundation/chanx` | 无界 channel,`match`/`scheduler` 内部按需采用有界 channel + 降级 |
 | `pkg/service/cron` | 与 `scheduler` 互补:cron 按表达式定时,scheduler 按事件 + 可暂停;
   `tournament` 复用其 `robfig/cron` 解析算重置点 |
-| `pkg/xgo.Pool` | `beauty.Go` 全局池;这些包的 goroutine 用 `Start/Stop` 自管生命周期 |
+| `pkg/foundation/xgo.Pool` | `beauty.Go` 全局池;这些包的 goroutine 用 `Start/Stop` 自管生命周期 |
 
 ## 参考
 

@@ -1,6 +1,6 @@
 # P2P Transport 实现
 
-`pkg/p2p` 定义了传输无关的 P2P 接口(`Transport`、`PeerConn`、`Network`),
+`pkg/transport/p2p` 定义了传输无关的 P2P 接口(`Transport`、`PeerConn`、`Network`),
 以下三种实现覆盖不同场景:
 
 ## 选型指南
@@ -11,7 +11,7 @@
 | **QUIC** | 跨机房/边缘节点、游戏服务器 | QUIC Stream ✅ | QUIC Datagram ✅ | 部分(UDP) | quic-go |
 | **WebRTC** | 浏览器互联、跨 NAT 穿透 | DataChannel(ordered) ✅ | DataChannel(unordered) ✅ | ✅ ICE/STUN/TURN | pion/webrtc |
 
-## 1. TCP Transport (`pkg/p2p/tcptransport`)
+## 1. TCP Transport (`pkg/transport/p2p/tcptransport`)
 
 **适合场景:**
 - Go 服务之间的内网/同机房 P2P 通信(无 NAT)
@@ -25,7 +25,7 @@
 - 双方必须网络可达(不穿 NAT)
 
 ```go
-import "github.com/rushteam/beauty/pkg/p2p/tcptransport"
+import "github.com/rushteam/beauty/pkg/transport/p2p/tcptransport"
 
 // 创建 transport
 t, _ := tcptransport.New("node-1", ":9000",
@@ -43,7 +43,7 @@ conn.SendReliable([]byte("hello"))
 conn, _ = t.Accept(ctx)
 ```
 
-## 2. QUIC Transport (`pkg/p2p/quictransport`)
+## 2. QUIC Transport (`pkg/transport/p2p/quictransport`)
 
 **适合场景:**
 - 服务端之间的高性能 P2P 通信(跨数据中心、边缘节点)
@@ -59,8 +59,8 @@ conn, _ = t.Accept(ctx)
 
 ```go
 import (
-    "github.com/rushteam/beauty/pkg/p2p/quictransport"
-    "github.com/rushteam/beauty/pkg/quic"
+    "github.com/rushteam/beauty/pkg/transport/p2p/quictransport"
+    "github.com/rushteam/beauty/pkg/transport/quic"
 )
 
 t, _ := quictransport.New("node-1", ":8443",
@@ -88,7 +88,7 @@ conn.SendUnreliable([]byte("position update")) // QUIC Datagram(可丢)
 **特点:**
 - ICE 框架自动 NAT 穿透(STUN + TURN fallback)
 - 与浏览器 RTCPeerConnection 完全兼容
-- 需要信令服务配合(`pkg/p2p/signaling`)
+- 需要信令服务配合(`pkg/transport/p2p/signaling`)
 - 可靠通道:ordered DataChannel
 - 不可靠通道:unordered DataChannel(maxRetransmits=0)
 
@@ -120,17 +120,17 @@ conn, _ = t.Accept(ctx)
 
 ```
                         ┌─────────────────┐
-                        │   pkg/p2p       │ ← 接口层(Transport, PeerConn, Network)
+                        │   pkg/transport/p2p       │ ← 接口层(Transport, PeerConn, Network)
                         │   p2p.go        │
                         └────────┬────────┘
                                  │
               ┌──────────────────┼──────────────────┐
               │                  │                  │
     ┌─────────▼─────────┐ ┌─────▼─────────┐ ┌─────▼───────────────┐
-    │ pkg/p2p/          │ │ pkg/p2p/      │ │ contrib/p2p-webrtc  │
+    │ pkg/transport/p2p/          │ │ pkg/transport/p2p/      │ │ contrib/p2p-webrtc  │
     │ tcptransport      │ │ quictransport │ │                     │
     │                   │ │               │ │ (pion/webrtc v4)    │
-    │ · net.Conn        │ │ · pkg/quic    │ │ · ICE/DTLS/SCTP     │
+    │ · net.Conn        │ │ · pkg/transport/quic    │ │ · ICE/DTLS/SCTP     │
     │ · 零依赖          │ │ · quic-go     │ │ · DataChannel       │
     └───────────────────┘ └───────────────┘ └─────────────────────┘
          内网/LAN              跨机房/边缘         浏览器/NAT 穿透

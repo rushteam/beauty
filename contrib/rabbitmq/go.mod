@@ -8,3 +8,5 @@ require (
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/rushteam/beauty v0.7.5
 )
+
+replace github.com/rushteam/beauty => ../../

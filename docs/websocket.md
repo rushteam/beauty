@@ -1,13 +1,13 @@
 # WebSocket（pkg/ws）
 
-`pkg/ws` 基于 [`github.com/coder/websocket`](https://github.com/coder/websocket) 提供轻量封装：
+`pkg/transport/ws` 基于 [`github.com/coder/websocket`](https://github.com/coder/websocket) 提供轻量封装：
 自动完成握手升级、统一关闭语义，并把 `*http.Request` 透传给业务（便于读 query / header /
 子协议 / 鉴权信息）。
 
 ## 快速开始
 
 ```go
-import "github.com/rushteam/beauty/pkg/ws"
+import "github.com/rushteam/beauty/pkg/transport/ws"
 
 mux := http.NewServeMux()
 mux.Handle("/ws", ws.Handler(func(r *http.Request, c *ws.Conn) error {

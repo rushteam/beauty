@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/cooldown"
-	"github.com/rushteam/beauty/pkg/counter"
-	"github.com/rushteam/beauty/pkg/idempotency"
-	"github.com/rushteam/beauty/pkg/kvstore"
+	"github.com/rushteam/beauty/pkg/resilience/cooldown"
+	"github.com/rushteam/beauty/pkg/resilience/counter"
+	"github.com/rushteam/beauty/pkg/store/idempotency"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 func main() {

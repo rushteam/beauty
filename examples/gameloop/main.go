@@ -28,9 +28,9 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/gameloop"
+	"github.com/rushteam/beauty/pkg/game/gameloop"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 const (

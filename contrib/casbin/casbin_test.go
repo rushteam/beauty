@@ -8,7 +8,7 @@ import (
 	casbinlib "github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
 
-	"github.com/rushteam/beauty/pkg/authz"
+	"github.com/rushteam/beauty/pkg/api/authz"
 
 	casbinx "github.com/rushteam/beauty/contrib/casbin"
 )

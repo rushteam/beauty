@@ -1,6 +1,6 @@
 # kvstore-shared —— KV 存储
 
-演示 `pkg/kvstore` 让 counter、cooldown、idempotency 跨实例共享状态，从单进程内存升级为多实例一致。
+演示 `pkg/store/kvstore` 让 counter、cooldown、idempotency 跨实例共享状态，从单进程内存升级为多实例一致。
 
 ## 运行
 

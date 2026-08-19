@@ -1,6 +1,6 @@
 # statesync — WebSocket 状态同步 + replicate 增量 + CatchUp
 
-权威模拟 + `spatial` AOI + `pkg/replicate` 增量下发,含 Ack/CatchUp/resync 协议。
+权威模拟 + `spatial` AOI + `pkg/game/replicate` 增量下发,含 Ack/CatchUp/resync 协议。
 
 | 方向 | 消息 |
 |------|------|

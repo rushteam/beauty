@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/ctxkey"
+	"github.com/rushteam/beauty/pkg/foundation/ctxkey"
 )
 
 var (

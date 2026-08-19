@@ -16,10 +16,10 @@ import (
 	"net/http"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/presence"
-	"github.com/rushteam/beauty/pkg/resume"
+	"github.com/rushteam/beauty/pkg/api/token"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/token"
+	"github.com/rushteam/beauty/pkg/transport/presence"
+	"github.com/rushteam/beauty/pkg/transport/resume"
 )
 
 var (

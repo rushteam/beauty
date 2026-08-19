@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/eventbus"
+	"github.com/rushteam/beauty/pkg/messaging/eventbus"
 )
 
 type UserEvent struct {

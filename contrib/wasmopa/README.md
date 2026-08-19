@@ -1,6 +1,6 @@
 # contrib/wasmopa —— OPA Rego→wasm 授权(独立模块)
 
-用 OPA 编译出的 wasm 策略模块实现 beauty `pkg/authz.Enforcer`:Rego 策略经
+用 OPA 编译出的 wasm 策略模块实现 beauty `pkg/api/authz.Enforcer`:Rego 策略经
 `opa build -t wasm` 生成 `policy.wasm`,在 wazero 沙箱内求值——纯 Go、无 CGo、无外部 OPA 进程。
 
 ```bash
@@ -19,7 +19,7 @@ opa build -t wasm -e 'authz/allow' policy.rego
 
 ```go
 import (
-    "github.com/rushteam/beauty/pkg/authz"
+    "github.com/rushteam/beauty/pkg/api/authz"
     "github.com/rushteam/beauty/contrib/wasmopa"
 )
 
@@ -42,5 +42,5 @@ mux.Handle("/api/", authz.HTTP(enforcer, mapper)(handler))
 ## 边界
 
 Rego 策略内容、subject 映射、data 热更频率都是 policy;本包负责 OPA wasm ABI 1.2+
-(`opa_eval`) 与实例池化。依赖 beauty core(`pkg/authz`)。内置最小 `env` wasm 模块满足
+(`opa_eval`) 与实例池化。依赖 beauty core(`pkg/api/authz`)。内置最小 `env` wasm 模块满足
 OPA builtin stub 需求。

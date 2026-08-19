@@ -367,7 +367,7 @@ Mount `logger.LevelHandler()` on a debug route to adjust levels over HTTP. See [
 
 ## Realtime: WebSocket
 
-Attach WebSocket handlers to any `http.ServeMux` via `pkg/ws`:
+Attach WebSocket handlers to any `http.ServeMux` via `pkg/transport/ws`:
 
 ```go
 package main
@@ -378,7 +378,7 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 func main() {
@@ -433,7 +433,7 @@ Heavy deps are separate Go modules under [`contrib/`](../contrib/):
 
 ```bash
 go get github.com/rushteam/beauty/contrib/gorm@latest   # GORM + OTel
-go get github.com/rushteam/beauty/contrib/kafka@latest # Kafka for pkg/mq
+go get github.com/rushteam/beauty/contrib/kafka@latest # Kafka for pkg/messaging/mq
 go get github.com/rushteam/beauty/contrib/llm@latest   # LLM client
 ```
 

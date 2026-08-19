@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/rushteam/beauty/pkg/kvstore"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 // incrScript 原子地 INCRBY,并且只在 key 此前不存在时才设置 TTL(已存在则不刷新

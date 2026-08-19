@@ -1,6 +1,6 @@
 # contrib/rabbitmq — RabbitMQ MQ 绑定
 
-实现 `pkg/mq.Publisher` / `Subscriber`(topic exchange,confirm 模式,at-least-once)。
+实现 `pkg/messaging/mq.Publisher` / `Subscriber`(topic exchange,confirm 模式,at-least-once)。
 
 ```go
 pub, err := rabbitmq.NewPublisher("amqp://guest:guest@localhost:5672/")

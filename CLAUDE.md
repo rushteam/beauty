@@ -11,7 +11,7 @@ Beauty is a Go 1.26 microservice framework. A tiny core (`beauty.New(...).Start(
 The repo is **three independent Go modules** — respect the boundary or CI fails:
 
 - **Core** — `github.com/rushteam/beauty` (root `go.mod`). Light, stdlib-leaning. **Must never import `contrib/`.** CI enforces this: `go list -deps ./...` must not contain any `contrib/` path.
-- **`contrib/<name>`** — each subdir is its own module (`github.com/rushteam/beauty/contrib/<name>`) with its own `go.mod`, for heavy third-party deps (gorm, kafka, elasticsearch, llm, wasm…). Build/test *inside* the subdir. `contrib` code is written against core interfaces (e.g. `pkg/mq.Publisher`, slog, OTel global providers) so users can swap in their own implementation.
+- **`contrib/<name>`** — each subdir is its own module (`github.com/rushteam/beauty/contrib/<name>`) with its own `go.mod`, for heavy third-party deps (gorm, kafka, elasticsearch, llm, wasm…). Build/test *inside* the subdir. `contrib` code is written against core interfaces (e.g. `pkg/messaging/mq.Publisher`, slog, OTel global providers) so users can swap in their own implementation.
 - **`tools/`** — `github.com/rushteam/beauty/tools`, the `beauty` CLI (scaffolding, api codegen, dev hot-reload). Separate module.
 
 Core `go build ./...` / `go test ./...` does **not** compile `contrib/` — the module boundary isolates it.
@@ -24,8 +24,8 @@ gofmt -l .                        # must print nothing; CI fails on unformatted 
 go vet ./...
 go build ./...
 go test -race -timeout 600s ./...
-go test -race ./pkg/dlock/...     # single package
-go test -race -run TestName ./pkg/dlock/...   # single test
+go test -race ./pkg/store/dlock/...     # single package
+go test -race -run TestName ./pkg/store/dlock/...   # single test
 
 # contrib module — always cd into it first (separate go.mod)
 cd contrib/gorm && go test ./...
@@ -55,9 +55,17 @@ The whole framework is `beauty.go` + a small set of interfaces. Read `beauty.go`
 
 ## Layout map
 
-- `pkg/service/*` — the runnable services + discovery/logger/telemetry.
-- `pkg/middleware/*` — composable HTTP middleware (accesslog, auth, ratelimit, circuitbreaker, timeout, cache, cors, recovery, requestid…). Default chain order is documented in `docs/middleware*.md`.
-- `pkg/*` (70+) — single-purpose mechanisms: `cache`, `dlock`, `idgen`, `kvstore`, `mq`, `eventbus`, `saga`, `txn`, `ws`, `sse`, `quic`, `hls`, `media`, `gameloop`, `spatial`, `presence`, `ratelimit`, `hedge`, `backoff`, `circuitbreaker`, `shard`, etc.
+- `pkg/foundation/` — zero-dep primitives & data structures (`ctxkey`, `safe`, `generic`, `fsm`, `bitmap`, `ringbuffer`, `chanx`, `priority`, `dag`, `syncx`, `xgo`, `semaphore`, …).
+- `pkg/resilience/` — fault tolerance & flow control (`backoff`, `circuitbreaker`, `ratelimit`, `hedge`, `timeout`, `throttle`, `cooldown`, `counter`).
+- `pkg/store/` — storage & shared state (`kvstore`, `cache`, `dlock`, `ephemeral`, `idempotency`, `tally`, `shard`, `loadbalance`).
+- `pkg/messaging/` — messaging & events (`mq`, `eventbus`, `stream`, `webhook`).
+- `pkg/transport/` — realtime transport (`ws`, `sse`, `quic`, `p2p`, `presence`, `router`, `resume`).
+- `pkg/api/` — HTTP/API/security/observability (`handler`, `errors`, `authz`, `token`, `metadata`, `featureflag`, `afterwork`, `callbacks`, …).
+- `pkg/orchestration/` — task scheduling (`saga`, `txn`, `worker`, `scheduler`, `timerqueue`, `delayqueue`).
+- `pkg/game/` — game engine: core (`gameloop`, `match`, `gameroom`, `spatial`, `replicate`, `versus`, `matchmaker`, `pathfind`, …) + meta (`loot`, `leveling`, `questlog`, `leaderboard`, `reddot`, `momentum`).
+- `pkg/media/` — media streaming (`rtmp`, `hls`, `hlsmux`, `webrtc`, hub/supervisor).
+- `pkg/service/*` — runnable services + discovery/logger/telemetry.
+- `pkg/middleware/*` — composable HTTP middleware (accesslog, auth, ratelimit, circuitbreaker, timeout, cache, cors, recovery, requestid…).
 - `examples/` — many runnable single-purpose demos; the fastest way to see an API in use.
 - `docs/` — per-topic design notes (discovery, middleware, media, wasm-roadmap, k8s-rbac…).
 - `contrib/README.md` — table of every contrib module and its purpose.

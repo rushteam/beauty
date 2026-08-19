@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/gameloop"
-	"github.com/rushteam/beauty/pkg/quic"
-	"github.com/rushteam/beauty/pkg/replicate"
-	"github.com/rushteam/beauty/pkg/spatial"
+	"github.com/rushteam/beauty/pkg/game/gameloop"
+	"github.com/rushteam/beauty/pkg/game/replicate"
+	"github.com/rushteam/beauty/pkg/game/spatial"
+	"github.com/rushteam/beauty/pkg/transport/quic"
 )
 
 const (

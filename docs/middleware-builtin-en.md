@@ -175,7 +175,7 @@ Nonce-based anti-replay middleware using `kvstore.Store.SetNX`. Each request car
 ```go
 import (
     "github.com/rushteam/beauty/pkg/middleware/antireplay"
-    "github.com/rushteam/beauty/pkg/kvstore"
+    "github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 store := redis.NewStore(redisClient) // or kvstore.NewMemory()

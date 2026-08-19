@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
-	"github.com/rushteam/beauty/pkg/leaderboard"
+	"github.com/rushteam/beauty/pkg/game/leaderboard"
 )
 
 // Tournament 管理一个周期性重置的排行榜。

@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"net/http"
 
-	cb "github.com/rushteam/beauty/pkg/callbacks"
+	cb "github.com/rushteam/beauty/pkg/api/callbacks"
 	"google.golang.org/grpc"
 )
 

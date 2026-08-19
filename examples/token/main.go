@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
+	"github.com/rushteam/beauty/pkg/api/token"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/token"
 )
 
 var mgr *token.Manager

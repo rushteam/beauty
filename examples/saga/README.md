@@ -1,6 +1,6 @@
 # saga —— 分布式事务 Saga
 
-演示 `pkg/saga` 的顺序正向步骤 + 失败逆序补偿，配合 `wallet` 幂等键保证补偿不重入。
+演示 `pkg/orchestration/saga` 的顺序正向步骤 + 失败逆序补偿，配合 `wallet` 幂等键保证补偿不重入。
 
 ## 运行
 

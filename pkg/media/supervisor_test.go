@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/backoff"
 	"github.com/rushteam/beauty/pkg/media"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 )
 
 func TestSupervisor_RestartsOnExit(t *testing.T) {

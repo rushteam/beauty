@@ -1,6 +1,6 @@
 # Realtime Service Component Library (pkg/ · pkg/domain/)
 
-On top of `pkg/ws` (WebSocket thin wrapper) and `pkg/sse` (SSE wrapper), beauty provides a set of
+On top of `pkg/transport/ws` (WebSocket thin wrapper) and `pkg/transport/sse` (SSE wrapper), beauty provides a set of
 **independently composable** realtime service primitives covering long-lived connection sessions, online presence,
 message routing, matchmaking, leaderboard caching, task scheduling, virtual accounts, operation audit, offline
 notifications, periodic leaderboards, temporary squads, versioned storage, social graphs, session tokens,
@@ -31,26 +31,26 @@ This document gives a quick reference and composition patterns for each package.
 
 | Package | One-liner | Typical Use | Demo Port |
 |----|--------|----------|-----------|
-| `pkg/match` | Stateful realtime session primitive (actor model) | Game rooms / authoritative battles / collaborative editing | 8181 |
-| `pkg/ws/session` | High-level WebSocket stateful session wrapper | Long-connection business / IM 1:1 chat | 8282 |
-| `pkg/presence` | Dual-index online presence + event bus | Channel members / online broadcast / candidate pool | 8283 |
-| `pkg/router` | Multi-semantic message routing + batching | Broadcast / targeted delivery / batch send | 8284 |
-| `pkg/leaderboard` | In-memory leaderboard ranking cache (heap sort) | "My rank" / TopN high-frequency reads | 8285 |
-| `pkg/scheduler` | Worker pool + runtime Pause/Resume | Rewards / batch notifications / expiry cleanup | 8286 |
-| `pkg/matchmaker` | Attribute-based matchmaking | PVP teams / match lobby | 8287 |
-| `pkg/audit` | Operation audit (success-only + async persistence) | Compliance / ops audit | 8289 |
-| `pkg/token` | Dual token (JWT HS256) + blacklist revocation | Login issue / refresh / kick | 8295 |
-| `pkg/dberr` | DB error translation (DB-agnostic → *Status) | Normalize repo errors to business codes | 8296 |
-| `pkg/webhook` | Event notification + idempotent dedup + DLQ | External callbacks / at-least-once | 8297 |
-| `pkg/resume` | Reconnect presence restore (token+presence) | Disconnect without losing state / auto reconnect | 8298 |
-| `pkg/presence/status` | Broadcast status changes to watchers | Friend online/offline notifications / status events | 8299 |
-| `pkg/ephemeral` | Short-TTL KV (in-memory + expiry sweep) | Verification codes / temp data / cache | 8302 |
-| `pkg/afterwork` | Request-scoped background task extension (waitUntil semantics) | Send email after response / write audit / trigger webhook | 8303 |
-| `pkg/handler` | Declarative HTTP handler wrapper (auth+inject+afterwork+error normalization) | Business functions only write (ctx,req)=>(resp,err) | 8303 |
-| `pkg/ratelimit` | Key-based rate limiting (token bucket + sliding window) + HTTP middleware | Anti-spam / API rate limit / per-user/IP isolation | 8304 |
-| `pkg/txn` | Cross-domain transaction coordination (2PC Prepare/Commit/Rollback) | Atomic wallet debit + save write / rollback all on any failure | 8305 |
-| `pkg/loadbalance` | Load balancing algorithms (consistent hash + smooth weighted round-robin + round-robin) | Session stickiness / stateful sharding / capacity-based dispatch | 8306 |
-| `pkg/ctxkey` | Type-safe context keys (generic Key[T]) | Unify contextKey definitions across packages / prevent key collisions | — |
+| `pkg/game/match` | Stateful realtime session primitive (actor model) | Game rooms / authoritative battles / collaborative editing | 8181 |
+| `pkg/transport/ws/session` | High-level WebSocket stateful session wrapper | Long-connection business / IM 1:1 chat | 8282 |
+| `pkg/transport/presence` | Dual-index online presence + event bus | Channel members / online broadcast / candidate pool | 8283 |
+| `pkg/transport/router` | Multi-semantic message routing + batching | Broadcast / targeted delivery / batch send | 8284 |
+| `pkg/game/leaderboard` | In-memory leaderboard ranking cache (heap sort) | "My rank" / TopN high-frequency reads | 8285 |
+| `pkg/orchestration/scheduler` | Worker pool + runtime Pause/Resume | Rewards / batch notifications / expiry cleanup | 8286 |
+| `pkg/game/matchmaker` | Attribute-based matchmaking | PVP teams / match lobby | 8287 |
+| `pkg/api/audit` | Operation audit (success-only + async persistence) | Compliance / ops audit | 8289 |
+| `pkg/api/token` | Dual token (JWT HS256) + blacklist revocation | Login issue / refresh / kick | 8295 |
+| `pkg/api/dberr` | DB error translation (DB-agnostic → *Status) | Normalize repo errors to business codes | 8296 |
+| `pkg/messaging/webhook` | Event notification + idempotent dedup + DLQ | External callbacks / at-least-once | 8297 |
+| `pkg/transport/resume` | Reconnect presence restore (token+presence) | Disconnect without losing state / auto reconnect | 8298 |
+| `pkg/transport/presence/status` | Broadcast status changes to watchers | Friend online/offline notifications / status events | 8299 |
+| `pkg/store/ephemeral` | Short-TTL KV (in-memory + expiry sweep) | Verification codes / temp data / cache | 8302 |
+| `pkg/api/afterwork` | Request-scoped background task extension (waitUntil semantics) | Send email after response / write audit / trigger webhook | 8303 |
+| `pkg/api/handler` | Declarative HTTP handler wrapper (auth+inject+afterwork+error normalization) | Business functions only write (ctx,req)=>(resp,err) | 8303 |
+| `pkg/resilience/ratelimit` | Key-based rate limiting (token bucket + sliding window) + HTTP middleware | Anti-spam / API rate limit / per-user/IP isolation | 8304 |
+| `pkg/orchestration/txn` | Cross-domain transaction coordination (2PC Prepare/Commit/Rollback) | Atomic wallet debit + save write / rollback all on any failure | 8305 |
+| `pkg/store/loadbalance` | Load balancing algorithms (consistent hash + smooth weighted round-robin + round-robin) | Session stickiness / stateful sharding / capacity-based dispatch | 8306 |
+| `pkg/foundation/ctxkey` | Type-safe context keys (generic Key[T]) | Unify contextKey definitions across packages / prevent key collisions | — |
 
 ### Extended Primitives: Concurrency / Reliability / Games & Live Streaming (pkg/)
 
@@ -61,31 +61,31 @@ generics + functional Options, usable independently or combined with the table a
 | Package | One-liner | Typical Use | Demo |
 |----|--------|----------|------|
 | **Concurrency & Reliability** | | | |
-| `pkg/idempotency` | Idempotent execution (dedup + singleflight merge + TTL) | Prevent duplicate charges/rewards · request dedup · cache stampede protection | ✓ |
-| `pkg/keyedmutex` | Fine-grained per-key locks (ref-count auto reclaim) | Serialize same account/room/order · parallel across different entities | ✓ |
-| `pkg/backoff` | Exponential backoff + jitter (Full/Equal/None/proportional) | Retry reliability · spread retry storms | ✓ |
-| `pkg/saga` | Cross-service Saga orchestration (forward order + reverse compensation + retry) | Gacha/order/redeem cross-service eventual consistency | ✓ |
-| `pkg/eventbus` | Generic in-process event bus (by topic + callbacks) | Decouple modules by events · one event, many subscribers | ✓ |
+| `pkg/store/idempotency` | Idempotent execution (dedup + singleflight merge + TTL) | Prevent duplicate charges/rewards · request dedup · cache stampede protection | ✓ |
+| `pkg/foundation/keyedmutex` | Fine-grained per-key locks (ref-count auto reclaim) | Serialize same account/room/order · parallel across different entities | ✓ |
+| `pkg/resilience/backoff` | Exponential backoff + jitter (Full/Equal/None/proportional) | Retry reliability · spread retry storms | ✓ |
+| `pkg/orchestration/saga` | Cross-service Saga orchestration (forward order + reverse compensation + retry) | Gacha/order/redeem cross-service eventual consistency | ✓ |
+| `pkg/messaging/eventbus` | Generic in-process event bus (by topic + callbacks) | Decouple modules by events · one event, many subscribers | ✓ |
 | **Scheduling & Counting** | | | |
-| `pkg/delayqueue` | One-shot delayed trigger at a fixed time (min-heap + cancel/reschedule) | Match countdown · buff expiry · order timeout · match fallback | ✓ |
-| `pkg/counter` | Sliding-window count / time-window quota | Daily gacha cap · per-minute danmaku limit · anti-abuse | ✓ |
-| `pkg/tally` | High-frequency cumulative aggregation + batch flush | Live likes/gifts · analytics counting (reduce write amplification) | ✓ |
+| `pkg/orchestration/delayqueue` | One-shot delayed trigger at a fixed time (min-heap + cancel/reschedule) | Match countdown · buff expiry · order timeout · match fallback | ✓ |
+| `pkg/resilience/counter` | Sliding-window count / time-window quota | Daily gacha cap · per-minute danmaku limit · anti-abuse | ✓ |
+| `pkg/store/tally` | High-frequency cumulative aggregation + batch flush | Live likes/gifts · analytics counting (reduce write amplification) | ✓ |
 | `pkg/idgen` | Distributed unique IDs (Snowflake, 64-bit trend-increasing) | Match IDs · order numbers · message seq · DB primary keys | ✓ |
 | **State Machine & Gameplay** | | | |
-| `pkg/fsm` | Generic finite state machine (transition validation + Enter/Leave hooks) | Match/room/order state flow · prevent illegal transitions | ✓ |
-| `pkg/versus` | Timed multi-party competitive scoring (countdown + winner + event stream) | Live PK · team battles · quiz · vote rally | ✓ |
-| `pkg/momentum` | Combo + heat time decay (half-life exponential cooldown) | Live combo effects · real-time heat leaderboard | ✓ |
+| `pkg/foundation/fsm` | Generic finite state machine (transition validation + Enter/Leave hooks) | Match/room/order state flow · prevent illegal transitions | ✓ |
+| `pkg/game/versus` | Timed multi-party competitive scoring (countdown + winner + event stream) | Live PK · team battles · quiz · vote rally | ✓ |
+| `pkg/game/momentum` | Combo + heat time decay (half-life exponential cooldown) | Live combo effects · real-time heat leaderboard | ✓ |
 | **Spatial & Geography** | | | |
-| `pkg/pathfind` | Grid A* pathfinding (obstacles + weights + diagonal) | Tower defense · SLG · click-to-move · monster chase | ✓ |
-| `pkg/spatial` | Grid spatial index (Nearby / KNN) | Nearby people · MMO AOI · large-map partitioning | ✓ |
-| `pkg/spatial/aoi` | AOI visibility set diff (enter/leave/stay) | Incremental sync interest management | — |
-| `pkg/replicate` | DirtySet + Delta projection (baseline/incremental) | State sync egress | — |
-| `pkg/snapbuf` | Ring snapshot buffer | Lag compensation rewind | — |
-| `pkg/inputclock` | Client frame mapping + RTT | Lag compensation | — |
-| `pkg/lagcomp` | Compensated frame query WorldAt | FPS hit detection | — |
-| `pkg/gameroom` | Dedicated room FSM | Waiting→Running→Draining | — |
-| `pkg/gameloop` | Fixed-step tick + input fan-out | Lockstep / state sync skeleton | ✓ |
-| `pkg/geohash` | Lat/lng geocoding (encode/neighbors/cover query/distance) | LBS nearby people/shops (prefix lookup) | ✓ |
+| `pkg/game/pathfind` | Grid A* pathfinding (obstacles + weights + diagonal) | Tower defense · SLG · click-to-move · monster chase | ✓ |
+| `pkg/game/spatial` | Grid spatial index (Nearby / KNN) | Nearby people · MMO AOI · large-map partitioning | ✓ |
+| `pkg/game/spatial/aoi` | AOI visibility set diff (enter/leave/stay) | Incremental sync interest management | — |
+| `pkg/game/replicate` | DirtySet + Delta projection (baseline/incremental) | State sync egress | — |
+| `pkg/game/snapbuf` | Ring snapshot buffer | Lag compensation rewind | — |
+| `pkg/game/inputclock` | Client frame mapping + RTT | Lag compensation | — |
+| `pkg/game/lagcomp` | Compensated frame query WorldAt | FPS hit detection | — |
+| `pkg/game/gameroom` | Dedicated room FSM | Waiting→Running→Draining | — |
+| `pkg/game/gameloop` | Fixed-step tick + input fan-out | Lockstep / state sync skeleton | ✓ |
+| `pkg/game/geohash` | Lat/lng geocoding (encode/neighbors/cover query/distance) | LBS nearby people/shops (prefix lookup) | ✓ |
 
 > Demos for these primitives are in `examples/<pkg>/main.go`; single-file, directly `go run`.
 
@@ -132,14 +132,14 @@ only one layer; composition works as follows:
 ```
         ┌─────────────── WebSocket / gRPC long connection ───────────────┐
         │                                                                 │
-   pkg/ws/session  ──(Handler.OnOpen/OnMessage/OnClose)──►  Application
+   pkg/transport/ws/session  ──(Handler.OnOpen/OnMessage/OnClose)──►  Application
         │                                                                 │
         │  Track/Untrack                  Send/QueueDeferred
         ▼                                ▼
-   pkg/presence  ◄────── Lookup ──────  pkg/router
+   pkg/transport/presence  ◄────── Lookup ──────  pkg/router
    (session↔stream dual index)         (route by presence ID / stream / all)
    
-   pkg/match          pkg/matchmaker         pkg/leaderboard     pkg/scheduler
+   pkg/game/match          pkg/game/matchmaker         pkg/game/leaderboard     pkg/orchestration/scheduler
    (stateful room)    (team matchmaking)     (rank cache)        (background worker pool)
         │                   │                      │                   │
         └─── Subscribe ───► Application ◄── Match callback ─┘ ── Insert ───────┘
@@ -175,9 +175,9 @@ middleware records "admin grant reward" throughout (see `examples/wallet` + `not
 the same stream and `match.Start` opens a room; room output is delivered via `router.SendToStream`.
 
 **HTTP branch: declarative handler + post-response side effects** — Business functions only write
-`(ctx, req) => (resp, error)`; `pkg/handler` handles auth policy (`WithAuth`), dependency injection (`WithInject`),
-error normalization (`errors.WriteHTTP`); after response returns, `pkg/afterwork`'s `Wait()` runs all `Defer`-queued
-side effects (send email / write audit / trigger `pkg/webhook`). See `examples/afterwork`.
+`(ctx, req) => (resp, error)`; `pkg/api/handler` handles auth policy (`WithAuth`), dependency injection (`WithInject`),
+error normalization (`errors.WriteHTTP`); after response returns, `pkg/api/afterwork`'s `Wait()` runs all `Defer`-queued
+side effects (send email / write audit / trigger `pkg/messaging/webhook`). See `examples/afterwork`.
 
 **Live streaming composition: multi-room PK** — Build a multi-room live PK backend with extended primitives: each match
 uses `versus` for timed competitive scoring and winner determination; multiple matches in parallel via roomID→Match map;
@@ -188,7 +188,7 @@ while `tally` aggregates high-frequency "likes/popularity" counts for batch pers
 bridged via `versus`'s event stream (internally reuses `stream`) to SSE clients; global PK lifecycle (start/end) is
 broadcast via `eventbus` to decouple notification/leaderboard downstream modules. See `examples/live-pk` (composition demo).
 
-## Quick Reference: pkg/match (Stateful Realtime Session)
+## Quick Reference: pkg/game/match (Stateful Realtime Session)
 
 Each session is driven by a dedicated goroutine with fixed tick rate; input/members/signals are consumed serially
 via channels; state is encapsulated inside the goroutine without locks.
@@ -208,9 +208,9 @@ m.Stop(); m.Wait()                   // graceful stop
 Business implements `Handler.Init/Tick`. Backpressure: `QueueInput` full → drop + warn; call queue full →
 treated as overload stop. See `examples/match`.
 
-## Quick Reference: pkg/ws/session (WebSocket Session Wrapper)
+## Quick Reference: pkg/transport/ws/session (WebSocket Session Wrapper)
 
-Production-grade capabilities on top of the `pkg/ws` thin wrapper: dual goroutine read/write separation,
+Production-grade capabilities on top of the `pkg/transport/ws` thin wrapper: dual goroutine read/write separation,
 periodic Ping heartbeat, close handshake, write timeout protection.
 
 ```go
@@ -223,7 +223,7 @@ mux.Handle("/ws", ws.Handler(session.Accept(&myHandler{},
 Business implements `Handler.OnOpen/OnMessage/OnClose`; use `s.Send/SendText/SendJSON` for writes.
 Queue full auto-closes slow clients. See `examples/session`.
 
-## Quick Reference: pkg/presence (Dual-Index Online Presence)
+## Quick Reference: pkg/transport/presence (Dual-Index Online Presence)
 
 Maintains bidirectional index of "who is in which stream": lookup members by stream (for broadcast), lookup stream
 by session (for offline cleanup); both directions O(1). Includes join/leave event bus.
@@ -239,7 +239,7 @@ tr.UntrackAll(sid)                    // one-click cleanup on session offline
 
 Concurrency-safe. Event queue full → drop (non-blocking). See `examples/presence`.
 
-## Quick Reference: pkg/router (Multi-Semantic Message Routing)
+## Quick Reference: pkg/transport/router (Multi-Semantic Message Routing)
 
 Enhanced `Broadcaster`: targeted delivery by presence ID, broadcast by stream, batch send.
 
@@ -253,7 +253,7 @@ rtr.SendToAll(msg)
 
 `FlushDeferred` sends in batch per session, reducing Lookups. See `examples/router`.
 
-## Quick Reference: pkg/leaderboard (Leaderboard Ranking Cache)
+## Quick Reference: pkg/game/leaderboard (Leaderboard Ranking Cache)
 
 Heap sort maintains ordered structure per board; O(log N) for "my rank", TopN, fetch by rank;
 blacklist can exclude write-heavy boards.
@@ -269,7 +269,7 @@ rc.Delete("score", 0, userID)
 
 Concurrency-safe. `Fill` is idempotent (safe to reload). See `examples/leaderboard`.
 
-## Quick Reference: pkg/scheduler (Worker Pool + Pause/Resume)
+## Quick Reference: pkg/orchestration/scheduler (Worker Pool + Pause/Resume)
 
 N workers consume queue concurrently; supports runtime Pause/Resume and graceful stop; worker panic auto-recovers.
 Complements `pkg/service/cron` (expression-based scheduling) — this package Submit on events.
@@ -288,7 +288,7 @@ s.Stop(); s.Wait()                   // graceful stop
 
 `WithWorkers(0)` allows pure queue mode (enqueue only, no consumption). See `examples/scheduler`.
 
-## Quick Reference: pkg/matchmaker (Attribute-Based Team Matchmaking)
+## Quick Reference: pkg/game/matchmaker (Attribute-Based Team Matchmaking)
 
 Players register tickets with string+numeric attributes; matcher uses "bucket (region+mode) + skill-sorted greedy"
 to form teams; callback when complete. Stdlib-only; suitable for single-node tens of thousands of tickets.
@@ -325,7 +325,7 @@ w.SetBalance("u1", WalletMap{"gold": 999}) // restore from DB on startup, no led
 
 Concurrency-safe. See `examples/wallet`.
 
-## Quick Reference: pkg/audit (Operation Audit, Success-Only)
+## Quick Reference: pkg/api/audit (Operation Audit, Success-Only)
 
 Structured record of "who did what to which resource"; only records successful operations where `err==nil` and status < 500
 (failures go to logger); async persistence does not block business.
@@ -347,7 +347,7 @@ mux.Use(a.HTTPMiddleware(func(r *http.Request) (audit.Resource, string, string) 
 
 ## Quick Reference: pkg/domain/notification (Persistent/Ephemeral Split + Offline Pull)
 
-Complements `pkg/router`: router delivers to online users; notification delivers to offline users (store + pull on reconnect).
+Complements `pkg/transport/router`: router delivers to online users; notification delivers to offline users (store + pull on reconnect).
 `persistent` flag splits the two; seq cursor pagination avoids duplicates.
 
 ```go
@@ -366,7 +366,7 @@ Ephemeral notifications (`Persistent:false`) only attempt live delivery, not sto
 
 ## Quick Reference: pkg/domain/tournament (Tournament: Cron Reset + Time Window)
 
-Thin wrapper over `pkg/leaderboard.RankCache`: each period uses `expiry` (next reset point) as time-window key,
+Thin wrapper over `pkg/game/leaderboard.RankCache`: each period uses `expiry` (next reset point) as time-window key,
 naturally implementing "independent leaderboard per period" without explicit clear.
 
 ```go
@@ -385,7 +385,7 @@ Cron parsing reuses `robfig/cron/v3` (5 fields: min hour day month weekday). See
 
 ## Quick Reference: pkg/domain/party (Non-Authoritative Squad)
 
-Leader + Members + JoinRequests + seat reservation; member changes broadcast snapshot. Complements `pkg/match`
+Leader + Members + JoinRequests + seat reservation; member changes broadcast snapshot. Complements `pkg/game/match`
 (authoritative state machine, fixed tick) — party is user-intent-driven temporary collaboration, no tick.
 
 ```go
@@ -442,7 +442,7 @@ g.IsBlocked("a", "d"); g.Edge("a", "b"); g.Count("a", -1)
 
 State constants: Active/Pending/Admin/Owner/Blocked (business can extend). See `examples/relationship`.
 
-## Quick Reference: pkg/token (Dual Token + Blacklist Revocation)
+## Quick Reference: pkg/api/token (Dual Token + Blacklist Revocation)
 
 Completes the missing "issue/refresh/revoke" half of `pkg/middleware/auth` (validation only). Dual token mode:
 short-lived session (1h) + long-lived refresh (7d), **independent keys** for signing; refresh leak ≠ session forgery.
@@ -472,9 +472,9 @@ newSess, _ = m.Refresh(refresh, &map[string]string{"role":"user"}) // override v
 Errors: `ErrInvalidToken` / `ErrExpired` / `ErrRevoked` / `ErrKicked`.
 Combined with `pkg/middleware/auth` for complete login state. See `examples/token`.
 
-## Quick Reference: pkg/dberr (DB Error Translation)
+## Quick Reference: pkg/api/dberr (DB Error Translation)
 
-Translates database driver errors to `pkg/errors` `*Status`, so repo layer only throws native driver errors
+Translates database driver errors to `pkg/api/errors` `*Status`, so repo layer only throws native driver errors
 and middleware/gateway gets business-coded errors uniformly. Two steps: `Driver.Classify(err) → ErrClass`
 (DB-agnostic enum), then map to `Code` per table. Each driver adapter implements `Classify`; business layer only knows `ErrClass`.
 
@@ -509,7 +509,7 @@ Generic adapters: `dberr.ErrorIsDriver` (classify by `errors.Is` sentinels, suit
 `ErrNoRows`/`ErrConnDone`), `dberr.NoopDriver` (all Unknown).
 Default mapping: conflict→409, not found→404, timeout→504, connection→503, unknown→500. See `examples/dberr`.
 
-## Quick Reference: pkg/webhook (Event Notification + Idempotent Dedup + DLQ)
+## Quick Reference: pkg/messaging/webhook (Event Notification + Idempotent Dedup + DLQ)
 
 Event-driven webhooks: filter by event type, custom headers, optional body template, optional HMAC signature,
 async trigger with exponential backoff retry. Reliable delivery enhancements (optional): **idempotent dedup**
@@ -545,9 +545,9 @@ store.Records()                       // delivery status snapshot
 Interfaces: `Store` (MarkDelivered/RecordDelivered/RecordFailed), `DLQ` (Push/Pop/Len).
 In-memory `MemStore`/`MemDLQ` work out of the box. See `examples/webhook`.
 
-## Quick Reference: pkg/resume (Reconnect Presence Restore)
+## Quick Reference: pkg/transport/resume (Reconnect Presence Restore)
 
-Completes the last piece of login state: weaves `pkg/token` and `pkg/presence` into "disconnect without losing state".
+Completes the last piece of login state: weaves `pkg/api/token` and `pkg/transport/presence` into "disconnect without losing state".
 Client reconnects with refresh token → server resolves userID + which streams still active → returns to client for auto reconnect.
 Convention: business passes `tokenID` as `presence.Track` sessionID (or maintains mapping) at `Issue`; this package queries by that convention.
 
@@ -567,9 +567,9 @@ info, _ = r.ResolveBySessionID("sess-99")
 Errors pass through: `ErrInvalidToken` / `ErrExpired` / `ErrRevoked` / `ErrKicked` (aliases of token package
 same-name errors) + `ErrNotConfigured`. See `examples/resume`.
 
-## Quick Reference: pkg/presence/status (Broadcast Status Changes to Watchers)
+## Quick Reference: pkg/transport/presence/status (Broadcast Status Changes to Watchers)
 
-`pkg/presence.Listener` only broadcasts join/leave within the same stream; this package subscribes to presence events,
+`pkg/transport/presence.Listener` only broadcasts join/leave within the same stream; this package subscribes to presence events,
 looks up "who watches the person whose status changed" (via `relationship.Watchers` reverse lookup), and delivers
 status notifications via `router` to watcher sessions. Chains `relationship + presence + router`.
 
@@ -598,7 +598,7 @@ See `examples/status`.
 
 Complements `pkg/domain/notification`: notification cursors by userID (personal offline inbox);
 chat cursors by channelID (channel history). IM channel messages need persistence + history pull + paging,
-distinct from `pkg/match` realtime (not persistent) and `pkg/router` delivery (no history storage).
+distinct from `pkg/game/match` realtime (not persistent) and `pkg/transport/router` delivery (no history storage).
 
 ```go
 s := chat.New(chat.WithMaxPerChannel(500))
@@ -613,9 +613,9 @@ s.Count("room1"); s.Delete("room1", m.ID)
 ```
 
 `MsgID` monotonic within channel; evicting oldest does not roll back (like notification seq design).
-Real-time delivery and persistence decoupled: this package only stores history; real-time fan-out by `pkg/router`. See `examples/chat`.
+Real-time delivery and persistence decoupled: this package only stores history; real-time fan-out by `pkg/transport/router`. See `examples/chat`.
 
-## Quick Reference: pkg/ephemeral (Short-TTL KV)
+## Quick Reference: pkg/store/ephemeral (Short-TTL KV)
 
 Lightweight version of `pkg/domain/storage`: no versioning, no persistence, in-memory + auto expiry.
 For verification codes / match room temp data / short token cache / leaderboard snapshots.
@@ -629,13 +629,13 @@ s.Delete("code:138xxxx"); s.Len()
 // ttl<=0 not stored; overwrite with shorter TTL expires by new TTL.
 ```
 
-Underlying `map + single goroutine periodic sweep + Get lazy delete` (like `pkg/token` gc pattern).
+Underlying `map + single goroutine periodic sweep + Get lazy delete` (like `pkg/api/token` gc pattern).
 Value type `any` (like sync.Map, one Store holds multiple types). See `examples/ephemeral`.
 
-## Quick Reference: pkg/afterwork (Request-Scoped Background Task Extension / waitUntil)
+## Quick Reference: pkg/api/afterwork (Request-Scoped Background Task Extension / waitUntil)
 
 Response can return immediately, but background tasks registered via `Defer` continue running — runtime won't kill them right after response.
-Unlike `pkg/safe.Go`: safe.Go is global fire-and-forget, no lifecycle binding;
+Unlike `pkg/foundation/safe.Go`: safe.Go is global fire-and-forget, no lifecycle binding;
 afterwork binds tasks to request ctx; framework calls `Wait()` after response to wait for all (with limit).
 
 ```go
@@ -654,15 +654,15 @@ afterwork.Defer(ctx, func(context.Context) { /* ... */ })
 reg.Wait() // block until all complete or drain timeout
 ```
 
-Notes: task panic recovered by `pkg/safe` (can hook `WithPanicHandler`); task ctx derived from
+Notes: task panic recovered by `pkg/foundation/safe` (can hook `WithPanicHandler`); task ctx derived from
 `context.WithoutCancel` — request ctx cancel should **not** kill tasks immediately; they finish after response.
 `Wait()` idempotent; `Stop()` is alias of `Wait()`. See `examples/afterwork`.
 
-## Quick Reference: pkg/handler (Declarative HTTP Handler Wrapper)
+## Quick Reference: pkg/api/handler (Declarative HTTP Handler Wrapper)
 
 Moves auth policy + resource injection + error normalization off business handlers;
 business functions only write `(ctx, req) => (resp, error)`.
-Ergonomic decorator combining `pkg/middleware/auth` + `pkg/afterwork` + `pkg/errors` + DI.
+Ergonomic decorator combining `pkg/middleware/auth` + `pkg/api/afterwork` + `pkg/api/errors` + DI.
 
 ```go
 type CreateReq struct{ Sku string `json:"sku"` }
@@ -690,11 +690,11 @@ Notes: returning `*Status` written as-is via `errors.WriteHTTP`; plain error def
 `Get[T](ctx, name)` gets dependency (type mismatch returns ok=false); `MustGet` fails fast at startup.
 `WithMethod` validates method; nil response returns 204. See `examples/afterwork`.
 
-## Quick Reference: pkg/ratelimit (Key-Based Rate Limiting + HTTP Middleware)
+## Quick Reference: pkg/resilience/ratelimit (Key-Based Rate Limiting + HTTP Middleware)
 
 Generic cross-cutting rate limit primitive; two algorithms: `TokenBucket` (fixed rate refill, allows burst) and
 `SlidingWindow` (sliding window precise count). Isolated per key (each user/IP independent count);
-over limit returns 429 + `Retry-After`. Declarative combo with `pkg/handler`: `WithRatelimit`.
+over limit returns 429 + `Retry-After`. Declarative combo with `pkg/api/handler`: `WithRatelimit`.
 
 ```go
 tb := ratelimit.NewTokenBucket(5, 1)         // burst 5, refill 1/s
@@ -704,7 +704,7 @@ tb.Allow("user:alice")                       // (true,0) within burst; over limi
 // HTTP middleware: rate limit by client IP.
 h := ratelimit.Middleware(tb, ratelimit.ClientIP)(myHandler)
 
-// Declarative with pkg/handler: rate limit before auth (over limit skips body parse).
+// Declarative with pkg/api/handler: rate limit before auth (over limit skips body parse).
 handler.New("POST", fn, handler.WithRatelimit(tb, byUserID))
 
 // Sliding window: max 3 in 50ms.
@@ -760,9 +760,9 @@ owners, admins, members, _ := s.Members("g1") // grouped by role
 
 Role encoding reuses relationship constants (`RoleOwner`/`RoleAdmin`/`RoleMember`/`RolePending`).
 Owner can't leave directly (must `TransferOwner` first). See `examples/group` —
-that demo also combines `pkg/domain/inbox` (offline DM between members) + `pkg/ratelimit` (message rate limit).
+that demo also combines `pkg/domain/inbox` (offline DM between members) + `pkg/resilience/ratelimit` (message rate limit).
 
-## Quick Reference: pkg/txn (Cross-Domain Transaction Coordination / Two-Phase Commit)
+## Quick Reference: pkg/orchestration/txn (Cross-Domain Transaction Coordination / Two-Phase Commit)
 
 Atomically commit or rollback wallet/storage/notification and other domain packages within one logical transaction boundary.
 Domains don't need to know about txn — business implements `Participant` interface (Prepare/Commit/Rollback)
@@ -786,7 +786,7 @@ Phase order: Prepare (sequential, any failure rolls back already-Prepared in rev
 best-effort: Commit failure on one domain continues others, returns aggregated error for compensation). Run is serial (one transaction at a time).
 `ParticipantFunc` is function form (lightweight). `examples/txn` demonstrates in-memory snapshot staging.
 
-## Quick Reference: pkg/ctxkey (Type-Safe Context Keys)
+## Quick Reference: pkg/foundation/ctxkey (Type-Safe Context Keys)
 
 Unifies the repeated `type contextKey struct{}` + `ctx.Value(k).(T)` pattern across packages. Generic
 `Key[T]` constrains get/set types at compile time; `New[T]()` allocates independent identity each call (same T, multiple Keys don't collide):
@@ -815,7 +815,7 @@ Routes: `/create` `/join` `/members` `/donate` `/fund` `/score` `/ranking`. See 
 
 # Extended Primitives Quick Reference (Concurrency / Reliability / Games & Live Streaming / Spatial Geography)
 
-## Quick Reference: pkg/idempotency (Idempotent Execution)
+## Quick Reference: pkg/store/idempotency (Idempotent Execution)
 
 Per-key dedup + concurrent merge (singleflight) in one: same key repeated executes once; result cached by TTL.
 
@@ -832,7 +832,7 @@ val, err, shared := store.Do("order:"+id, func() (int64, error) {
 - `fn` panic clears placeholder, allows retry;
 - Idempotency key must be **stable** (from business/message ID), not generated on the spot with `idgen`/`uuid`. See `examples/idempotency`.
 
-## Quick Reference: pkg/keyedmutex (Fine-Grained Per-Key Locks)
+## Quick Reference: pkg/foundation/keyedmutex (Fine-Grained Per-Key Locks)
 
 Same key serial, different keys parallel. Ref count zero auto-reclaims lock, no leak as keys grow.
 
@@ -849,7 +849,7 @@ km.Do(k, func() { ... })                     // convenience wrapper
 - `Lock` returns `unlock` closure (not `Unlock(key)`), `sync.Once` prevents double unlock;
 - Distinguish from `idempotency`: latter "execute once"; this "execute every time, just serially". See `examples/keyedmutex`.
 
-## Quick Reference: pkg/backoff (Exponential Backoff + Jitter)
+## Quick Reference: pkg/resilience/backoff (Exponential Backoff + Jitter)
 
 Unified backoff strategy: `Duration(n)` computes nth wait; `Retry`/`RetryIf` wraps retriable operations.
 
@@ -866,7 +866,7 @@ err := p.RetryIf(ctx, callRemote, func(e error) bool {
 - Four jitter modes: `JitterFull` (default, most spread) / `Equal` / `None` / `Proportional` (±ratio, default ±25%);
 - `Retry` returns immediately on ctx cancel; reused by webhook/saga/grpcclient. See `examples/backoff`.
 
-## Quick Reference: pkg/saga (Cross-Service Saga Orchestration)
+## Quick Reference: pkg/orchestration/saga (Cross-Service Saga Orchestration)
 
 Execute forward operations in order; on any failure, compensate succeeded steps in reverse for eventual consistency.
 
@@ -886,7 +886,7 @@ case saga.StatusCompensationFailed: /* compensation also failed, alert for manua
 - Compensation must be idempotent (recommend pairing with `wallet.ApplyTx`); compensation phase uses `WithoutCancel`, unaffected by original ctx cancel;
 - Pure in-memory, not persisted; crash recovery relies on re-deliverable trigger source. See `examples/saga`.
 
-## Quick Reference: pkg/eventbus (In-Process Event Bus)
+## Quick Reference: pkg/messaging/eventbus (In-Process Event Bus)
 
 Subscribe by topic + callback dispatch; decouples "who sends" from "who receives".
 
@@ -897,10 +897,10 @@ defer unsub()
 bus.Publish("user.login", UserEvent{UserID: "u1"}) // notify all subscribers for that topic
 ```
 
-- Sync (default, `Publish` returns when processing done) or async (`WithAsync`); handler panic recovered via `pkg/safe`;
+- Sync (default, `Publish` returns when processing done) or async (`WithAsync`); handler panic recovered via `pkg/foundation/safe`;
 - Distinguish from `stream` (channel single-source fan-out, all subscribers same stream): eventbus is multi-topic, callback-style. See `examples/eventbus`.
 
-## Quick Reference: pkg/delayqueue (One-Shot Delayed Trigger)
+## Quick Reference: pkg/orchestration/delayqueue (One-Shot Delayed Trigger)
 
 Min-heap + single goroutine driver; runs callback at scheduled time; supports cancel/reschedule by key.
 
@@ -913,9 +913,9 @@ q.Cancel("order:"+id)                                // paid → cancel
 ```
 
 - Fills the gap between `scheduler` (immediate) and `cron` (periodic): match countdown/buff expiry/timeout fallback;
-- Callback runs in independent goroutine; panic recovered via `pkg/safe`. See `examples/delayqueue`.
+- Callback runs in independent goroutine; panic recovered via `pkg/foundation/safe`. See `examples/delayqueue`.
 
-## Quick Reference: pkg/counter (Sliding-Window Count / Quota)
+## Quick Reference: pkg/resilience/counter (Sliding-Window Count / Quota)
 
 Per-key time-window accumulation; `Allow` for in-window quota check.
 
@@ -929,7 +929,7 @@ if !c.Allow("user:"+uid, 1, 60) { /* over 60 in 1 minute, reject */ }
 - Ring buckets + sharded locks; complements `ratelimit`: ratelimit controls **rate** (token bucket); counter controls **total within window**;
 - Idle keys reclaimed by gc. See `examples/counter`.
 
-## Quick Reference: pkg/tally (High-Frequency Cumulative Aggregation + Batch Flush)
+## Quick Reference: pkg/store/tally (High-Frequency Cumulative Aggregation + Batch Flush)
 
 Many small +1s merged in memory; periodic/threshold batch handed to flush, flattening write amplification.
 
@@ -942,7 +942,7 @@ t.Add("room:1:like", 1) // hot path, in-memory accumulate only
 ```
 
 - Generic numeric types; complements `wallet` (per-entry precise ledger): tally is aggregatable, tail-loss-tolerant counting (likes/popularity);
-- `flush` panic recovered via `pkg/safe`, doesn't affect subsequent. See `examples/tally`.
+- `flush` panic recovered via `pkg/foundation/safe`, doesn't affect subsequent. See `examples/tally`.
 
 ## Quick Reference: pkg/idgen (Distributed Unique ID / Snowflake)
 
@@ -957,7 +957,7 @@ ts, node, seq := idgen.Parse(id)
 - Epoch configurable (`WithEpoch`, immutable after launch); handles **clock rollback** (spin within tolerance, error beyond threshold, never silently duplicate);
 - Complements `uuid` (128-bit string): idgen compact, sortable, suitable for primary keys/match IDs. See `examples/idgen`.
 
-## Quick Reference: pkg/fsm (Generic Finite State Machine)
+## Quick Reference: pkg/foundation/fsm (Generic Finite State Machine)
 
 Declarative transition table; illegal transitions error instead of silent state change; Enter/Leave/Transition hooks.
 
@@ -974,7 +974,7 @@ m.Can(Finish); m.Current()
 - S/E are comparable enums; hook error can veto transition (OnLeave/OnTransition); concurrency-safe.
 - Match/room/order state flow, prevent illegal jumps. See `examples/fsm`.
 
-## Quick Reference: pkg/versus (Timed Multi-Party Competitive Scoring / Live PK)
+## Quick Reference: pkg/game/versus (Timed Multi-Party Competitive Scoring / Live PK)
 
 Combines `fsm` (state) + `stream` (event stream) + countdown; two/multi-party timed competition, winner at deadline.
 
@@ -990,7 +990,7 @@ ch, unsub := m.Subscribe(ctx)   // subscribe to score change events (→ SSE/WS)
 - pending→running→ended state machine; ended idempotent; auto settle at deadline or manual `Finish`;
 - Event stream internally reuses `stream.Broadcaster`. See `examples/versus` and `examples/live-pk` (multi-room composition).
 
-## Quick Reference: pkg/momentum (Combo + Heat Time Decay)
+## Quick Reference: pkg/game/momentum (Combo + Heat Time Decay)
 
 Increment within combo window / reset on break; heat decays exponentially by half-life (lazy, no background goroutine).
 
@@ -1004,7 +1004,7 @@ tr.GC(1e-3)                 // reclaim cooled keys on demand
 - Distinguish from `counter`/`leaderboard` (no decay): momentum reflects "how hot right now";
 - Live combo effects, real-time heat leaderboard. See `examples/momentum`.
 
-## Quick Reference: pkg/pathfind (Grid A* Pathfinding)
+## Quick Reference: pkg/game/pathfind (Grid A* Pathfinding)
 
 Shortest path on grid map; supports obstacles, movement cost, diagonal (can forbid corner-cutting).
 
@@ -1018,7 +1018,7 @@ path := g.FindPath(from, to, pathfind.WithDiagonal(true))
 - Octile heuristic guarantees optimal; pure computation, same Grid can `FindPath` concurrently;
 - Tower defense/SLG/click-to-move/monster chase. See `examples/pathfind`.
 
-## Quick Reference: pkg/spatial (Grid Spatial Index / Nearby People)
+## Quick Reference: pkg/game/spatial (Grid Spatial Index / Nearby People)
 
 Entities bucketed by coordinates; `Nearby`/`KNN` only scan neighbor cells + precise distance filter, avoiding full scan.
 
@@ -1034,9 +1034,9 @@ top := ix.KNN(0, 0, 5, 500)          // nearest 5
   ~same as full scan at 10k entities (map overhead ~ offsets candidate reduction), grid ~10µs vs full ~171µs at 250k (~17×).
   Full scan simpler when entity count is small;
 - Nearby people/MMO AOI/large-map partitioning. See `examples/spatial`.
-- **Incremental sync** layers `spatial/aoi` diff + `pkg/replicate.Projector` on `spatial.Nearby` egress — see `examples/statesync`.
+- **Incremental sync** layers `spatial/aoi` diff + `pkg/game/replicate.Projector` on `spatial.Nearby` egress — see `examples/statesync`.
 
-## Quick Reference: pkg/spatial/aoi + pkg/replicate (AOI incremental sync)
+## Quick Reference: pkg/game/spatial/aoi + pkg/game/replicate (AOI incremental sync)
 
 `aoi.Set` diffs the previous visibility set into enter/leave/stay; `replicate.Projector` combines DirtySet to produce per-viewer `Delta` (spawn/update/despawn/baseline).
 
@@ -1050,7 +1050,7 @@ batch := track.OnAck(ack) // reliable CatchUp; check batch.Truncated
 - `Journal` + `ViewerTrack` + `Ack` / `CatchUpBatch` recover from loss; client sends `resync` when `truncated=true`;
 - See `examples/statesync`, `examples/statesync-quic`; Agones hosting: `examples/agones-room` + `examples/matchmaker-room` + `contrib/agones`.
 
-## Quick Reference: pkg/snapbuf + inputclock + lagcomp (lag compensation)
+## Quick Reference: pkg/game/snapbuf + inputclock + lagcomp (lag compensation)
 
 | Package | Role |
 |---|---|
@@ -1066,7 +1066,7 @@ snap, atFrame, ok := comp.WorldAt(shooter, clientFrame)
 
 - `gameloop.PushInput` carries `ClientFrame`; client prediction/rollback stays in application code.
 
-## Quick Reference: pkg/gameroom + contrib/agones (room orchestration)
+## Quick Reference: pkg/game/gameroom + contrib/agones (room orchestration)
 
 `gameroom.Manager` FSM: `Waiting → Ready → Running → Draining → Closed`, with Join/Leave, `ScheduleStart`, `Drain`.
 
@@ -1081,7 +1081,7 @@ _ = ctrl.Run(ctx) // Watcher: Agones Shutdown → Drain → SDK.Shutdown
 
 - One room per Pod on K8s; matchmaker `Allocator` returns address then clients dial WS. See `examples/agones-room`; local match→assign: `examples/matchmaker-room`; gRPC: `contrib/agones` `NewGRPCAllocator`.
 
-## Quick Reference: pkg/geohash (Lat/Lng Geocoding)
+## Quick Reference: pkg/game/geohash (Lat/Lng Geocoding)
 
 Encode lat/lng to base32 string; same prefix means geographically adjacent — "nearby" reduces to string prefix lookup.
 
@@ -1094,7 +1094,7 @@ d := geohash.Distance(lat1, lng1, lat2, lng2)  // Haversine meters
 - Nearby search: lookup by `CoverNeighbors` prefix set in DB/Redis, then filter precisely with `Distance`;
 - Complements `spatial` (planar grid), for real Earth coordinate LBS. See `examples/geohash`.
 
-## Quick Reference: pkg/loot (Weighted Random Draw / Gacha)
+## Quick Reference: pkg/game/loot (Weighted Random Draw / Gacha)
 
 Draw by weight; Alias Method O(1) per draw after table build; optional pity and without-replacement draw.
 
@@ -1112,7 +1112,7 @@ it, pity := p.Draw()            // pity=true means this draw triggered pity
 - Alias table read-only after build, concurrency-safe; `WithRand` injects reproducible RNG;
 - `Puller` has pity counter state, not concurrency-safe (one per player). See `examples/loot`.
 
-## Quick Reference: pkg/semaphore (Weighted Semaphore / Bulkhead Isolation)
+## Quick Reference: pkg/foundation/semaphore (Weighted Semaphore / Bulkhead Isolation)
 
 Limits max concurrent occupancy of shared resources. Supports weighted acquire (heavy ops take more, light ops take less);
 equal-weight scenario (bulkhead) is cost=1 special case.
@@ -1181,7 +1181,7 @@ s.Capacity()        // total capacity
 - `MaxWait=0` reject immediately when full (default); `MaxWait>0` queue wait, still reject on timeout;
 - `Do`/`DoWithCost` auto acquire+release; context cancel aware; concurrency-safe.
 
-## Quick Reference: pkg/throttle (Batch Aggregation Trigger)
+## Quick Reference: pkg/resilience/throttle (Batch Aggregation Trigger)
 
 Flush when N items accumulated or T time elapsed. Standard for log/event/DB batch writes.
 
@@ -1203,7 +1203,7 @@ th.Len()                // current buffer size
 - `Stop` guarantees no data loss; context cancel still flushes on Stop;
 - Concurrency-safe.
 
-## Quick Reference: pkg/priority (Priority Queue)
+## Quick Reference: pkg/foundation/priority (Priority Queue)
 
 Generic binary heap; supports Push/Pop/Peek/Update/Remove. Two variants: zero-overhead non-concurrent + Mutex concurrent-safe.
 
@@ -1227,7 +1227,7 @@ v, ok := sq.Pop()      // (1, true)
 - `SyncQueue[T]`: built-in Mutex, Pop/Peek returns (T, bool) for safe empty handling;
 - `PushPop`: one operation Push+Pop, one less heap adjustment than separate calls.
 
-## Quick Reference: pkg/timeout (Timeout Execution + Panic Recovery)
+## Quick Reference: pkg/resilience/timeout (Timeout Execution + Panic Recovery)
 
 Add timeout + auto panic recovery + error classification (timeout/panic/business error, all `errors.Is`-able) to any function.
 
@@ -1249,7 +1249,7 @@ val, err := timeout.DoValue(ctx, time.Second, func(ctx context.Context) (Result,
 - fn runs in independent goroutine; caller returns immediately on timeout (fn should check ctx to exit);
 - Stateless, concurrency-safe.
 
-## Quick Reference: pkg/pipeline (Multi-Stage Pipeline)
+## Quick Reference: pkg/foundation/pipeline (Multi-Stage Pipeline)
 
 Type-safe Stage chain: each stage can have concurrent workers + bounded channel backpressure + fan-in/fan-out.
 
@@ -1290,7 +1290,7 @@ pipeline.Run(ctx, src, stage)      // single-stage shortcut, collect results
 - Any stage error terminates entire pipeline; context cancel stops whole chain;
 - emit can output 0~N items (filter/expand); generics guarantee type safety between stages.
 
-## Quick Reference: pkg/circuitbreaker (Circuit Breaker)
+## Quick Reference: pkg/resilience/circuitbreaker (Circuit Breaker)
 
 Three-state protection: Closed (normal) → Open (fast fail) → HalfOpen (probe) → Closed/Open.
 Sliding window tracks error rate; auto trip above threshold; after cooldown, allow limited probe requests to verify recovery.
@@ -1317,9 +1317,9 @@ if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
 
 - Complements `backoff` (retry)/`ratelimit` (rate limit)/`cooldown` (cooldown) as resilience quartet;
 - `Do` wraps one call: Closed executes and counts; Open immediately `ErrCircuitOpen`; HalfOpen probes;
-- Concurrency-safe (single lock). See `pkg/circuitbreaker`.
+- Concurrency-safe (single lock). See `pkg/resilience/circuitbreaker`.
 
-## Quick Reference: pkg/cooldown (Cooldown / Action Timing)
+## Quick Reference: pkg/resilience/cooldown (Cooldown / Action Timing)
 
 Per-key "next available time"; can only trigger again after that point.
 
@@ -1336,7 +1336,7 @@ cd.TriggerFor("p1:daily", 24*time.Hour) // per-action override default CD
 - Distinguish from `ratelimit` (rate)/`counter` (window total): cooldown controls **minimum interval between two actions**;
 - Sharded locks + gc reclaims idle keys. See `examples/cooldown`.
 
-## Quick Reference: pkg/ringbuffer (Fixed-Length Ring Buffer / Recent N)
+## Quick Reference: pkg/foundation/ringbuffer (Fixed-Length Ring Buffer / Recent N)
 
 Keep only recent N; overwrite oldest when full, O(1) append.
 
@@ -1351,7 +1351,7 @@ s := ringbuffer.NewSync[string](50) // concurrent-safe variant
 - `Ring[T]` non-concurrent (zero overhead), `SyncRing[T]` built-in RWMutex;
 - Fixed memory, no expansion. Recent danmaku/match history/rolling logs. See `examples/ringbuffer`.
 
-## Quick Reference: pkg/bitmap (Bitmap / Check-in)
+## Quick Reference: pkg/foundation/bitmap (Bitmap / Check-in)
 
 1 bit per boolean state; large-scale marking + set operations, extremely memory-efficient.
 
@@ -1411,7 +1411,7 @@ r.RetroRemaining(time.Now())          // remaining retro check-ins this month
 ```
 
 - Distinguish from `questlog` (goal progress + claim): signin is "calendar check-in + consecutive days";
-- Retro check-in auto-recalculates streak; bitmap zero-dependency embedded (no `pkg/bitmap` dependency);
+- Retro check-in auto-recalculates streak; bitmap zero-dependency embedded (no `pkg/foundation/bitmap` dependency);
 - Concurrency-safe.
 
 ## Quick Reference: pkg/domain/mail (In-Game Mailbox)
@@ -1440,7 +1440,7 @@ mb.DeleteExpired()                         // clean expired mail
 - `Store[T]` interface: Save/Get/Update/Delete/List/CountByStatus/DeleteExpired;
 - Concurrency-safe (depends on Store implementation).
 
-## Quick Reference: pkg/questlog (Quest / Achievement Progress)
+## Quick Reference: pkg/game/questlog (Quest / Achievement Progress)
 
 Accumulate progress toward goals; claim once when met; supports prerequisites and period reset.
 
@@ -1459,7 +1459,7 @@ log.Reset("u1", "kill")        // refresh periodic quest
 - Four states: Locked (prerequisite incomplete) → InProgress → Achieved → Claimed;
 - Distinguish from counter (window count, expires): questlog is "accumulate toward goal + claim state machine", progress doesn't decrease over time. See `examples/questlog`.
 
-## Quick Reference: pkg/leveling (Experience / Level Curve)
+## Quick Reference: pkg/game/leveling (Experience / Level Curve)
 
 Add experience to current total; compute new level/levels gained/progress within level. Pure computation, stateless.
 
@@ -1473,7 +1473,7 @@ lv.Stat(totalExp)            // read-only (display "exp until next level")
 - Three curves: `Linear` (arithmetic)/`Poly` (polynomial acceleration)/`Table` (lookup, for designer numbers);
 - After max level exp still accumulates but level doesn't increase; exp persisted by caller, this package does pure conversion. See `examples/leveling`.
 
-## Quick Reference: pkg/reddot (Badge / Unread Aggregation Tree)
+## Quick Reference: pkg/game/reddot (Badge / Unread Aggregation Tree)
 
 Set unread on leaves; parent = sum of descendants; clear propagates upward.
 
@@ -1504,24 +1504,24 @@ These primitives default to **in-memory, single-process**: state doesn't cross i
 `counter` (quota), `cooldown` (cooldown), `idempotency` (dedup) will be wrong if each instance counts separately (quota bypassed, duplicate claim on instance switch, retry duplicate execution). These three support `WithStore(kvstore.Store)`: configure to store state in shared backend (Redis etc.), consistent across instances.
 
 ```go
-store := myRedisStore          // implement pkg/kvstore.Store interface (one Redis command per method)
+store := myRedisStore          // implement pkg/store/kvstore.Store interface (one Redis command per method)
 c := counter.New(time.Minute, counter.WithStore(store))     // quota cross-instance
 cd := cooldown.New(8*time.Second, cooldown.WithStore(store)) // cooldown cross-instance
 im := idempotency.New[T](idempotency.WithStore(store))       // dedup cross-instance
 ```
 
 - Without `WithStore`, behavior and API unchanged (default in-memory, zero overhead);
-- `pkg/kvstore` defines interface + in-memory impl (`NewMemory`); Redis etc. backends implemented by user (stdlib-only, no SDK import);
+- `pkg/store/kvstore` defines interface + in-memory impl (`NewMemory`); Redis etc. backends implemented by user (stdlib-only, no SDK import);
 - **Semantic differences** to note: counter store mode uses **fixed window** (not sliding, boundary may allow 2× burst); idempotency store mode is **dedup reuse** not "global singleflight" (concurrent same key across instances may each execute once, idempotency guaranteed by unique result storage — so idempotency key requires business operation itself safely retriable); store failure always **fail-open** (read returns 0 / allow / degrade execute) + `WithOnStoreError` reporting.
 
 See `examples/kvstore-shared` (two instances in single process sharing Store, demonstrates cross-instance quota/cooldown/dedup).
 
-**④ Cross-Instance Mutex/Coordination — Use `pkg/dlock`**
+**④ Cross-Instance Mutex/Coordination — Use `pkg/store/dlock`**
 `keyedmutex` is in-process lock; `saga`/`delayqueue` each bypass cross-process coordination via "result idempotency" or "MQ re-delivery";
 but some scenarios need **cross-process mutex** itself — most typical is "only one instance should run Cron in multi-instance deployment".
 These aren't solved by adding Store to a primitive (mutex/leader election is another dimension); need independent distributed lock/leader primitive, see next section.
 
-## Quick Reference: pkg/dlock (Distributed Lock / Leader Election)
+## Quick Reference: pkg/store/dlock (Distributed Lock / Leader Election)
 
 Backend-agnostic interface for cross-process mutex (`Locker`) and continuous leader election (`Elector`). Core use: in multi-instance deployment,
 only one instance executes something (most typical: Cron scheduled tasks, see `pkg/service/cron.WithLeaderElector`).
@@ -1571,7 +1571,7 @@ elector.Run(ctx, "myservice-cron", func(leaderCtx context.Context) {
 
 All packages follow unified conventions for easy mixing:
 
-- **Stdlib only** — except `pkg/ws/session` reuses `pkg/ws` (depends on `coder/websocket`) and
+- **Stdlib only** — except `pkg/transport/ws/session` reuses `pkg/transport/ws` (depends on `coder/websocket`) and
   `pkg/domain/tournament` reuses `robfig/cron/v3` (cron parsing), all others zero third-party deps,
   can be copied to any Go project directly.
 - **Namespace layering** — `pkg/` for generic primitives (session/presence/routing/ranking/scheduling/audit),
@@ -1588,12 +1588,12 @@ All packages follow unified conventions for easy mixing:
 
 | Existing Package | Relationship |
 |--------|------|
-| `pkg/ws` | Underlying layer for `session`; can still use standalone when not using `session`'s `Handler` |
-| `pkg/stream` | `Broadcaster` fan-out semantics enhanced by `router` (adds targeted/by-stream/batching) |
-| `pkg/chanx` | Unbounded channel; `match`/`scheduler` internally use bounded channel + degrade as needed |
+| `pkg/transport/ws` | Underlying layer for `session`; can still use standalone when not using `session`'s `Handler` |
+| `pkg/messaging/stream` | `Broadcaster` fan-out semantics enhanced by `router` (adds targeted/by-stream/batching) |
+| `pkg/foundation/chanx` | Unbounded channel; `match`/`scheduler` internally use bounded channel + degrade as needed |
 | `pkg/service/cron` | Complements `scheduler`: cron by expression, scheduler by event + pausable;
   `tournament` reuses its `robfig/cron` parsing for reset points |
-| `pkg/xgo.Pool` | `beauty.Go` global pool; these packages' goroutines self-manage lifecycle via `Start/Stop` |
+| `pkg/foundation/xgo.Pool` | `beauty.Go` global pool; these packages' goroutines self-manage lifecycle via `Start/Stop` |
 
 ## References
 

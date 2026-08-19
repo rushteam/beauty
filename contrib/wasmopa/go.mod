@@ -19,3 +19,5 @@ require (
 )
 
 // 本地联调。发布前去掉 replace。
+
+replace github.com/rushteam/beauty => ../../

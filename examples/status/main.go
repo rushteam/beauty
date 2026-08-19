@@ -17,10 +17,10 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/domain/relationship"
-	"github.com/rushteam/beauty/pkg/presence"
-	"github.com/rushteam/beauty/pkg/presence/status"
-	"github.com/rushteam/beauty/pkg/router"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"github.com/rushteam/beauty/pkg/transport/presence"
+	"github.com/rushteam/beauty/pkg/transport/presence/status"
+	"github.com/rushteam/beauty/pkg/transport/router"
 )
 
 type sinkRegistry struct {

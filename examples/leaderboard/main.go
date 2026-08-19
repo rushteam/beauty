@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/leaderboard"
+	"github.com/rushteam/beauty/pkg/game/leaderboard"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

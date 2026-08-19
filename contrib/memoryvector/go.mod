@@ -8,3 +8,5 @@ require (
 	github.com/rushteam/beauty/contrib/llm v0.8.6
 	github.com/rushteam/beauty/contrib/vector v0.8.6
 )
+
+replace github.com/rushteam/beauty => ../../

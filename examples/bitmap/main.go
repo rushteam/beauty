@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/bitmap"
+	"github.com/rushteam/beauty/pkg/foundation/bitmap"
 )
 
 func main() {

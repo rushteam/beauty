@@ -1,6 +1,6 @@
 # websocket —— WebSocket 示例
 
-演示 `pkg/ws` 的 Echo 连接与 JSON 广播两种常见模式，配合 `pkg/stream` 做 fan-out。
+演示 `pkg/transport/ws` 的 Echo 连接与 JSON 广播两种常见模式，配合 `pkg/messaging/stream` 做 fan-out。
 
 ## 运行
 

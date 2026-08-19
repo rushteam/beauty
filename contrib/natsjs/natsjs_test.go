@@ -11,7 +11,7 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 
 	bjs "github.com/rushteam/beauty/contrib/natsjs"
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 // runJS 起一个开启 JetStream 的内嵌 NATS 服务(落盘到临时目录)。

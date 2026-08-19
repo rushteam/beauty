@@ -21,7 +21,7 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/sse"
+	"github.com/rushteam/beauty/pkg/transport/sse"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"

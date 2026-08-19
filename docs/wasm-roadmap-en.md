@@ -12,7 +12,7 @@ following the "heavy dependencies in contrib, zero core burden" convention, land
 - Controlled host functions (logging, KV, request metadata access, etc.), capabilities granted on demand;
 - Memory limits (`WithMemoryLimitPages`) + execution timeout/interrupt (`WithTimeout` + `CloseOnContextDone`) + WASI filesystem and network disabled by default;
 - High-level wrapper: **HTTP middleware as wasm modules** — request metadata → wasm `handle` → decision (allow/deny/rewrite headers/status code);
-- `pkg/handler.WithMiddleware` generic hook, declarative wasm binding (zero contrib dependency in core).
+- `pkg/api/handler.WithMiddleware` generic hook, declarative wasm binding (zero contrib dependency in core).
 
 Polish already added: instance pool (`WithPool`) + warm-up (`WithWarm` / `Pool.Warm`), disk compile cache (`WithCacheDir`),
 built-in host functions (`WithLog` / `WithClock`), observability (`WithObserver` / `WithHandlerObserver`),
@@ -34,7 +34,7 @@ security gap (E2B/code-interpreter approach, but pure Go embedded, no external p
 
 ## Tier 3 — Policy as WASM · Shipped (`contrib/wasmopa`)
 
-OPA compiles Rego to wasm; execute in a wazero sandbox, implementing `pkg/authz.Enforcer`:
+OPA compiles Rego to wasm; execute in a wazero sandbox, implementing `pkg/api/authz.Enforcer`:
 
     opa build -t wasm -e 'authz/allow' policy.rego → policy.wasm
     → wasmopa.New(wasmBytes) → authz.Enforcer

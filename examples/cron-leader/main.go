@@ -17,8 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/dlock"
 	"github.com/rushteam/beauty/pkg/service/cron"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 func main() {

@@ -38,9 +38,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/kvstore"
 	"github.com/rushteam/beauty/pkg/middleware/antireplay"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 // SecretFunc 根据 appID 查找静态 secret。返回 false 表示未知 appID。

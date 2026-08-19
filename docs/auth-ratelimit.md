@@ -400,7 +400,7 @@ func (e *CustomKeyExtractor) Extract(ctx context.Context, metadata map[string]in
 import (
     "github.com/rushteam/beauty/pkg/middleware/ratelimit"
     "github.com/rushteam/beauty/pkg/middleware/tenant"
-    "github.com/rushteam/beauty/pkg/metadata/propagation"
+    "github.com/rushteam/beauty/pkg/api/metadata/propagation"
 )
 
 rl := ratelimit.NewRateLimitMiddleware(ratelimit.Config{
@@ -482,7 +482,7 @@ import (
     
     "github.com/rushteam/beauty"
     "github.com/rushteam/beauty/pkg/auth"
-    "github.com/rushteam/beauty/pkg/ratelimit"
+    "github.com/rushteam/beauty/pkg/resilience/ratelimit"
     "github.com/rushteam/beauty/pkg/service/webserver"
 )
 

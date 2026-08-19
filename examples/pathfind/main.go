@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/pathfind"
+	"github.com/rushteam/beauty/pkg/game/pathfind"
 )
 
 func main() {

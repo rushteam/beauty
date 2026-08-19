@@ -12,9 +12,9 @@ import (
 	"strconv"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/match"
+	"github.com/rushteam/beauty/pkg/game/match"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 // 房间状态:累计收到的输入总数。

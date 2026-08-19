@@ -12,8 +12,8 @@ import (
 
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
-	"github.com/rushteam/beauty/pkg/ws/session"
+	"github.com/rushteam/beauty/pkg/transport/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws/session"
 )
 
 type room struct {

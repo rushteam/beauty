@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/rushteam/beauty/pkg/questlog"
+	"github.com/rushteam/beauty/pkg/game/questlog"
 )
 
 func main() {

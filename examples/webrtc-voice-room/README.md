@@ -2,7 +2,7 @@
 
 N 个人互相通话:每个浏览器推自己的麦克风、订阅其他所有人的音频,服务端做**选择性转发**
 (SFU,不混流不转码)。基于 [`pkg/media/webrtc/sfu`](../../pkg/media/webrtc/sfu),信令走
-WebSocket([`pkg/ws`](../../pkg/ws))。
+WebSocket([`pkg/transport/ws`](../../pkg/transport/ws))。
 
 ```
 浏览器A ─┐  WS 信令(offer/answer/candidate)   ┌─ 服务端 sfu.Room
@@ -42,7 +42,7 @@ go run ./examples/webrtc-voice-room
 
 **策略(本示例)**:
 
-- **信令承载**:这里用 `pkg/ws`;换成别的传输只要实现「收到消息 → `HandleSignal`,
+- **信令承载**:这里用 `pkg/transport/ws`;换成别的传输只要实现「收到消息 → `HandleSignal`,
   `Room` 回调 `send` → 发出去」即可。
 - **房间划分**:demo 是单一全局房间;多房间按 `?room=` 各建一个 `sfu.Room` 路由。
 - **参会者 id / 鉴权**:demo 用 URL 里的随机 id;正式场景应由鉴权签发稳定 id。

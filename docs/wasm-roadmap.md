@@ -13,7 +13,7 @@
 - 受控 host functions(日志、KV、读取请求元数据…),能力按需授权;
 - 内存上限(`WithMemoryLimitPages`)+ 执行超时/中断(`WithTimeout` + `CloseOnContextDone`)+ 默认关闭 WASI 的文件与网络;
 - 高层封装:**HTTP 中间件即 wasm 模块**——请求元数据 → wasm `handle` → 决策(放行/拒绝/改写请求头/状态码);
-- `pkg/handler.WithMiddleware` 通用口,声明式绑定 wasm(核心零 contrib 依赖)。
+- `pkg/api/handler.WithMiddleware` 通用口,声明式绑定 wasm(核心零 contrib 依赖)。
 
 已补打磨:实例池(`WithPool`)+预热(`WithWarm`/`Pool.Warm`)、磁盘编译缓存(`WithCacheDir`)、
 内置 host functions(`WithLog`/`WithClock`)、可观测(`WithObserver`/`WithHandlerObserver`)、
@@ -35,7 +35,7 @@
 
 ## Tier 3 —— 策略即 wasm · 已落地(`contrib/wasmopa`)
 
-OPA 把 Rego 编译成 wasm,在 wazero 沙箱里执行,实现 `pkg/authz.Enforcer`:
+OPA 把 Rego 编译成 wasm,在 wazero 沙箱里执行,实现 `pkg/api/authz.Enforcer`:
 
     opa build -t wasm -e 'authz/allow' policy.rego → policy.wasm
     → wasmopa.New(wasmBytes) → authz.Enforcer

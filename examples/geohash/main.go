@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/geohash"
+	"github.com/rushteam/beauty/pkg/game/geohash"
 )
 
 func main() {

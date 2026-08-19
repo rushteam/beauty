@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/scheduler"
+	"github.com/rushteam/beauty/pkg/orchestration/scheduler"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

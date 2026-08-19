@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/hls"
 	"github.com/rushteam/beauty/pkg/media"
+	"github.com/rushteam/beauty/pkg/media/hls"
 )
 
 func newStreamHub() *media.Hub[*hls.Stream] {

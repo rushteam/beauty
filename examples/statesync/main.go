@@ -19,14 +19,14 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/gameloop"
-	"github.com/rushteam/beauty/pkg/inputclock"
-	"github.com/rushteam/beauty/pkg/lagcomp"
-	"github.com/rushteam/beauty/pkg/replicate"
+	"github.com/rushteam/beauty/pkg/game/gameloop"
+	"github.com/rushteam/beauty/pkg/game/inputclock"
+	"github.com/rushteam/beauty/pkg/game/lagcomp"
+	"github.com/rushteam/beauty/pkg/game/replicate"
+	"github.com/rushteam/beauty/pkg/game/snapbuf"
+	"github.com/rushteam/beauty/pkg/game/spatial"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/snapbuf"
-	"github.com/rushteam/beauty/pkg/spatial"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 const (

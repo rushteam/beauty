@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rushteam/beauty/pkg/ctxkey"
-	"github.com/rushteam/beauty/pkg/metadata"
+	"github.com/rushteam/beauty/pkg/api/metadata"
+	"github.com/rushteam/beauty/pkg/foundation/ctxkey"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcmd "google.golang.org/grpc/metadata"

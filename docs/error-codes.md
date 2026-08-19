@@ -1,6 +1,6 @@
 # 结构化错误码
 
-`pkg/errors` 提供三层统一的错误体系：
+`pkg/api/errors` 提供三层统一的错误体系：
 
 ```
 业务 Code（如 10404）
@@ -17,7 +17,7 @@ handler 只需返回 `*errors.Status`，recovery 中间件和拦截器自动完�
 ## 快速上手
 
 ```go
-import apperrors "github.com/rushteam/beauty/pkg/errors"
+import apperrors "github.com/rushteam/beauty/pkg/api/errors"
 
 // gRPC handler
 func (s *UserSvc) GetUser(ctx context.Context, req *pb.GetUserReq) (*pb.User, error) {
@@ -60,7 +60,7 @@ Content-Type: application/json
 
 ```go
 import (
-    apperrors "github.com/rushteam/beauty/pkg/errors"
+    apperrors "github.com/rushteam/beauty/pkg/api/errors"
     "github.com/rushteam/beauty/pkg/service/grpcserver"
 )
 
@@ -80,7 +80,7 @@ beauty.WithGrpcServer(":9090", register,
 
 ```go
 import (
-    apperrors "github.com/rushteam/beauty/pkg/errors"
+    apperrors "github.com/rushteam/beauty/pkg/api/errors"
     "github.com/rushteam/beauty/pkg/middleware/recovery"
 )
 
@@ -142,7 +142,7 @@ func MyHandler(w http.ResponseWriter, r *http.Request) {
 // internal/errors/codes.go
 package errors
 
-import apperrors "github.com/rushteam/beauty/pkg/errors"
+import apperrors "github.com/rushteam/beauty/pkg/api/errors"
 
 const (
     ErrUserNotFound  = apperrors.Code(10404)

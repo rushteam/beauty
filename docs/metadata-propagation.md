@@ -4,7 +4,7 @@ Beauty 的上下文透传分两层，各司其职：
 
 | 层 | 包 | 传什么 | 协议 |
 |----|-----|--------|------|
-| **业务 metadata** | `pkg/metadata` | tenant-id、caller、env 等自定义字段 | 任意 `x-` 前缀 header |
+| **业务 metadata** | `pkg/api/metadata` | tenant-id、caller、env 等自定义字段 | 任意 `x-` 前缀 header |
 | **OTel trace context** | `pkg/service/telemetry` | traceparent、tracestate、baggage | W3C TraceContext（默认）/ B3 |
 
 两层独立运作，互不干扰，但都通过同一个 context 链路传递。
@@ -16,7 +16,7 @@ Beauty 的上下文透传分两层，各司其职：
 ### 核心 API
 
 ```go
-import "github.com/rushteam/beauty/pkg/metadata"
+import "github.com/rushteam/beauty/pkg/api/metadata"
 
 // 写入 context
 md := metadata.New()
@@ -46,7 +46,7 @@ custom   := md.Get("x-feature-flag")        // "v2"
 ### HTTP 服务端接入
 
 ```go
-import "github.com/rushteam/beauty/pkg/metadata/propagation"
+import "github.com/rushteam/beauty/pkg/api/metadata/propagation"
 
 // 挂载中间件：从入站 Header 提取 MD → 注入 ctx → 透传字段回写响应 Header
 webserver.WithMiddleware(propagation.HTTPServerMiddleware)
@@ -80,7 +80,7 @@ client.OnBeforeRequest(func(c *resty.Client, r *resty.Request) error {
 **gRPC 客户端（自动透传，推荐）：**
 
 ```go
-import "github.com/rushteam/beauty/pkg/metadata/propagation"
+import "github.com/rushteam/beauty/pkg/api/metadata/propagation"
 
 // 注册客户端拦截器，之后所有调用自动透传
 conn, err := grpc.NewClient(addr,
@@ -117,7 +117,7 @@ Beauty 服务端（HTTP/gRPC）已接入 `otelhttp` / `otelgrpc`，它们负责�
 - 从入站请求提取 trace context 并恢复 span
 - 为出站响应注入 trace context
 
-异步 MQ 用 [`contrib/kafka`](../contrib/kafka) 内置 kotel（Kafka），或 opt-in 的 [`pkg/mq/otelmq`](../pkg/mq/otelmq)（InProc/NATS 等）。详见下方「MQ 异步链路」。
+异步 MQ 用 [`contrib/kafka`](../contrib/kafka) 内置 kotel（Kafka），或 opt-in 的 [`pkg/messaging/mq/otelmq`](../pkg/messaging/mq/otelmq)（InProc/NATS 等）。详见下方「MQ 异步链路」。
 
 这依赖全局 `TextMapPropagator` 的正确配置。**只要调用了 `beauty.WithTrace()`，W3C TraceContext + Baggage 就会自动启用**，无需额外操作。
 
@@ -217,16 +217,16 @@ pub, _ := kafka.NewPublisher(brokers) // 默认 WithHooks(kotel)
 sub := kafka.NewSubscriber(brokers)
 ```
 
-**InProc / NATS 等**——用 opt-in 的 [`pkg/mq/otelmq`](../pkg/mq/otelmq)：
+**InProc / NATS 等**——用 opt-in 的 [`pkg/messaging/mq/otelmq`](../pkg/messaging/mq/otelmq)：
 
 ```go
-import "github.com/rushteam/beauty/pkg/mq/otelmq"
+import "github.com/rushteam/beauty/pkg/messaging/mq/otelmq"
 
 pub := otelmq.Publisher(natsPub)
 h := mq.Chain(business, otelmq.Trace("order"), mq.Recover())
 ```
 
-- `otelmq` 放在子包：保持 `pkg/mq` 零外部依赖；基于 `Message.Headers`，与 broker 无关。
+- `otelmq` 放在子包：保持 `pkg/messaging/mq` 零外部依赖；基于 `Message.Headers`，与 broker 无关。
 - Kafka 已用 kotel 时不要再套 `otelmq`，避免双重 Inject。
 
 ### 传播协议选型建议
@@ -239,7 +239,7 @@ h := mq.Chain(business, otelmq.Trace("order"), mq.Recover())
 | 与 AWS X-Ray 集成 | 追加 `go.opentelemetry.io/contrib/propagators/aws/xray` |
 | 多系统混合 | `WithTracePropagator` 可追加多个，按顺序尝试提取 |
 | Kafka 异步跨服务 | `contrib/kafka` 内置 kotel（默认开） |
-| 非 Kafka MQ | `pkg/mq/otelmq` |
+| 非 Kafka MQ | `pkg/messaging/mq/otelmq` |
 
 ---
 
@@ -250,7 +250,7 @@ package main
 
 import (
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/metadata/propagation"
+    "github.com/rushteam/beauty/pkg/api/metadata/propagation"
     "github.com/rushteam/beauty/pkg/service/telemetry"
     "github.com/rushteam/beauty/pkg/service/grpcserver"
     "github.com/rushteam/beauty/pkg/service/webserver"

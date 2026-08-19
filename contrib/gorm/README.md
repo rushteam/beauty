@@ -50,4 +50,4 @@ db, _ := bgorm.OpenWith(postgres.Open(dsn), nil, bgorm.Config{})
 ## 边界
 
 建模、迁移、仓储模式、事务编排都在使用方——本模块只负责把 GORM 接好。要 Outbox(可靠"改库+
-发消息")可配合 `pkg/mq`,自行在同一事务里写 outbox 表。
+发消息")可配合 `pkg/messaging/mq`,自行在同一事务里写 outbox 表。

@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/idempotency"
+	"github.com/rushteam/beauty/pkg/store/idempotency"
 )
 
 func main() {

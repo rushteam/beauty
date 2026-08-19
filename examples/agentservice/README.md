@@ -57,7 +57,7 @@ curl -N 'localhost:8080/stream?session=s2&q=删除系统文件etc'
 - **工具循环 + 人工审批** — `contrib/llm/agent`(`Runner` + `Tool.Approval` + `Runner.Approve`)
 - **Agent Skills** — `contrib/llm/agent/skills`(`skills/greeter/SKILL.md`)
 - **会话记忆 + 滚动摘要** — `contrib/llm/agent/session`(`Manager` + `MemoryStore` + `Summarizer`)
-- **HTTP / SSE / 生命周期** — beauty 核心(`WithWebServer`、`pkg/sse`)
+- **HTTP / SSE / 生命周期** — beauty 核心(`WithWebServer`、`pkg/transport/sse`)
 
 > 远程 MCP 工具可用 `contrib/mcpagent` 桥接进同一个 `Runner.Tools`,本示例未纳入以避免多模块依赖;
 > 其端到端用法见 `contrib/mcpagent`。

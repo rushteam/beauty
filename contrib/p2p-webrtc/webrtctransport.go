@@ -28,7 +28,7 @@ import (
 	"sync"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/rushteam/beauty/pkg/p2p"
+	"github.com/rushteam/beauty/pkg/transport/p2p"
 )
 
 const (

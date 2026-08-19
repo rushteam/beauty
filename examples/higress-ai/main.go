@@ -29,7 +29,7 @@ import (
 	"github.com/rushteam/beauty/contrib/llm/openai"
 	"github.com/rushteam/beauty/contrib/mcp"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/sse"
+	"github.com/rushteam/beauty/pkg/transport/sse"
 )
 
 func main() {

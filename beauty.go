@@ -7,12 +7,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rushteam/beauty/pkg/foundation/signals"
+	"github.com/rushteam/beauty/pkg/foundation/xgo"
 	"github.com/rushteam/beauty/pkg/service/core"
 	"github.com/rushteam/beauty/pkg/service/discover"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/service/telemetry"
-	"github.com/rushteam/beauty/pkg/signals"
-	"github.com/rushteam/beauty/pkg/xgo"
 )
 
 var (

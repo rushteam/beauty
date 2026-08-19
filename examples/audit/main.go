@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/audit"
+	"github.com/rushteam/beauty/pkg/api/audit"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

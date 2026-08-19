@@ -4,7 +4,7 @@ Beauty context propagation operates at two independent layers:
 
 | Layer | Package | What it carries | Protocol |
 |----|-----|--------|------|
-| **Business metadata** | `pkg/metadata` | Custom fields such as tenant-id, caller, env | Any `x-` prefixed header |
+| **Business metadata** | `pkg/api/metadata` | Custom fields such as tenant-id, caller, env | Any `x-` prefixed header |
 | **OTel trace context** | `pkg/service/telemetry` | traceparent, tracestate, baggage | W3C TraceContext (default) / B3 |
 
 Both layers operate independently without interfering with each other, but both propagate through the same context chain.
@@ -16,7 +16,7 @@ Both layers operate independently without interfering with each other, but both 
 ### Core API
 
 ```go
-import "github.com/rushteam/beauty/pkg/metadata"
+import "github.com/rushteam/beauty/pkg/api/metadata"
 
 // Write to context
 md := metadata.New()
@@ -46,7 +46,7 @@ Predefined keys:
 ### HTTP Server Integration
 
 ```go
-import "github.com/rushteam/beauty/pkg/metadata/propagation"
+import "github.com/rushteam/beauty/pkg/api/metadata/propagation"
 
 // Mount middleware: extract MD from inbound headers → inject into ctx → echo propagated fields in response headers
 webserver.WithMiddleware(propagation.HTTPServerMiddleware)
@@ -80,7 +80,7 @@ client.OnBeforeRequest(func(c *resty.Client, r *resty.Request) error {
 **gRPC client (automatic propagation, recommended):**
 
 ```go
-import "github.com/rushteam/beauty/pkg/metadata/propagation"
+import "github.com/rushteam/beauty/pkg/api/metadata/propagation"
 
 // Register client interceptors; all subsequent calls propagate automatically
 conn, err := grpc.NewClient(addr,
@@ -117,7 +117,7 @@ Beauty servers (HTTP/gRPC) integrate `otelhttp` / `otelgrpc`, which:
 - Extract trace context from inbound requests and restore spans
 - Inject trace context into outbound responses
 
-Async MQ uses [`contrib/kafka`](../contrib/kafka) with built-in kotel (Kafka), or opt-in [`pkg/mq/otelmq`](../pkg/mq/otelmq) (InProc/NATS, etc.). See "MQ Async Tracing" below for details.
+Async MQ uses [`contrib/kafka`](../contrib/kafka) with built-in kotel (Kafka), or opt-in [`pkg/messaging/mq/otelmq`](../pkg/messaging/mq/otelmq) (InProc/NATS, etc.). See "MQ Async Tracing" below for details.
 
 This depends on correct configuration of the global `TextMapPropagator`. **As long as you call `beauty.WithTrace()`, W3C TraceContext + Baggage are enabled automatically**—no extra setup required.
 
@@ -217,16 +217,16 @@ pub, _ := kafka.NewPublisher(brokers) // default WithHooks(kotel)
 sub := kafka.NewSubscriber(brokers)
 ```
 
-**InProc / NATS, etc.** — use opt-in [`pkg/mq/otelmq`](../pkg/mq/otelmq):
+**InProc / NATS, etc.** — use opt-in [`pkg/messaging/mq/otelmq`](../pkg/messaging/mq/otelmq):
 
 ```go
-import "github.com/rushteam/beauty/pkg/mq/otelmq"
+import "github.com/rushteam/beauty/pkg/messaging/mq/otelmq"
 
 pub := otelmq.Publisher(natsPub)
 h := mq.Chain(business, otelmq.Trace("order"), mq.Recover())
 ```
 
-- `otelmq` lives in a subpackage to keep `pkg/mq` free of external dependencies; it is based on `Message.Headers` and is broker-agnostic.
+- `otelmq` lives in a subpackage to keep `pkg/messaging/mq` free of external dependencies; it is based on `Message.Headers` and is broker-agnostic.
 - Do not wrap Kafka with `otelmq` when kotel is already in use—avoid double injection.
 
 ### Propagation Protocol Selection
@@ -239,7 +239,7 @@ h := mq.Chain(business, otelmq.Trace("order"), mq.Recover())
 | AWS X-Ray integration | Add `go.opentelemetry.io/contrib/propagators/aws/xray` |
 | Mixed multi-system environment | `WithTracePropagator` can add multiple propagators; extraction is tried in order |
 | Kafka async cross-service | `contrib/kafka` built-in kotel (enabled by default) |
-| Non-Kafka MQ | `pkg/mq/otelmq` |
+| Non-Kafka MQ | `pkg/messaging/mq/otelmq` |
 
 ---
 
@@ -250,7 +250,7 @@ package main
 
 import (
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/metadata/propagation"
+    "github.com/rushteam/beauty/pkg/api/metadata/propagation"
     "github.com/rushteam/beauty/pkg/service/telemetry"
     "github.com/rushteam/beauty/pkg/service/grpcserver"
     "github.com/rushteam/beauty/pkg/service/webserver"

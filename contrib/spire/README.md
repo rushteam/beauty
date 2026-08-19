@@ -2,7 +2,7 @@
 
 用 [SPIRE](https://spiffe.io/docs/latest/spire-about/) Workload API 给 beauty 服务发
 [X509-SVID](https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md),做服务间
-**mTLS**,并把对端 SPIFFE ID 接到 `pkg/middleware/auth` / `pkg/authz`。
+**mTLS**,并把对端 SPIFFE ID 接到 `pkg/middleware/auth` / `pkg/api/authz`。
 
 ```bash
 go get github.com/rushteam/beauty/contrib/spire@latest

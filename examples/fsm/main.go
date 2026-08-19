@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/fsm"
+	"github.com/rushteam/beauty/pkg/foundation/fsm"
 )
 
 type State string

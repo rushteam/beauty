@@ -26,7 +26,7 @@ import (
 	"github.com/rushteam/beauty/pkg/media/webrtc"
 	"github.com/rushteam/beauty/pkg/media/webrtc/sfu"
 	"github.com/rushteam/beauty/pkg/service/webserver"
-	"github.com/rushteam/beauty/pkg/ws"
+	"github.com/rushteam/beauty/pkg/transport/ws"
 )
 
 func main() {

@@ -14,3 +14,5 @@ require golang.org/x/sys v0.44.0 // indirect
 
 // 本地联调:胶水模块同时依赖 wasm(Tier1 运行时)与 llm/agent/skills(执行器注入口)。
 // 发布前请去掉 replace,并把 require 指向已发布的 tag。
+
+replace github.com/rushteam/beauty => ../../

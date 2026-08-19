@@ -9,11 +9,11 @@
 ## 结构
 
 ```
-pkg/gameloop/gameloop.go   机制原语 gameloop.Room —— 只依赖 pkg/stream,零框架耦合
-examples/gameloop/main.go  lockstep demo:pkg/ws 接连接 + 3 个进程内 bot 自校验
+pkg/game/gameloop/gameloop.go   机制原语 gameloop.Room —— 只依赖 pkg/messaging/stream,零框架耦合
+examples/gameloop/main.go  lockstep demo:pkg/transport/ws 接连接 + 3 个进程内 bot 自校验
 ```
 
-`pkg/gameloop.Room[In, Out]` 只做四件事:
+`pkg/game/gameloop.Room[In, Out]` 只做四件事:
 
 - **定步长 tick**:按固定频率推进逻辑帧(lockstep 命脉是「所有端帧率一致」);
 - **输入聚合**:并发 `Push` 收集输入,每帧原子取走「上一帧以来的全部输入」;
@@ -28,7 +28,7 @@ gameloop.HandlerFunc[Cmd, Frame](func(frame uint64, inputs []gameloop.PlayerInpu
     return []Frame{{Frame: frame, Inputs: inputs}}
 })
 
-// 状态同步(另一种写法):在这里跑服务器权威模拟,用 pkg/spatial 做 AOI,产出快照/增量
+// 状态同步(另一种写法):在这里跑服务器权威模拟,用 pkg/game/spatial 做 AOI,产出快照/增量
 ```
 
 ## 运行
@@ -53,14 +53,14 @@ go run ./examples/gameloop
 逻辑的确定性,是**你的**责任,不在框架内,本示例也刻意不去验证。
 
 > 想看**状态同步**版(同一个 `Room`,换 `OnTick` 下发"状态"而非"输入",并用
-> `pkg/spatial` 做 AOI 视野过滤):见 [`examples/statesync`](../statesync)。
+> `pkg/game/spatial` 做 AOI 视野过滤):见 [`examples/statesync`](../statesync)。
 
 ## 复用到的 beauty 原语
 
 | 原语 | 作用 |
 |---|---|
-| `pkg/stream.Broadcaster` | 每帧下发扇出给 N 个连接,慢客户端丢帧不拖垮循环 |
-| `pkg/ws` | WebSocket 连接:读循环 `Push` 输入、写循环写回每帧 |
+| `pkg/messaging/stream.Broadcaster` | 每帧下发扇出给 N 个连接,慢客户端丢帧不拖垮循环 |
+| `pkg/transport/ws` | WebSocket 连接:读循环 `Push` 输入、写循环写回每帧 |
 | `beauty.WithService` | 把房间挂进 app 生命周期(和 cron 同构) |
 
 > 生产化提示:高频动作类受 WebSocket(TCP)队头阻塞限制,需要 UDP/KCP;下发建议

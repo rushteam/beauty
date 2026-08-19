@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	apperrors "github.com/rushteam/beauty/pkg/errors"
+	apperrors "github.com/rushteam/beauty/pkg/api/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

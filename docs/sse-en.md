@@ -1,12 +1,12 @@
-# Server-Sent Events (pkg/sse)
+# Server-Sent Events (pkg/transport/sse)
 
-`pkg/sse` wraps the common pitfalls of SSE (server push) in Go: it sets streaming response headers automatically,
+`pkg/transport/sse` wraps the common pitfalls of SSE (server push) in Go: it sets streaming response headers automatically,
 avoids write-timeout cutoffs, flushes each event (piercing otelhttp / compress wrapper chains), and ends cleanly when the client disconnects.
 
 ## Quick Start
 
 ```go
-import "github.com/rushteam/beauty/pkg/sse"
+import "github.com/rushteam/beauty/pkg/transport/sse"
 
 mux := http.NewServeMux()
 mux.Handle("/events", sse.Handler(func(r *http.Request, sink sse.Sink) error {

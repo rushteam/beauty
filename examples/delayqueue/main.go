@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/delayqueue"
+	"github.com/rushteam/beauty/pkg/orchestration/delayqueue"
 )
 
 func main() {

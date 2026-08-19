@@ -1,6 +1,6 @@
 # Structured Error Codes
 
-`pkg/errors` provides a unified three-layer error system:
+`pkg/api/errors` provides a unified three-layer error system:
 
 ```
 Business Code (e.g. 10404)
@@ -17,7 +17,7 @@ Handlers only need to return `*errors.Status`; the recovery middleware and inter
 ## Quick Start
 
 ```go
-import apperrors "github.com/rushteam/beauty/pkg/errors"
+import apperrors "github.com/rushteam/beauty/pkg/api/errors"
 
 // gRPC handler
 func (s *UserSvc) GetUser(ctx context.Context, req *pb.GetUserReq) (*pb.User, error) {
@@ -60,7 +60,7 @@ To explicitly mount the gRPC error conversion interceptor (without going through
 
 ```go
 import (
-    apperrors "github.com/rushteam/beauty/pkg/errors"
+    apperrors "github.com/rushteam/beauty/pkg/api/errors"
     "github.com/rushteam/beauty/pkg/service/grpcserver"
 )
 
@@ -80,7 +80,7 @@ beauty.WithGrpcServer(":9090", register,
 
 ```go
 import (
-    apperrors "github.com/rushteam/beauty/pkg/errors"
+    apperrors "github.com/rushteam/beauty/pkg/api/errors"
     "github.com/rushteam/beauty/pkg/middleware/recovery"
 )
 
@@ -142,7 +142,7 @@ Business modules register codes in their own `init()`; the framework reserves 1â
 // internal/errors/codes.go
 package errors
 
-import apperrors "github.com/rushteam/beauty/pkg/errors"
+import apperrors "github.com/rushteam/beauty/pkg/api/errors"
 
 const (
     ErrUserNotFound  = apperrors.Code(10404)

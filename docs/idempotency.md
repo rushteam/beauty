@@ -1,4 +1,4 @@
-# 幂等原语 (pkg/idempotency)
+# 幂等原语 (pkg/store/idempotency)
 
 同一 **幂等键** 的重复请求只应产生一次副作用;网络重试、消息重投、客户端双点都需要这层保护。
 
@@ -39,5 +39,5 @@ return guard.Commit(result)
 ## 选型
 
 - 「同 key 只执行一次并复用结果」→ `Do` 或 `Acquire/Commit`
-- 「同 key 串行但每次都要跑」→ `pkg/keyedmutex`
-- 「窗口内次数配额」→ `pkg/counter` / `ratelimit`
+- 「同 key 串行但每次都要跑」→ `pkg/foundation/keyedmutex`
+- 「窗口内次数配额」→ `pkg/resilience/counter` / `ratelimit`

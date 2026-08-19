@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/matchmaker"
+	"github.com/rushteam/beauty/pkg/game/matchmaker"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

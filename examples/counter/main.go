@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/counter"
+	"github.com/rushteam/beauty/pkg/resilience/counter"
 )
 
 func main() {

@@ -15,7 +15,7 @@ import (
 
 	fga "github.com/openfga/go-sdk/client"
 
-	"github.com/rushteam/beauty/pkg/authz"
+	"github.com/rushteam/beauty/pkg/api/authz"
 )
 
 // Mapper 把授权请求映射成 OpenFGA 的 (user, relation, object) 关系元组。

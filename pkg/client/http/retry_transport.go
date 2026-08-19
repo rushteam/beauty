@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/backoff"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 )
 
 // RetryableFunc 判断一次结果是否值得重试。resp 在网络错误时为 nil。

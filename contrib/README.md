@@ -10,7 +10,7 @@ beauty 核心(`github.com/rushteam/beauty`)只保留轻量、通用的机制与�
 放进 contrib 独立模块,于是:
 
 - **不用就零负担**:不 import 就不进你的依赖图——核心 `go.mod` 不会因为 gorm/ES 而变重。
-- **可自己实现**:contrib 尽量面向核心的接口/约定编写(如 `pkg/mq` 的 `Publisher`、slog、
+- **可自己实现**:contrib 尽量面向核心的接口/约定编写(如 `pkg/messaging/mq` 的 `Publisher`、slog、
   OTel 全局 Provider),你完全可以照着自写一份、不用官方 contrib。
 - **可钉不同版本**:各 contrib 独立打 tag、独立 `go get`,你能按需锁定版本,和核心解耦升级。
 
@@ -44,11 +44,11 @@ cd contrib/gorm && go test ./...
 | [`contrib/codec/kratos`](codec/kratos) | Kratos 注册中心格式编解码:KV key `/microservices/{name}/{id}`, value JSON endpoints | 无(纯 beauty core) |
 | [`contrib/gorm`](gorm) | GORM 集成:读写分离(dbresolver)、otelgorm 链路、slog 日志桥、错误映射 | gorm.io/gorm、driver/mysql、otelgorm |
 | [`contrib/sqldb`](sqldb) | database/sql 读写分离 + OTel(otelsql),配合 **sqlc**/sqlx/手写 SQL | XSAM/otelsql |
-| [`contrib/nats`](nats) | `pkg/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
-| [`contrib/natsjs`](natsjs) | `pkg/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
-| [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
-| [`contrib/rabbitmq`](rabbitmq) | `pkg/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
-| [`contrib/redisstream`](redisstream) | `pkg/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
+| [`contrib/nats`](nats) | `pkg/messaging/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
+| [`contrib/natsjs`](natsjs) | `pkg/messaging/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |
+| [`contrib/kafka`](kafka) | `pkg/messaging/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
+| [`contrib/rabbitmq`](rabbitmq) | `pkg/messaging/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
+| [`contrib/redisstream`](redisstream) | `pkg/messaging/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
 | [`contrib/ginadapt`](ginadapt) | Gin ↔ beauty HTTP 中间件适配:标准 `func(http.Handler) http.Handler` 转 `gin.HandlerFunc` | gin-gonic/gin |
 | [`contrib/graphql`](graphql) | GraphQL/BFF 层:gqlgen schema-first 封装为 beauty.Service + DataLoader + 复杂度限制 + APQ + 认证透传 + Federation + Subscription(WS/SSE) | 99designs/gqlgen |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
@@ -56,7 +56,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |
 | [`contrib/llmcheckpoint`](llmcheckpoint) | `llm/agent` RunStore / CheckpointStore 的 SQLite / Redis 持久化 | llm + modernc.org/sqlite、go-redis |
 | [`contrib/llmservice`](llmservice) | 胶水:把 llm/agent 包装为 beauty.Service;worker 池 + SSE HTTP + MQ 消费 + 分布式锁/亲和路由 | llm + beauty core |
-| [`contrib/agones`](agones) | Agones GameServer 生命周期 × `pkg/gameroom`(Ready/Drain/Shutdown + WatchContext) | agones.dev/agones |
+| [`contrib/agones`](agones) | Agones GameServer 生命周期 × `pkg/game/gameroom`(Ready/Drain/Shutdown + WatchContext) | agones.dev/agones |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 | [`contrib/memoryvector`](memoryvector) | 胶水:Embedder + vector → `llm/agent/memory.Store`(语义长期记忆) | llm + vector |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |
@@ -64,19 +64,19 @@ cd contrib/gorm && go test ./...
 | [`contrib/wasm`](wasm) | WebAssembly 插件运行时(wazero):沙箱化 wasm 模块 + host functions + "HTTP 中间件即 wasm" | tetratelabs/wazero |
 | [`contrib/proxywasm`](proxywasm) | Proxy-Wasm ABI v0.2.1 兼容:Higress/Envoy 生态 WASM 插件无需修改即可作为 Beauty HTTP 中间件运行;HTTP Filter 子集(header/body/log/properties/send_local_response) | tetratelabs/wazero |
 | [`contrib/wasmagent`](wasmagent) | 胶水:把 `wasm` 的沙箱执行能力接到 `llm/agent`(技能脚本 wasm 执行 + wasm 模块即 agent.Tool) | wasm + llm |
-| [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
-| [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
-| [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
+| [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/api/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
+| [`contrib/casbin`](casbin) | `pkg/api/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
+| [`contrib/openfga`](openfga) | `pkg/api/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
 | [`contrib/otelllm`](otelllm) | LLM AI 可观测性:OTel Trace/Metrics 装饰器(GenAI 语义约定)+ Agent run-tree Hooks + 增强版 Metered(含错误上报),可导出到 Jaeger/Tempo/Langfuse/LangSmith | otel/otel-sdk |
-| [`contrib/p2p-webrtc`](p2p-webrtc) | `pkg/p2p` 的 WebRTC DataChannel 传输:NAT 穿透(STUN/TURN) + 浏览器兼容;需信令服务配合 | pion/webrtc |
+| [`contrib/p2p-webrtc`](p2p-webrtc) | `pkg/transport/p2p` 的 WebRTC DataChannel 传输:NAT 穿透(STUN/TURN) + 浏览器兼容;需信令服务配合 | pion/webrtc |
 | [`contrib/spire`](spire) | SPIFFE/SPIRE Workload API:X509-SVID mTLS + SPIFFE ID→auth/authz | go-spiffe/v2 |
 
 `contrib/connectrpc` 和 `contrib/kitex` 实现核心 `beauty.Service` 和 `discover.Service` 接口,
 分别将 Connect 协议和 Kitex Thrift 协议作为与 `grpcserver` 对等的一等公民服务类型(依赖核心)。
 `contrib/codec/kitex` 与 `contrib/codec/gozero`、`contrib/codec/kratos` 同级,提供 Kitex 注册
 格式编解码,实现跨框架服务互通。
-`contrib/nats`、`contrib/natsjs`、`contrib/kafka`、`contrib/rabbitmq`、`contrib/redisstream` 实现核心 `pkg/mq` 的 `Publisher`/`Subscriber`
-接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/authz.Enforcer` 接口——这些都 `require
+`contrib/nats`、`contrib/natsjs`、`contrib/kafka`、`contrib/rabbitmq`、`contrib/redisstream` 实现核心 `pkg/messaging/mq` 的 `Publisher`/`Subscriber`
+接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/api/authz.Enforcer` 接口——这些都 `require
 github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/spire` 对接核心 auth/authz 与
 TLS 钩子(本地联调暂用 `replace`,发布前去掉);`contrib/gorm`、`contrib/sqldb`、
 `contrib/elasticsearch`、`contrib/llm`、`contrib/vector`、`contrib/mcp` 不依赖核心,可完全独立使用

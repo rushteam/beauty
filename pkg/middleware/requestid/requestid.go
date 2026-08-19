@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/rushteam/beauty/pkg/ctxkey"
+	"github.com/rushteam/beauty/pkg/foundation/ctxkey"
 	"github.com/rushteam/beauty/pkg/utils/uuid"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"

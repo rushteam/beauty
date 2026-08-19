@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/rushteam/beauty/pkg/authz"
+	"github.com/rushteam/beauty/pkg/api/authz"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/spiffe/go-spiffe/v2/spiffegrpc/grpccredentials"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 const (

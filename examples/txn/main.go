@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/rushteam/beauty/pkg/txn"
+	"github.com/rushteam/beauty/pkg/orchestration/txn"
 )
 
 // --- 内存 staging:任意 map 的快照-提交模式 ---

@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/webserver"
+	"github.com/rushteam/beauty/pkg/store/loadbalance"
 )
 
 // backend 模拟一个后端节点。

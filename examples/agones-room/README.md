@@ -57,8 +57,8 @@ spec:
 
 | 包 | 作用 |
 |---|---|
-| `pkg/gameroom` | 房间 FSM(Waiting→Running→Draining) |
-| `pkg/gameloop` | 定步 tick + 输入扇出 |
+| `pkg/game/gameroom` | 房间 FSM(Waiting→Running→Draining) |
+| `pkg/game/gameloop` | 定步 tick + 输入扇出 |
 | `contrib/agones` | Ready/Health/Shutdown + WatchContext |
 
 增量同步见 [`statesync`](../statesync)、[`statesync-quic`](../statesync-quic);匹配分配见 [`matchmaker-room`](../matchmaker-room)。Agones 模块说明见 [`contrib/agones/README.md`](../../contrib/agones/README.md)。

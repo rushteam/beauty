@@ -21,3 +21,5 @@ require (
 
 // 本地联调:桥接同时用到 llm(含未发版的 llm/agent 与工具调用)与 mcp。
 // 发布前请去掉 replace,并把 require 指向已发布的 tag。
+
+replace github.com/rushteam/beauty => ../../

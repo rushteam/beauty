@@ -7,7 +7,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 // 消息映射:mq.Message ↔ kgo.Record 往返无损(Topic/Key/Body/Headers)。

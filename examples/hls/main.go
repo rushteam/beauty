@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/hls"
+	"github.com/rushteam/beauty/pkg/media/hls"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

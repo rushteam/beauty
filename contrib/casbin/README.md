@@ -1,6 +1,6 @@
-# contrib/casbin —— pkg/authz 的 Casbin 引擎(独立模块)
+# contrib/casbin —— pkg/api/authz 的 Casbin 引擎(独立模块)
 
-用 [Casbin](https://casbin.org) 实现 `pkg/authz.Enforcer`:RBAC(角色继承/域)、ABAC、策略文件 / DB
+用 [Casbin](https://casbin.org) 实现 `pkg/api/authz.Enforcer`:RBAC(角色继承/域)、ABAC、策略文件 / DB
 adapter 等 Casbin 全部模型能力。应用面向 `authz.Enforcer` 编程,可在内置 RBAC 与 Casbin 间无缝替换。
 
 ```bash
@@ -13,7 +13,7 @@ go get github.com/rushteam/beauty/contrib/casbin@latest
 import (
     casbinlib "github.com/casbin/casbin/v2"
     casbinx "github.com/rushteam/beauty/contrib/casbin"
-    "github.com/rushteam/beauty/pkg/authz"
+    "github.com/rushteam/beauty/pkg/api/authz"
 )
 
 e, _ := casbinlib.NewEnforcer("model.conf", "policy.csv") // 或自建 model/adapter

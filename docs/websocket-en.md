@@ -1,13 +1,13 @@
-# WebSocket (pkg/ws)
+# WebSocket (pkg/transport/ws)
 
-`pkg/ws` provides a lightweight wrapper around [`github.com/coder/websocket`](https://github.com/coder/websocket):
+`pkg/transport/ws` provides a lightweight wrapper around [`github.com/coder/websocket`](https://github.com/coder/websocket):
 it handles the upgrade handshake automatically, unifies close semantics, and passes `*http.Request` through to
 application code (so you can read query params, headers, subprotocols, and auth info).
 
 ## Quick Start
 
 ```go
-import "github.com/rushteam/beauty/pkg/ws"
+import "github.com/rushteam/beauty/pkg/transport/ws"
 
 mux := http.NewServeMux()
 mux.Handle("/ws", ws.Handler(func(r *http.Request, c *ws.Conn) error {

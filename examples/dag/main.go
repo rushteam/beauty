@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/dag"
+	"github.com/rushteam/beauty/pkg/foundation/dag"
 )
 
 func step(name string) func(context.Context) error {

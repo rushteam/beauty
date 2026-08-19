@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/contrib/spire"
-	"github.com/rushteam/beauty/pkg/authz"
+	"github.com/rushteam/beauty/pkg/api/authz"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"google.golang.org/grpc"

@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/backoff"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 )
 
 // Supervisor 监督一个子进程(典型:每路流的 ffmpeg 转码进程):非正常退出时按退避

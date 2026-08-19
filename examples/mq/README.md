@@ -1,6 +1,6 @@
 # mq —— 消息队列抽象 + 消费者即 Service
 
-传输无关的发布/订阅抽象([`pkg/mq`](../../pkg/mq)),补齐框架跨服务异步的空白(此前只有
+传输无关的发布/订阅抽象([`pkg/messaging/mq`](../../pkg/messaging/mq)),补齐框架跨服务异步的空白(此前只有
 进程内 `eventbus` 扇出 + `webhook` HTTP 推)。本示例用**零依赖的进程内 broker** 跑通,换真
 broker(NATS/Kafka)只需替换 broker 实现,业务代码不动。
 
@@ -30,6 +30,6 @@ go run ./examples/mq
 
 ## 边界(机制 vs 策略)
 
-- 序列化(`Body` 是 `[]byte`)、trace 透传(用 `Headers` 配 `pkg/metadata`)、分区键、broker 选型都是 policy。
+- 序列化(`Body` 是 `[]byte`)、trace 透传(用 `Headers` 配 `pkg/api/metadata`)、分区键、broker 选型都是 policy。
 - 投递保证由 broker 决定:进程内实现是 at-most-once(handler 出错不重投);要持久化/重投/
   exactly-once 用支持的 broker(如 NATS JetStream)。可靠"改库+发消息"需 Outbox(依赖持久层,暂未做)。

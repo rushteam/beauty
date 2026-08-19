@@ -13,10 +13,10 @@
 - **`contrib/kafka`**:底层从 segmentio/kafka-go 换为 **twmb/franz-go**,默认挂载官方 **kotel**
   OTel(publish/receive/process span + metrics)。`NewPublisher` 现返回 `(*Publisher, error)`;
   原 `WithBalancer`/`WithWriterTimeout` 改为 `WithPartitioner`/`WithProduceTimeout`/
-  `WithClientOpts`。Kafka 场景用内置 kotel,不必再套 `pkg/mq/otelmq`。
+  `WithClientOpts`。Kafka 场景用内置 kotel,不必再套 `pkg/messaging/mq/otelmq`。
 
 ### Added
-- **authz**：新增 `pkg/authz`——授权机制,补齐"只认证不授权"的空白(在 `middleware/auth`/`token`
+- **authz**：新增 `pkg/api/authz`——授权机制,补齐"只认证不授权"的空白(在 `middleware/auth`/`token`
   确认身份+角色之上,判"能否对某资源做某动作")。`Subject`(id/角色/属性,放 context)+ `Enforcer`
   接口(`Authorize(sub,action,resource)`→nil/ErrDenied)+ 内置 **RBAC**(`Grant` + 通配 `*` / `/*`
   前缀,零依赖)+ HTTP 中间件 / gRPC 一元拦截器(无主体→401/Unauthenticated、拒绝→403/PermissionDenied,
@@ -26,12 +26,12 @@
     默认按 Subject 每个角色 Enforce,`WithSubjectID`/`WithMapper` 可调映射。进程内 model+policy 单测,`-race` 通过。
   - **`contrib/openfga`**——用 OpenFGA(Zanzibar 式 ReBAC)实现 `authz.Enforcer`,经 Check API 判定细粒度
     关系权限;默认映射 user/relation/object,`WithMapper` 可调。httptest 打桩单测,`-race` 通过。
-  - casbin/openfga 实现核心 `pkg/authz.Enforcer` 故 `require github.com/rushteam/beauty`(核心 v0.2.0 起含 authz)。
-- **syncx**：新增 `pkg/syncx`——一组便捷的并发原语(泛型,仅依赖 stdlib + `golang.org/x/sync`),补齐
+  - casbin/openfga 实现核心 `pkg/api/authz.Enforcer` 故 `require github.com/rushteam/beauty`(核心 v0.2.0 起含 authz)。
+- **syncx**：新增 `pkg/foundation/syncx`——一组便捷的并发原语(泛型,仅依赖 stdlib + `golang.org/x/sync`),补齐
   常被手搓、易写错的模式:`Map`/`ForEach`(带并发上限 + 错误聚合,首错取消其余)、`SingleFlight`
   (相同 key 去重合并,防缓存击穿)、`Batcher`(按大小/时间 flush 批处理)、`Debounce`/`Throttle`
   (去抖/限频)、`Future`/`Async`(异步跑 + Await 取结果,panic 转错误)。全部 `-race` 单测通过。
-- **buildinfo**：新增 `pkg/buildinfo`——运行时暴露构建信息(版本/commit/构建时间/Go 版本/模块/dirty),
+- **buildinfo**：新增 `pkg/foundation/buildinfo`——运行时暴露构建信息(版本/commit/构建时间/Go 版本/模块/dirty),
   用于 `/version` 端点、启动日志、诊断。零依赖(仅标准库)。两来源自动合并:ldflags 注入的包级变量
   (`-X .../buildinfo.version=...`)优先,缺失项用 `runtime/debug.ReadBuildInfo` 的 VCS 元数据回退。
   `Get()`/`String()`(单行摘要)/`Handler()`(输出 JSON 的 `http.Handler`)。单测覆盖默认/ldflags 覆盖/Handler。
@@ -44,15 +44,15 @@
   `Ping`/`Close`)。`Open`(MySQL DSN)/`OpenWith`(任意 `gorm.Dialector`,支持 Postgres/SQLite/测试)。
   不 import 核心,仅依赖标准库 slog + OTel 全局 Provider,亦可脱离框架单用。sqlite 内存 + 合成错误
   单测覆盖 CRUD/读写句柄/唯一键判定,`-race` 通过。
-  - **`contrib/nats`**——`pkg/mq` 的 NATS broker 绑定,实现 `Publisher`/`Subscriber`:topic→subject、
+  - **`contrib/nats`**——`pkg/messaging/mq` 的 NATS broker 绑定,实现 `Publisher`/`Subscriber`:topic→subject、
     `mq.WithGroup`→NATS queue group(竞争)/ 不设组扇出、Headers 与 Key 透传、订阅随 ctx 退订;
     at-most-once(要持久化用 JetStream)。内嵌 `nats-server` 做真实往返单测(扇出/队列组/退订),`-race` 通过。
-  - **`contrib/kafka`**——`pkg/mq` 的 Kafka broker 绑定(segmentio/kafka-go),实现 `Publisher`/`Subscriber`:
+  - **`contrib/kafka`**——`pkg/messaging/mq` 的 Kafka broker 绑定(segmentio/kafka-go),实现 `Publisher`/`Subscriber`:
     topic/Key/Headers 映射、consumer group=mq group、**at-least-once**(handler 成功后提交 offset);Kafka
     消费必须带 group(否则 `ErrGroupRequired`)。单测覆盖消息映射与 group 前置校验(broker 互操作需外部环境)。
   - **`contrib/elasticsearch`**——薄封装 go-elasticsearch/v8:`New`/`Ping`/`Search`(原始 JSON)/`Index`/`ES()`,
     独立不依赖核心。httptest 打桩单测(含 v8 product-check 头),`-race` 通过。
-  - **`contrib/natsjs`**——`pkg/mq` 的 NATS **JetStream** 绑定,持久化 + **at-least-once**:`EnsureStream` 建流、
+  - **`contrib/natsjs`**——`pkg/messaging/mq` 的 NATS **JetStream** 绑定,持久化 + **at-least-once**:`EnsureStream` 建流、
     Publish 落盘、`mq.WithGroup`→durable consumer(竞争、断线续)/ 不设组 ephemeral(扇出)、AckExplicit
     (成功 Ack / 失败 Nak 重投)。内嵌开启 JetStream 的 `nats-server` 做真实往返单测(先发后订的持久化、Nak 重投),`-race` 通过。
   - **`contrib/llm`**——面向 AI 应用的 provider 无关 LLM 客户端(**纯标准库、零外部依赖**,HTTP 直连
@@ -75,8 +75,8 @@
     (主)/`Reader()`(副本轮询,无副本回退主)/`Primary()`(开事务/迁移)/`Ping`/`Close`;`RW()` 自动路由
     (Exec→主、Query→从)+ `Primary(ctx)` 逃生口(应对 `INSERT...RETURNING`/`SELECT...FOR UPDATE` 的路由坑)。
     不 import 驱动与核心。双内存 sqlite 库单测验证路由落点,`-race` 通过。
-  - 其中 nats/natsjs/kafka 实现核心 `pkg/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/sqldb/elasticsearch 独立。
-- **mq**：新增 `pkg/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
+  - 其中 nats/natsjs/kafka 实现核心 `pkg/messaging/mq` 接口故 `import` 核心(`replace => ../..` 本仓解析);gorm/sqldb/elasticsearch 独立。
+- **mq**：新增 `pkg/messaging/mq`——传输无关的消息队列抽象,补齐框架跨服务异步的空白(此前只有进程内
   `eventbus` 扇出 + `webhook` HTTP 推)。`Publisher`/`Subscriber` 接口(订阅按 ctx 绑定生命周期,
   同时适配 NATS push 与 Kafka pull 语义)+ `Consumer`(把一组订阅包成 `beauty.Service`:
   Start/String/Ready,随 app 停机)+ 处理中间件(`Chain`/`Recover`/`Retry`)。**队列组**
@@ -86,8 +86,8 @@
   保证由 broker 决定(进程内为 at-most-once,用 Retry 兜瞬时错误;可靠"改库+发消息"的 Outbox
   依赖持久层暂未做)。示例 `examples/mq`。单测覆盖扇出/队列组负载均衡/订阅随 ctx 解除/Consumer
   生命周期/Retry/Recover/关闭,`-race` 通过,无新依赖。
-- **shard**：新增 `pkg/shard`——有状态服务多副本分片路由的薄机制。用一致性哈希(复用
-  `pkg/loadbalance.ConsistentHash`)把每个 key(streamKey/roomID/userID)确定性归属到某实例:
+- **shard**：新增 `pkg/store/shard`——有状态服务多副本分片路由的薄机制。用一致性哈希(复用
+  `pkg/store/loadbalance.ConsistentHash`)把每个 key(streamKey/roomID/userID)确定性归属到某实例:
   `Sharder.Owner(key)`/`IsLocal(key)`,成员集可随服务发现动态 `SetMembers`。`Router` 是
   `http.Handler`,按 key 把非本地请求反向代理给归属实例(WebSocket 亦可,带防环标记头),本地 key
   交本地 handler——从而让 `media.Hub`、`webrtc/sfu` 房间、`gameloop` 房间、`presence` 这些进程内
@@ -103,9 +103,9 @@
   `EXT-X-PART`/`PRELOAD-HINT` 与阻塞式刷新)、fMP4 init 段等全部细节。`Bridge` 同时实现
   `rtmp.Handler`(收流)与 `http.Handler`(播放,拿到 SPS/PPS+首关键帧后惰性起 muxer,未就绪回
   503),幂等 `Finish()` 满足 `media.Stream` 可直接进 `pkg/media.Hub` 做多路管理,亦可作为
-  `hls.Master` 的一路 ABR 变体(`http.Handler`)。与 `pkg/hls` 分工:RTMP→HLS 走本包;需要
+  `hls.Master` 的一路 ABR 变体(`http.Handler`)。与 `pkg/media/hls` 分工:RTMP→HLS 走本包;需要
   **通用分片入口**(喂 ffmpeg 现成分片)、**跨码率 ABR 主清单**、**可插拔对象存储 `Store`** 时用
-  `pkg/hls`。存储:gohlslib 默认内存,`WithDirectory` 落盘给 CDN(LL-HLS variant 不支持落盘)。
+  `pkg/media/hls`。存储:gohlslib 默认内存,`WithDirectory` 落盘给 CDN(LL-HLS variant 不支持落盘)。
   边界照旧——分片/LL-HLS 参数经 Option 透出,转码/鉴权/多码率在框架外。示例
   `examples/live-hls-gohlslib`(单路)、`examples/live-multi`(多路 + OTel 指标)。单测覆盖 FLV
   解析纯函数 + 用真实 SPS/PPS/ASC 喂帧由 gohlslib 自身校验产出、以及 Hub/ABR 集成,`-race` 通过。
@@ -116,19 +116,19 @@
   未落定时自动推迟、answer 到达后重试)。信令**传输无关**——`Room.Join(id, send)` 通过 `send`
   回调推信令、`Participant.HandleSignal` 吃客户端信令,承载(WebSocket 等)由上层决定。鉴权、
   房间划分、音/视频、混流(MCU)、主讲人检测、STUN/TURN、录制全留 policy。示例
-  `examples/webrtc-voice-room`(pkg/ws 信令 + 浏览器多人语音)。进程内多方单测覆盖真实 ICE +
+  `examples/webrtc-voice-room`(pkg/transport/ws 信令 + 浏览器多人语音)。进程内多方单测覆盖真实 ICE +
   双向收流 + 重协商 + 离开回收,`-race` 通过。
 - **media/webrtc**：新增 `pkg/media/webrtc`——WebRTC 的 WHIP(采集)/WHEP(分发)薄机制,
   基于纯 Go 的 pion/webrtc(零 cgo,新增 `pion/webrtc/v4` + `pion/rtp` 依赖)。面向**亚秒级、
-  交互式**实时媒体(连麦/云游戏/实时协作),和 `pkg/hls`(多秒级、可过 CDN 分发)互补,
-  与 `pkg/quic`+`pkg/gameloop` 同属「实时」家族。WHIP/WHEP 本质同为「HTTP 一发一答 SDP 协商、
+  交互式**实时媒体(连麦/云游戏/实时协作),和 `pkg/media/hls`(多秒级、可过 CDN 分发)互补,
+  与 `pkg/transport/quic`+`pkg/game/gameloop` 同属「实时」家族。WHIP/WHEP 本质同为「HTTP 一发一答 SDP 协商、
   服务端做 answerer」:`NewWHIP`/`NewWHEP` 是 `http.Handler`(挂 `beauty.WithWebServer` 即可,
   不自起监听),负责 SDP/ICE 协商 + 资源生命周期(`Location`/`DELETE`/断连自动回收);
   `Answer` 暴露协商原语,`Pipe` 做 RTP 纯包转发(不转码,SFU 最小原语),`NewLocalTrackFor`
   按远端编解码建可写轨道,`NewAPI` 装配默认编解码 + 拦截器。鉴权、转发拓扑(SFU/MCU)、
   STUN/TURN、编解码档位、CORS 全留 policy。示例 `examples/webrtc-whip-whep`(一推多播最小 SFU,
   浏览器/OBS 推流 → 多浏览器播放)。端到端单测覆盖真实 ICE 环回 + RTP 转发 + DELETE 拆除。
-- **media/hls**：新增 `pkg/hls`——直播/点播 HLS origin(滚动分片窗口 + m3u8 播放列表
+- **media/hls**：新增 `pkg/media/hls`——直播/点播 HLS origin(滚动分片窗口 + m3u8 播放列表
   生成 live/VOD + `http.Handler` 挂 webserver 分发)。纯 Go 零 cgo,**不做编解码/切片**,
   分片由上游(ffmpeg 或其它 muxer)`Append` 进来。支持 TS 与 fMP4(`EXT-X-MAP` init
   分片)。**分片存储可插拔**:`Store` 接口 + 内存/磁盘实现(`WithStore`),对象存储可自实现。
@@ -146,12 +146,12 @@
 - **media**：新增 `pkg/media`——直播/视频服务的编排薄机制。`Hub[S media.Stream]` 做**多路流管理**
   (streamKey→Session 注册表 + 生命周期 + 按 key 路由 + 防重复推流,`Session.Context`
   供外部后台任务随流停机);按流类型泛型化,`Stream = http.Handler + Finish()`,可承载
-  `*hlsmux.Bridge`(gohlslib)或 `*hls.Stream`(自研 origin),故 `pkg/media` 不依赖 `pkg/hls`。
-  `Supervisor` 做**子进程监督**(ffmpeg 等,启动/按 `pkg/backoff`
+  `*hlsmux.Bridge`(gohlslib)或 `*hls.Stream`(自研 origin),故 `pkg/media` 不依赖 `pkg/media/hls`。
+  `Supervisor` 做**子进程监督**(ffmpeg 等,启动/按 `pkg/resilience/backoff`
   退避重启/优雅停,命令构造留 policy);`Metrics` 基于 OTel 全局 Meter 上报运维指标
   (`media.streams.active` / `publish` / `rejected` / `ingest.bytes` / `segments` /
   `transcode.restarts`,未配 telemetry 时 no-op)。示例 `examples/live-multi`(多路 + 指标)。
-- **quic**：新增 `pkg/quic`——基于 quic-go 的连接层,作为 `pkg/ws`(WebSocket/TCP)
+- **quic**：新增 `pkg/transport/quic`——基于 quic-go 的连接层,作为 `pkg/transport/ws`(WebSocket/TCP)
   之外面向实时/游戏同步的可选传输(opt-in 子包,新增 `quic-go` 依赖)。一条连接同时
   提供**可靠有序流**(`OpenStream`/`AcceptStream`,多路复用、跨流无队头阻塞——关键指令)
   与**不可靠数据报**(`SendDatagram`/`ReceiveDatagram`,RFC 9221——高频状态/位置更新,
@@ -161,13 +161,13 @@
   `WithTransport` / `WithDialTransport` 支持自备(缓冲调优的)UDP socket 与
   `quic.Transport` 复用(一条 socket 同承载监听 + 拨号),包注释附 sysctl 提示。
   端到端示例见 `examples/statesync-quic`(指令走可靠流、状态走不可靠数据报)。
-- **gameloop**：新增 `pkg/gameloop`——「机制而非策略」的定步长游戏循环原语(定步长
+- **gameloop**：新增 `pkg/game/gameloop`——「机制而非策略」的定步长游戏循环原语(定步长
   tick、并发输入聚合、经 `stream.Broadcaster` 扇出、结构上满足 `beauty.Service`
   可直接 `WithService` 挂进框架)。帧同步/状态同步的服务端骨架,同步策略全在
-  `Handler.OnTick` 里、不进框架。仅依赖 `pkg/stream`。两个参考示例展示同一个
+  `Handler.OnTick` 里、不进框架。仅依赖 `pkg/messaging/stream`。两个参考示例展示同一个
   `Room` 换 `OnTick` 即切换策略:`examples/gameloop`(帧同步/lockstep,下发输入,
   bot 自校验逐帧输入全端一致)、`examples/statesync`(状态同步,服务器权威模拟 +
-  `pkg/spatial` AOI 视野过滤,下发状态)。
+  `pkg/game/spatial` AOI 视野过滤,下发状态)。
 - **dlock**：新增 URL/DSN 工厂，与 `conf.New` 的 scheme 工厂模式对齐——
   `dlock.New(dsn)` 构造 `Locker`、`dlock.NewElector(dsn)` 构造 `Elector`，空导入对应
   infra 子包即注册（`etcd`/`etcdv3`、`consul`、`redis` 注册两者；`k8s` 只注册 Elector）。
@@ -208,7 +208,7 @@
   `ReadTimeout`/`WriteTimeout` 连接池与超时字段(零值用 go-redis 默认)。分布式锁/KV 共用的
   客户端从此可观测。新增依赖 `redisotel`(其依赖 go-redis/otel 核心已有),go-redis 升至 v9.21。
 - **client**：把已有的韧性原语接进**直连/普通客户端**(此前只有服务发现版客户端接了节点级
-  熔断+重试)。HTTP `resty.NewHTTPClient` 新增 `WithRetry`(基于 `pkg/backoff.Policy`:默认只重
+  熔断+重试)。HTTP `resty.NewHTTPClient` 新增 `WithRetry`(基于 `pkg/resilience/backoff.Policy`:默认只重
   试幂等方法的瞬时失败——网络错误/429/502/503/504,遵守 `Retry-After`、请求体自动重放)、
   `WithRetryable`(自定义判定)、`WithCircuitBreaker`(复用 `middleware/circuitbreaker` 的
   RoundTripper);传输链为**熔断→重试→otel→base**(熔断最外:一次逻辑请求一个样本,打开即短路

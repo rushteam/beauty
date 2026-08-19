@@ -34,10 +34,10 @@ go run .
 
 ## 接到真消息系统 / 生产化
 
-- **换 Publisher**:把 demo 的 `logPublisher` 换成 `pkg/mq` / `contrib/nats` 的适配(3 行,见 `main.go` 注释)。
-- **relay 放后台 + 只在 leader 上跑**:用 `pkg/dlock` 选主或 `pkg/service/cron`(leader-only),单实例即可,
+- **换 Publisher**:把 demo 的 `logPublisher` 换成 `pkg/messaging/mq` / `contrib/nats` 的适配(3 行,见 `main.go` 注释)。
+- **relay 放后台 + 只在 leader 上跑**:用 `pkg/store/dlock` 选主或 `pkg/service/cron`(leader-only),单实例即可,
   无需 `SELECT ... FOR UPDATE SKIP LOCKED`;多副本并发拉取再加 SKIP LOCKED(Postgres/MySQL8)。
-- **at-least-once**:投成功但删除前崩溃 → 下次重投 → 消费端需幂等(见 `pkg/idempotency`)。
+- **at-least-once**:投成功但删除前崩溃 → 下次重投 → 消费端需幂等(见 `pkg/store/idempotency`)。
 - **DLQ / 最大重试 / 按 key 有序 / 定期清理**:按需自行加,不在本示例内。
 
 ## 表结构

@@ -322,7 +322,7 @@ OPENAI_API_KEY=sk-xxx          # 直连 OpenAI 的 key(Higress 故障时用)
 
 ```
 Layer 1 — Higress:  TLS 终止 / JWT 校验 / IP ACL / CC 防护 / 全局限流
-Layer 2 — Beauty:   业务鉴权(pkg/middleware/auth) / RBAC(pkg/authz)
+Layer 2 — Beauty:   业务鉴权(pkg/middleware/auth) / RBAC(pkg/api/authz)
 Layer 3 — LLM:     Guard 护栏(prompt injection / PII / max input)
 Layer 4 — MCP:     工具级权限检查(handler 内自行校验)
 ```
@@ -332,7 +332,7 @@ Layer 4 — MCP:     工具级权限检查(handler 内自行校验)
 Higress 基于 Envoy，原生支持 HTTP/2 + SSE 透传。以下场景无需额外配置：
 - `contrib/llm/openai` 的流式 `Stream()` 方法（SSE）
 - `contrib/mcp` 的 Streamable HTTP（长连接 + 消息推送）
-- `pkg/sse` 的 agent 事件流
+- `pkg/transport/sse` 的 agent 事件流
 
 如需调整超时（默认 Envoy idle timeout 5m）：
 

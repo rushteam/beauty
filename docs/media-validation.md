@@ -91,7 +91,7 @@ go run ./examples/webrtc-voice-room      # :8080
 
 ---
 
-## 5. 多副本分片(pkg/shard,可选,验证水平扩展)
+## 5. 多副本分片(pkg/store/shard,可选,验证水平扩展)
 
 在两个端口各起一份 live-multi(或包一层 `shard.Router`),把 `shard.SetMembers` 指向两个实例:
 

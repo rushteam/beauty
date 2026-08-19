@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/backoff"
 	resty "github.com/rushteam/beauty/pkg/client/http"
 	mwcb "github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 )
 
 func fastPolicy(retries int) *backoff.Policy {

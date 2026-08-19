@@ -8,7 +8,7 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/rushteam/beauty/pkg/kvstore"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 // Store 用 etcd 实现 pkg/kvstore.Store,给 counter/cooldown/idempotency 等原语一个

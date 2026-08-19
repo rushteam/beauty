@@ -2,7 +2,7 @@
 
 ## Overview
 
-`pkg/client/http` provides an HTTP client with service discovery, aligned with gRPC's `ServiceDiscoveryClient`. Callers only need to provide **service name + relative path**; instance selection, URL construction, and retry with node switching are handled by the client. It reuses `pkg/loadbalance` (round robin / smooth weighted round robin) + `pkg/service/discover` + `pkg/utils/selector`.
+`pkg/client/http` provides an HTTP client with service discovery, aligned with gRPC's `ServiceDiscoveryClient`. Callers only need to provide **service name + relative path**; instance selection, URL construction, and retry with node switching are handled by the client. It reuses `pkg/store/loadbalance` (round robin / smooth weighted round robin) + `pkg/service/discover` + `pkg/utils/selector`.
 
 The core is `discoveryTransport` (implements `http.RoundTripper`): it rewrites the request's `URL.Host` to the address of an instance selected from service discovery, then forwards to the underlying transport (wrapped with otelhttp). This means callers get a **standard `*http.Client`** — all HTTP ecosystem tooling (otel trace, cookies, custom timeouts, middleware) composes transparently.
 

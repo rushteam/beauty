@@ -1,12 +1,12 @@
-# Server-Sent Events（pkg/sse）
+# Server-Sent Events（pkg/transport/sse）
 
-`pkg/sse` 封装了 SSE（服务器推送）在 Go 里的常见坑：自动设置流式响应头、
+`pkg/transport/sse` 封装了 SSE（服务器推送）在 Go 里的常见坑：自动设置流式响应头、
 解决写超时掐断、每条事件自动 flush（穿透 otelhttp / compress 包装链）、客户端断开自动结束。
 
 ## 快速开始
 
 ```go
-import "github.com/rushteam/beauty/pkg/sse"
+import "github.com/rushteam/beauty/pkg/transport/sse"
 
 mux := http.NewServeMux()
 mux.Handle("/events", sse.Handler(func(r *http.Request, sink sse.Sink) error {

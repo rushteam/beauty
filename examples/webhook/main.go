@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/webhook"
+	"github.com/rushteam/beauty/pkg/messaging/webhook"
 )
 
 func main() {

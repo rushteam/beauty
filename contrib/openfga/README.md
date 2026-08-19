@@ -1,6 +1,6 @@
-# contrib/openfga —— pkg/authz 的 OpenFGA 关系授权(独立模块)
+# contrib/openfga —— pkg/api/authz 的 OpenFGA 关系授权(独立模块)
 
-用 [OpenFGA](https://openfga.dev)(Google Zanzibar 式 **ReBAC**)实现 `pkg/authz.Enforcer`,适合
+用 [OpenFGA](https://openfga.dev)(Google Zanzibar 式 **ReBAC**)实现 `pkg/api/authz.Enforcer`,适合
 "X 是文档 Y 的编辑者"这类细粒度、基于关系的权限。薄封装官方 `openfga/go-sdk`,通过 Check API 判定。
 
 ```bash
@@ -12,7 +12,7 @@ go get github.com/rushteam/beauty/contrib/openfga@latest
 ```go
 import (
     ofga "github.com/rushteam/beauty/contrib/openfga"
-    "github.com/rushteam/beauty/pkg/authz"
+    "github.com/rushteam/beauty/pkg/api/authz"
 )
 
 var enforcer authz.Enforcer, _ = ofga.New("http://127.0.0.1:8080", storeID)

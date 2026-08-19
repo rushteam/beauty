@@ -1,6 +1,6 @@
 # contrib/agones — GameServer 生命周期 × gameroom
 
-把 [Agones](https://agones.dev/) SDK 的 **Ready / Health / Shutdown** 与 `pkg/gameroom` 房间 FSM 对齐。
+把 [Agones](https://agones.dev/) SDK 的 **Ready / Health / Shutdown** 与 `pkg/game/gameroom` 房间 FSM 对齐。
 
 ```bash
 go get github.com/rushteam/beauty/contrib/agones@latest

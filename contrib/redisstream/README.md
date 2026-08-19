@@ -1,6 +1,6 @@
 # contrib/redisstream — Redis Streams MQ 绑定
 
-实现 `pkg/mq.Publisher` / `Subscriber`(XADD / XREADGROUP,at-least-once)。
+实现 `pkg/messaging/mq.Publisher` / `Subscriber`(XADD / XREADGROUP,at-least-once)。
 
 ```go
 pub := redisstream.NewPublisher(rdb)

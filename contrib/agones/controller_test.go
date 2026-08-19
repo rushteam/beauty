@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/contrib/agones"
-	"github.com/rushteam/beauty/pkg/gameroom"
+	"github.com/rushteam/beauty/pkg/game/gameroom"
 )
 
 type mockSDK struct {

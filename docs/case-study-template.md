@@ -75,8 +75,8 @@ Check all that apply and add brief notes on how each was used:
 | Middleware (auth, ratelimit, etc.) | `[ ]` | `[list which]` |
 | OpenTelemetry (trace/metric) | `[ ]` | `[e.g. Prometheus + Jaeger]` |
 | Cron / scheduled jobs | `[ ]` | |
-| Message queue (`pkg/mq`) | `[ ]` | `[e.g. Kafka via contrib/kafka]` |
-| Distributed lock (`pkg/dlock`) | `[ ]` | |
+| Message queue (`pkg/messaging/mq`) | `[ ]` | `[e.g. Kafka via contrib/kafka]` |
+| Distributed lock (`pkg/store/dlock`) | `[ ]` | |
 | Other `pkg/*` or `contrib/*` | `[ ]` | `[specify]` |
 
 ### Infrastructure

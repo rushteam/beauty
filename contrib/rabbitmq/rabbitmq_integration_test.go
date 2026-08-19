@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/contrib/rabbitmq"
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 func TestIntegrationPubSub(t *testing.T) {

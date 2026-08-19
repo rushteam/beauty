@@ -20,3 +20,5 @@ require (
 	github.com/sosodev/duration v1.3.1 // indirect
 	golang.org/x/net v0.56.0 // indirect
 )
+
+replace github.com/rushteam/beauty => ../../

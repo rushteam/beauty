@@ -27,13 +27,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/counter"
-	"github.com/rushteam/beauty/pkg/eventbus"
-	"github.com/rushteam/beauty/pkg/idempotency"
+	"github.com/rushteam/beauty/pkg/foundation/keyedmutex"
+	"github.com/rushteam/beauty/pkg/game/versus"
 	"github.com/rushteam/beauty/pkg/idgen"
-	"github.com/rushteam/beauty/pkg/keyedmutex"
-	"github.com/rushteam/beauty/pkg/tally"
-	"github.com/rushteam/beauty/pkg/versus"
+	"github.com/rushteam/beauty/pkg/messaging/eventbus"
+	"github.com/rushteam/beauty/pkg/resilience/counter"
+	"github.com/rushteam/beauty/pkg/store/idempotency"
+	"github.com/rushteam/beauty/pkg/store/tally"
 )
 
 // pkLifecycle 是 eventbus 上广播的全局 PK 生命周期事件负载。

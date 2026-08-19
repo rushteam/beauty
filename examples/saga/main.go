@@ -11,7 +11,7 @@ import (
 	"fmt"
 
 	"github.com/rushteam/beauty/pkg/domain/wallet"
-	"github.com/rushteam/beauty/pkg/saga"
+	"github.com/rushteam/beauty/pkg/orchestration/saga"
 )
 
 func main() {

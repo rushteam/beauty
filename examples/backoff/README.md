@@ -1,6 +1,6 @@
 # backoff —— 退避重试
 
-演示 `pkg/backoff` 的指数退避序列、`Retry` 自动重试与 `RetryIf` 按错误类型决定是否继续。
+演示 `pkg/resilience/backoff` 的指数退避序列、`Retry` 自动重试与 `RetryIf` 按错误类型决定是否继续。
 
 ## 运行
 

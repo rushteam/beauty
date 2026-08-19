@@ -175,7 +175,7 @@ app := beauty.New(
 ```go
 import (
     "github.com/rushteam/beauty/pkg/middleware/antireplay"
-    "github.com/rushteam/beauty/pkg/kvstore"
+    "github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 store := redis.NewStore(redisClient) // 或 kvstore.NewMemory()

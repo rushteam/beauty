@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/cooldown"
+	"github.com/rushteam/beauty/pkg/resilience/cooldown"
 )
 
 func main() {

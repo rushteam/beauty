@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/rushteam/beauty/pkg/ctxkey"
+	"github.com/rushteam/beauty/pkg/foundation/ctxkey"
 )
 
 // HTTPMiddleware 返回 HTTP 认证中间件

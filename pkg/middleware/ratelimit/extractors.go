@@ -7,7 +7,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/rushteam/beauty/pkg/metadata"
+	"github.com/rushteam/beauty/pkg/api/metadata"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
 	"github.com/rushteam/beauty/pkg/middleware/tenant"
 )

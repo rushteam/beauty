@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/kvstore"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 type options struct {

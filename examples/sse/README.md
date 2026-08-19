@@ -1,6 +1,6 @@
 # sse —— SSE 服务端推送
 
-演示 `pkg/sse` 的单连接定时推送与多连接广播，适合单向实时通知（比 WebSocket 更轻）。
+演示 `pkg/transport/sse` 的单连接定时推送与多连接广播，适合单向实时通知（比 WebSocket 更轻）。
 
 ## 运行
 

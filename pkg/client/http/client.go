@@ -6,8 +6,8 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/rushteam/beauty/pkg/backoff"
 	mwcb "github.com/rushteam/beauty/pkg/middleware/circuitbreaker"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 )
 
 const defaultTimeout = 30 * time.Second

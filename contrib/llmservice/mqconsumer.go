@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/mq"
+	"github.com/rushteam/beauty/pkg/messaging/mq"
 )
 
 // MQConsumer 把 AgentService 接入 pkg/mq:订阅指定 topic,反序列化消息为 Task 投入 worker 池。

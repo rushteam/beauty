@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/kvstore"
 	"github.com/rushteam/beauty/pkg/middleware/auth"
+	"github.com/rushteam/beauty/pkg/store/kvstore"
 )
 
 var testSecret = []byte("test-secret-key")

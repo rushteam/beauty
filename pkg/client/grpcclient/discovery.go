@@ -11,12 +11,12 @@ import (
 
 	"log/slog"
 
-	"github.com/rushteam/beauty/pkg/backoff"
 	"github.com/rushteam/beauty/pkg/governance/bannednodes"
 	governancecb "github.com/rushteam/beauty/pkg/governance/circuitbreaker"
 	governancerouter "github.com/rushteam/beauty/pkg/governance/router"
-	"github.com/rushteam/beauty/pkg/loadbalance"
+	"github.com/rushteam/beauty/pkg/resilience/backoff"
 	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/store/loadbalance"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

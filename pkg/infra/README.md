@@ -2,7 +2,7 @@
 
 `pkg/infra` 把各类中间件/编排平台（etcd、Consul、Kubernetes、Redis、Nacos、
 Polaris）适配到框架定义的**后端无关接口**上。核心接口都在纯标准库的接口包里
-（`pkg/conf`、`pkg/dlock`、`pkg/kvstore`），infra 子包才引入对应 SDK 依赖——业务
+（`pkg/conf`、`pkg/store/dlock`、`pkg/store/kvstore`），infra 子包才引入对应 SDK 依赖——业务
 按需 import，不用的后端不进依赖树。
 
 设计约定：
@@ -67,7 +67,7 @@ polaris://host:8090/key
 
 ```go
 import (
-    "github.com/rushteam/beauty/pkg/dlock"
+    "github.com/rushteam/beauty/pkg/store/dlock"
     _ "github.com/rushteam/beauty/pkg/infra/etcd" // 注册 etcd 后端
 )
 

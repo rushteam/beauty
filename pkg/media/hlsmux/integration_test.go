@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/hls"
 	"github.com/rushteam/beauty/pkg/media"
+	"github.com/rushteam/beauty/pkg/media/hls"
 )
 
 // TestBridge_WithHub:Bridge 接入 pkg/media.Hub 做多路管理——Acquire/按 key 路由播放/Release。

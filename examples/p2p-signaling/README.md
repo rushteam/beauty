@@ -6,13 +6,13 @@
 ```
 浏览器A ─┐                                    ┌─ 直连 DataChannel(P2P)
 浏览器B ─┼── WS 信令(offer/answer/ICE) ──→ ─┤  · reliable 通道:聊天消息
-浏览器C ─┘       pkg/p2p/signaling             └─ · unreliable 通道:位置同步
+浏览器C ─┘       pkg/transport/p2p/signaling             └─ · unreliable 通道:位置同步
 ```
 
 核心包:
-- [`pkg/p2p`](../../pkg/p2p) — P2P 双通道抽象(`PeerConn` 接口)
-- [`pkg/p2p/signaling`](../../pkg/p2p/signaling) — WebSocket 信令服务
-- [`pkg/p2p/topology`](../../pkg/p2p/topology) — 拓扑策略(FullMesh/Star/MatchPairs)
+- [`pkg/transport/p2p`](../../pkg/transport/p2p) — P2P 双通道抽象(`PeerConn` 接口)
+- [`pkg/transport/p2p/signaling`](../../pkg/transport/p2p/signaling) — WebSocket 信令服务
+- [`pkg/transport/p2p/topology`](../../pkg/transport/p2p/topology) — 拓扑策略(FullMesh/Star/MatchPairs)
 
 ## 与 webrtc-voice-room 的区别
 
@@ -77,7 +77,7 @@ queue := topology.NewQueue()
 
 ## 机制 vs 策略
 
-**机制(pkg/p2p/signaling)**:信令中继、peer 发现、拓扑驱动的连接编排。
+**机制(pkg/transport/p2p/signaling)**:信令中继、peer 发现、拓扑驱动的连接编排。
 
 **策略(由你决定)**:
 - **鉴权**:join 前校验 token(中间件或在 Handler 外层包一层)

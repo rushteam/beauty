@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rushteam/beauty/pkg/authz"
+	"github.com/rushteam/beauty/pkg/api/authz"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )

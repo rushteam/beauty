@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rushteam/beauty/pkg/authz"
+	"github.com/rushteam/beauty/pkg/api/authz"
 
 	ofga "github.com/rushteam/beauty/contrib/openfga"
 )

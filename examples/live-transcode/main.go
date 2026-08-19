@@ -31,7 +31,7 @@ import (
 	"strings"
 
 	"github.com/rushteam/beauty"
-	"github.com/rushteam/beauty/pkg/hls"
+	"github.com/rushteam/beauty/pkg/media/hls"
 	"github.com/rushteam/beauty/pkg/media/rtmp"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )

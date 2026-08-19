@@ -34,7 +34,7 @@ import (
     "time"
     
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/timeout"
+    "github.com/rushteam/beauty/pkg/resilience/timeout"
 )
 
 func main() {

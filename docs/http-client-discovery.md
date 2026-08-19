@@ -2,7 +2,7 @@
 
 ## 概述
 
-`pkg/client/http` 提供基于服务发现的 HTTP 客户端,对齐 gRPC 的 `ServiceDiscoveryClient`。调用方只需提供**服务名 + 相对路径**,实例选择、URL 拼接、重试换节点均由客户端处理。复用 `pkg/loadbalance`(轮询 / 平滑加权轮询)+ `pkg/service/discover` + `pkg/utils/selector`。
+`pkg/client/http` 提供基于服务发现的 HTTP 客户端,对齐 gRPC 的 `ServiceDiscoveryClient`。调用方只需提供**服务名 + 相对路径**,实例选择、URL 拼接、重试换节点均由客户端处理。复用 `pkg/store/loadbalance`(轮询 / 平滑加权轮询)+ `pkg/service/discover` + `pkg/utils/selector`。
 
 核心是 `discoveryTransport`(实现 `http.RoundTripper`):它把请求的 `URL.Host` 改写为从服务发现选出的实例地址,转发给底层 transport(otelhttp 包装)。这意味着调用方拿到的是**标准 `*http.Client`**,所有 http 生态(otel trace、cookie、自定义 timeout、中间件)都能透明组合。
 

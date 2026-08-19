@@ -1,6 +1,6 @@
 # matchmaker —— 匹配系统
 
-演示 `pkg/matchmaker` 按属性（region、skill）分桶匹配，凑齐人数后回调组队。
+演示 `pkg/game/matchmaker` 按属性（region、skill）分桶匹配，凑齐人数后回调组队。
 
 ## 运行
 

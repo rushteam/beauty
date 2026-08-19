@@ -41,7 +41,7 @@ import (
     "time"
     
     "github.com/rushteam/beauty"
-    "github.com/rushteam/beauty/pkg/circuitbreaker"
+    "github.com/rushteam/beauty/pkg/resilience/circuitbreaker"
 )
 
 func main() {

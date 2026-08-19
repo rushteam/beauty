@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/rushteam/beauty/pkg/spatial"
+	"github.com/rushteam/beauty/pkg/game/spatial"
 )
 
 func main() {

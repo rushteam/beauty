@@ -25,3 +25,5 @@ require (
 
 // 本地联调:依赖核心未发布的 resty.WithBaseTransport 等改动。
 // 发布前请去掉 replace,并把 require 指向已发布的 beauty tag。
+
+replace github.com/rushteam/beauty => ../../

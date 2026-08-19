@@ -2,8 +2,8 @@ package llmservice
 
 import (
 	"github.com/rushteam/beauty/contrib/llm/agent"
-	"github.com/rushteam/beauty/pkg/dlock"
-	"github.com/rushteam/beauty/pkg/shard"
+	"github.com/rushteam/beauty/pkg/store/dlock"
+	"github.com/rushteam/beauty/pkg/store/shard"
 )
 
 // ServiceOption 配置 AgentService。

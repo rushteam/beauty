@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/rushteam/beauty/pkg/conf"
-	"github.com/rushteam/beauty/pkg/dlock"
+	"github.com/rushteam/beauty/pkg/store/dlock"
 )
 
 func init() {

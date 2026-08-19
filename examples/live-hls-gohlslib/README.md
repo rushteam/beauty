@@ -22,10 +22,10 @@ ffmpeg -re -stream_loop -1 -i input.mp4 -c:v libx264 -c:a aac -f flv rtmp://loca
 
 ## 两条 HLS 路径怎么选
 
-| | `pkg/hls` + `pkg/media/remux` | `pkg/media/hlsmux`(本示例) |
+| | `pkg/media/hls` + `pkg/media/remux` | `pkg/media/hlsmux`(本示例) |
 |---|---|---|
 | HLS 实现 | 自研(播放列表/TS 切片手写) | gohlslib |
-| LL-HLS / fMP4 | pkg/hls 支持 LL-HLS;remux 只产 TS | 原生支持 TS / fMP4 / LL-HLS |
+| LL-HLS / fMP4 | pkg/media/hls 支持 LL-HLS;remux 只产 TS | 原生支持 TS / fMP4 / LL-HLS |
 | 第三方依赖 | 仅 go-astits | gohlslib + mediacommon |
 | 适合 | 最薄、够用、想少依赖 | 要产线级 HLS、经真实播放器打磨 |
 

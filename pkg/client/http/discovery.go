@@ -9,8 +9,8 @@ import (
 
 	governancecb "github.com/rushteam/beauty/pkg/governance/circuitbreaker"
 	governancerouter "github.com/rushteam/beauty/pkg/governance/router"
-	"github.com/rushteam/beauty/pkg/loadbalance"
 	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/store/loadbalance"
 	"github.com/rushteam/beauty/pkg/utils/selector"
 )
 

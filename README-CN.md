@@ -169,25 +169,25 @@ conn, err := grpcclient.DialContext(ctx, "nacos://127.0.0.1:8848/helloworld.rpc"
 |---|---|
 | 配置 / 热更新 | `pkg/conf`(nacos、etcd、consul、k8s configmap/secret) |
 | 服务发现 | `pkg/service/discover`,客户端 `pkg/client/{grpcclient,http}` |
-| 分布式锁 / 选主 | `pkg/dlock`(etcd、consul、redis、k8s Lease、PG Advisory Lock);k8s RBAC 见 [`docs/k8s-rbac.md`](docs/k8s-rbac.md) |
-| TTL-KV 与原语 | `pkg/kvstore`(redis、etcd)→ counter / cooldown / idempotency |
-| 并发 | `pkg/syncx`(Map/ForEach、SingleFlight、Batcher、Debounce/Throttle、Future)、`pkg/xgo`、`pkg/safe`、`pkg/chanx`、`pkg/keyedmutex` |
-| 韧性 | `pkg/ratelimit`、`pkg/governance/{circuitbreaker,overloadctrl}`、`pkg/backoff` |
-| 实时 | `pkg/ws`、`pkg/sse`、`pkg/stream`、`pkg/quic`、`pkg/gameloop`、`pkg/spatial`、`pkg/presence`、`pkg/p2p`(信令 + 拓扑 + 传输) |
-| 媒体 | `pkg/media/rtmp`、`pkg/hls`、`pkg/media/hlsmux`、`pkg/media/webrtc`(含 `sfu`)、`pkg/media`(hub/supervisor/metrics) |
+| 分布式锁 / 选主 | `pkg/store/dlock`(etcd、consul、redis、k8s Lease、PG Advisory Lock);k8s RBAC 见 [`docs/k8s-rbac.md`](docs/k8s-rbac.md) |
+| TTL-KV 与原语 | `pkg/store/kvstore`(redis、etcd)→ counter / cooldown / idempotency |
+| 并发 | `pkg/foundation/syncx`(Map/ForEach、SingleFlight、Batcher、Debounce/Throttle、Future)、`pkg/foundation/xgo`、`pkg/foundation/safe`、`pkg/foundation/chanx`、`pkg/foundation/keyedmutex` |
+| 韧性 | `pkg/resilience/ratelimit`、`pkg/governance/{circuitbreaker,overloadctrl}`、`pkg/resilience/backoff` |
+| 实时 | `pkg/transport/ws`、`pkg/transport/sse`、`pkg/messaging/stream`、`pkg/transport/quic`、`pkg/game/gameloop`、`pkg/game/spatial`、`pkg/transport/presence`、`pkg/transport/p2p`(信令 + 拓扑 + 传输) |
+| 媒体 | `pkg/media/rtmp`、`pkg/media/hls`、`pkg/media/hlsmux`、`pkg/media/webrtc`(含 `sfu`)、`pkg/media`(hub/supervisor/metrics) |
 | WASM / Agent | `contrib/wasm`(中间件 + FaaS)、`contrib/wasmopa`(OPA/Rego)、`contrib/wasmagent`(agent 工具/技能);见 [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) |
-| 消息 | `pkg/mq`、`pkg/eventbus`、`pkg/webhook`、`pkg/delayqueue`、`pkg/scheduler` |
-| 一致性 | `pkg/saga`、`pkg/txn`、`pkg/idempotency` |
-| 可观测 | `pkg/service/telemetry`、`pkg/service/logger`、`pkg/buildinfo`、`pkg/service/pprof` |
-| 横向扩展 | `pkg/shard`(一致性哈希路由 + 反向代理) |
-| 鉴权 | `pkg/middleware/auth`(认证)、`pkg/authz`(授权:RBAC + HTTP/gRPC 中间件)、`pkg/token` |
+| 消息 | `pkg/messaging/mq`、`pkg/messaging/eventbus`、`pkg/messaging/webhook`、`pkg/orchestration/delayqueue`、`pkg/orchestration/scheduler` |
+| 一致性 | `pkg/orchestration/saga`、`pkg/orchestration/txn`、`pkg/store/idempotency` |
+| 可观测 | `pkg/service/telemetry`、`pkg/service/logger`、`pkg/foundation/buildinfo`、`pkg/service/pprof` |
+| 横向扩展 | `pkg/store/shard`(一致性哈希路由 + 反向代理) |
+| 鉴权 | `pkg/middleware/auth`(认证)、`pkg/api/authz`(授权:RBAC + HTTP/gRPC 中间件)、`pkg/api/token` |
 | 领域 / 游戏 | `pkg/{leaderboard,matchmaker,leveling,questlog,versus,tally,reddot,...}` |
 
 细节见 [`docs/`](docs) 与可运行示例 [`examples/`](examples)。
 
 ## 消息
 
-传输无关的队列(`pkg/mq`):`Publisher`/`Subscriber` 接口 +「消费者即 `beauty.Service`」的
+传输无关的队列(`pkg/messaging/mq`):`Publisher`/`Subscriber` 接口 +「消费者即 `beauty.Service`」的
 `Consumer`,外加 `Chain`/`Retry`/`Recover` 中间件。核心自带进程内实现;真实 broker 是 contrib 可选模块。
 
 ```go
@@ -205,15 +205,15 @@ app := beauty.New(beauty.WithService(consumer))
 | [`contrib/gorm`](contrib/gorm) | GORM:读写分离、otel 链路、slog、错误映射 | `…/contrib/gorm` |
 | [`contrib/sqldb`](contrib/sqldb) | `database/sql` 读写分离 + otel,配合 **sqlc** | `…/contrib/sqldb` |
 | [`contrib/elasticsearch`](contrib/elasticsearch) | Elasticsearch v8 搜索 / 写入 / 健康 | `…/contrib/elasticsearch` |
-| [`contrib/nats`](contrib/nats) | `pkg/mq` 的 NATS broker(at-most-once) | `…/contrib/nats` |
-| [`contrib/natsjs`](contrib/natsjs) | `pkg/mq` 的 NATS JetStream(持久、at-least-once) | `…/contrib/natsjs` |
-| [`contrib/kafka`](contrib/kafka) | `pkg/mq` 的 Kafka broker(franz-go + kotel) | `…/contrib/kafka` |
+| [`contrib/nats`](contrib/nats) | `pkg/messaging/mq` 的 NATS broker(at-most-once) | `…/contrib/nats` |
+| [`contrib/natsjs`](contrib/natsjs) | `pkg/messaging/mq` 的 NATS JetStream(持久、at-least-once) | `…/contrib/natsjs` |
+| [`contrib/kafka`](contrib/kafka) | `pkg/messaging/mq` 的 Kafka broker(franz-go + kotel) | `…/contrib/kafka` |
 | [`contrib/llm`](contrib/llm) | provider 无关 LLM 客户端(对话/流式/embedding,OpenAI/Anthropic/Azure/兼容) | `…/contrib/llm` |
 | [`contrib/otelllm`](contrib/otelllm) | AI 可观测性:OTel Trace/Metrics(GenAI 语义约定) + Agent run-tree Hooks → Jaeger/Tempo/Langfuse/LangSmith | `…/contrib/otelllm` |
 | [`contrib/vector`](contrib/vector) | 向量存储 / RAG 语义检索 | `…/contrib/vector` |
 | [`contrib/mcp`](contrib/mcp) | Model Context Protocol server/client(把服务暴露成 AI 工具) | `…/contrib/mcp` |
 | [`contrib/wasm`](contrib/wasm) | wazero 运行时:HTTP 中间件、FaaS-lite 路由、host funcs、池/缓存 | `…/contrib/wasm` |
-| [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm 策略,实现 `pkg/authz.Enforcer` | `…/contrib/wasmopa` |
+| [`contrib/wasmopa`](contrib/wasmopa) | OPA Rego→wasm 策略,实现 `pkg/api/authz.Enforcer` | `…/contrib/wasmopa` |
 | [`contrib/wasmagent`](contrib/wasmagent) | 沙箱 agent 工具 / 技能(`ScriptExecutor` + `agent.Tool`) | `…/contrib/wasmagent` |
 
 路径前缀均为 `github.com/rushteam/beauty`。详见 [`contrib/README.md`](contrib/README.md)。
@@ -221,7 +221,7 @@ app := beauty.New(beauty.WithService(consumer))
 ## 可观测
 
 OpenTelemetry 贯穿框架:trace 与 metrics 走 `pkg/service/telemetry`,日志走 `pkg/service/logger`
-(slog,自动注入 `trace_id`/`span_id`),运行时构建信息用 `pkg/buildinfo`。配好一次导出器,
+(slog,自动注入 `trace_id`/`span_id`),运行时构建信息用 `pkg/foundation/buildinfo`。配好一次导出器,
 媒体/mq/客户端各层就会自动上报指标。
 
 ## 文档

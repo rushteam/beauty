@@ -25,7 +25,7 @@ import (
 	"github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/pkg/domain/group"
 	"github.com/rushteam/beauty/pkg/domain/inbox"
-	"github.com/rushteam/beauty/pkg/ratelimit"
+	"github.com/rushteam/beauty/pkg/resilience/ratelimit"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 

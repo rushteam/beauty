@@ -1,13 +1,13 @@
 # live-transcode —— 拓扑 A:RTMP 采集 → ffmpeg 转码(ABR)→ HLS 分发
 
 演示怎么把 **ffmpeg 转码**衔接进 beauty:框架收 RTMP、做鉴权/编排,把流管道喂给
-ffmpeg 转成**多码率**(自适应码率 ABR),再用 [`pkg/hls.Master`](../../pkg/hls) 组主清单分发。
+ffmpeg 转成**多码率**(自适应码率 ABR),再用 [`pkg/media/hls.Master`](../../pkg/media/hls) 组主清单分发。
 **转码交给 ffmpeg,框架不碰编解码。**
 
 ```
 OBS/ffmpeg ──RTMP──▶ pkg/media/rtmp ──重建 FLV──▶ ffmpeg(720p+360p 两档)──▶ HLS 目录
                                                                               │
-                        pkg/hls.Master(FileServer 变体)◀── master + 各码率 ──┘
+                        pkg/media/hls.Master(FileServer 变体)◀── master + 各码率 ──┘
 ```
 
 衔接的关键点:`rtmp.Handler` 把收到的音视频 tag 重新拼成合法 **FLV 流**写进

@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  nacos:
+    image: nacos/nacos-server:v2.4.3
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  higress-controller:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/higress:latest
+    command:
+      - "serve"
+      - "--gateWayMode=true"
+      - "--ingressClass=higress"
+    environment:
+      KUBECONFIG: ""
+    volumes:
+      - ./higress:/data/higress
+    ports:
+      - "8001:8001"
+    depends_on:
+      nacos:
+        condition: service_healthy
+
+  higress-gateway:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/gateway:latest
+    environment:
+      HIGRESS_CONTROLLER: higress-controller:15051
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - higress-controller
+
+  user-svc:
+    build:
+      context: .
+      dockerfile: user-svc/Dockerfile
+    environment:
+      NACOS_ADDR: nacos:8848
+    depends_on:
+      nacos:
+        condition: service_healthy
+
+  web-svc:
+    build:
+      context: .
+      dockerfile: web-svc/Dockerfile
+    environment:
+      NACOS_ADDR: nacos:8848
+    depends_on:
+      nacos:
+        condition: service_healthy

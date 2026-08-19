@@ -36,7 +36,7 @@ Three reasons people pick Beauty:
 - **Unified lifecycle** — one `app.Start(ctx)` for HTTP, gRPC, cron, and anything implementing `Service`; config/discovery/resilience/observability built in.
 - **Realtime + media** — WS/SSE/QUIC, fixed-timestep game loop, spatial AOI & presence; P2P DataChannel with pluggable transport (TCP/QUIC/WebRTC) and topology (mesh/star/client-server/matchmaking); RTMP ingest, HLS / LL-HLS origin, WebRTC WHIP/WHEP + SFU room, multi-stream hub.
 - **WASM · Agent** — [`contrib/wasm`](contrib/wasm) (middleware / FaaS-lite router), [`contrib/wasmopa`](contrib/wasmopa) (Rego→wasm authz), [`contrib/wasmagent`](contrib/wasmagent) (sandboxed agent tools); LLM / RAG / MCP in [`contrib/llm`](contrib/llm) · [`contrib/vector`](contrib/vector) · [`contrib/mcp`](contrib/mcp). See [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md).
-- **Also included** — config hot reload (nacos/etcd/consul/k8s), service discovery, dlock/leader, rate limit / circuit break / load shedding, transport-agnostic MQ, OpenTelemetry, consistent-hash sharding, and data/search/broker modules in contrib.
+- **Also included** — config hot reload (nacos/etcd/consul/k8s), service discovery (auto-injects `protocol` metadata for Higress/Envoy gateway compatibility), dlock/leader, rate limit / circuit break / load shedding, transport-agnostic MQ, OpenTelemetry, consistent-hash sharding, and data/search/broker modules in contrib.
 
 ## Install
 

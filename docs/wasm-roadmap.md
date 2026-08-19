@@ -66,9 +66,33 @@ router.RegisterBytes(ctx, "/greet", greetWasm, wasm.WithHandlerPool(8))
 http.Handle("/fn/", http.StripPrefix("/fn", router))
 ```
 
+## Tier 5 —— Proxy-Wasm ABI 兼容 · 已落地(`contrib/proxywasm`)
+
+基于 wazero 实现 Proxy-Wasm ABI v0.2.1 的 HTTP Filter 子集,使 Higress/Envoy 生态的
+WASM 插件(proxy-wasm-go-sdk / proxy-wasm-rust-sdk 编写)无需修改即可作为 Beauty HTTP 中间件运行。
+
+- ✅ 完整 HTTP stream 生命周期:VM start → Plugin configure → per-request stream context;
+- ✅ Host functions:proxy_log、header map 6 操作、buffer 读写、send_local_response、
+  properties、stream control、时间、定时器;
+- ✅ 最小 WASI(fd_write→slog、clock、random、environ/args);
+- ✅ 有状态实例池(初始化后可复用)+ 超时中断 + fail-open/closed + 可观测;
+- ✅ 输出标准 `func(http.Handler) http.Handler`,无缝接入 webserver/handler;
+- ◻ HTTP callout、gRPC、shared data/queue、metrics (stub,按需后续补齐)。
+
+用法:
+
+```go
+rt, _ := proxywasm.New(ctx, proxywasm.WithMemoryLimitPages(32))
+mod, _ := rt.Compile(ctx, higressPluginWasm)
+filter := proxywasm.HTTPFilter(mod,
+    proxywasm.WithPluginConfig(configJSON),
+    proxywasm.WithPoolSize(16),
+)
+beauty.WithWebServer(":8080", mux, webserver.WithMiddleware(filter))
+```
+
 ## 备选(暂不排期)
 
-- Proxy-Wasm ABI 兼容:复用现成 Envoy Wasm 过滤器(工程量大)。
 - js/wasm:把 `gameloop`/`spatial`(AOI)/`presence` 的共享逻辑编到浏览器做客户端预测。
 - GOOS=wasip1 部署到 wasm 运行时:wasip1 网络受限,当前仅适合纯计算 handler/worker。
 

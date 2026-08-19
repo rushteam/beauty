@@ -15,7 +15,7 @@ type HandlerConfig struct {
 	AgentName string
 }
 
-// Handler 将 beauty StreamAgent 暴露为 AG-UI HTTP 端点。
+// Handler 将 beauty Agent 暴露为 AG-UI HTTP 端点。
 // 请求方式: POST 发送 RunAgentInput JSON → 响应为 SSE 事件流。
 //
 // 使用方式:
@@ -23,12 +23,12 @@ type HandlerConfig struct {
 //	h := agui.NewHandler(myAgent, agui.HandlerConfig{})
 //	http.Handle("/agent", h)
 type Handler struct {
-	Agent agent.StreamAgent
+	Agent agent.Agent
 	Cfg   HandlerConfig
 }
 
 // NewHandler 创建 AG-UI HTTP 处理器。
-func NewHandler(a agent.StreamAgent, cfg HandlerConfig) *Handler {
+func NewHandler(a agent.Agent, cfg HandlerConfig) *Handler {
 	return &Handler{Agent: a, Cfg: cfg}
 }
 
@@ -76,13 +76,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req.Tools = inputToBeautyTools(input.Tools)
 	}
 
-	ch := h.Agent.RunStream(r.Context(), req)
-
 	var currentMsgID string
 	var inTextMessage bool
 	var inReasoning bool
 
-	for ev := range ch {
+	for ev, err := range h.Agent.Run(r.Context(), req) {
+		if err != nil {
+			writeEvent(w, fl, Event{
+				Type:      EventRunError,
+				ThreadID:  threadID,
+				RunID:     runID,
+				Message:   err.Error(),
+				Timestamp: nowTimestamp(),
+			})
+			return
+		}
 		switch ev.Type {
 		case agent.EventToken:
 			if ev.Response == nil {

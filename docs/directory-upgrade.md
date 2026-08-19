@@ -18,8 +18,8 @@
    - `pkg/core` → `pkg/service/core`
 
 3. 客户端包结构优化：
-   - `pkg/client/grpcclient` → `pkg/client/grpc`
    - `pkg/client/resty` → `pkg/client/http`
+   - `pkg/client/grpcclient` 保持不变（gRPC 客户端包路径）
 
 4. 示例代码重组：
    - `example/auth-ratelimit` → `examples/security/auth-ratelimit`
@@ -44,7 +44,7 @@ echo "开始目录结构升级..."
 echo "创建新目录结构..."
 mkdir -p pkg/utils/{addr,uuid,bloom} \
         pkg/service/{telemetry,logger,discover,core} \
-        pkg/client/{grpc,http,nacos} \
+        pkg/client/{grpcclient,http,nacos} \
         examples/{security,resilience,services,complete}
 
 # 移动工具类文件
@@ -62,7 +62,6 @@ mv pkg/core/* pkg/service/core/ 2>/dev/null || true
 
 # 重构客户端包
 echo "重构客户端包..."
-mv pkg/client/grpcclient/* pkg/client/grpc/ 2>/dev/null || true
 mv pkg/client/resty/* pkg/client/http/ 2>/dev/null || true
 
 # 重组示例代码
@@ -75,7 +74,7 @@ mv example/example examples/complete/ 2>/dev/null || true
 
 # 清理旧目录
 echo "清理旧目录..."
-rm -rf pkg/{addr,uuid,libs,tracing,logger,discover,core} pkg/client/{grpcclient,resty} example 2>/dev/null || true
+rm -rf pkg/{addr,uuid,libs,tracing,logger,discover,core} pkg/client/resty example 2>/dev/null || true
 
 # 更新导入路径
 echo "更新导入路径..."

@@ -5,8 +5,8 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
-	github.com/rushteam/beauty v0.2.0
-	github.com/rushteam/beauty/contrib/llm v0.2.0
+	github.com/rushteam/beauty v0.8.6
+	github.com/rushteam/beauty/contrib/llm v0.8.6
 )
 
 require (
@@ -60,7 +60,3 @@ require (
 
 // 独立嵌套模块:示例同时用到核心(webserver/SSE/生命周期)与 contrib/llm(agent/session/skills),
 // 用 replace 指向本地联调。核心仓库的 go build ./... 不会编译本模块(模块边界隔离)。
-replace (
-	github.com/rushteam/beauty => ../..
-	github.com/rushteam/beauty/contrib/llm => ../../contrib/llm
-)

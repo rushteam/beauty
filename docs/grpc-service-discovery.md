@@ -135,6 +135,7 @@ grpcServer := grpcserver.New(
 ### 服务元数据
 每个服务包含以下元数据：
 - `kind`: "grpc"
+- `protocol`: "GRPC"（自动注入，兼容 Higress 等云原生网关的后端协议识别）
 - `methods`: 方法列表，如 `["SayHello"]`
 - `proto_file`: proto文件信息，如 `"greeter.proto"`
 - `region`: 地域信息，如 `"us-west-1"`
@@ -144,6 +145,44 @@ grpcServer := grpcserver.New(
 - `weight`: 服务权重，如 `"100"`
 - `priority`: 服务优先级，如 `"0"`
 - 用户自定义元数据（通过WithMetadata设置）
+
+### 云原生网关兼容（Higress / Envoy）
+
+注册到 Nacos 或 Consul 时，框架自动在实例元数据中注入 `protocol` 字段（值为
+`HTTP`/`GRPC`/`HTTPS`/`GRPCS`），使 [Higress](https://higress.io) 等基于 Envoy 的
+云原生网关能**自动识别后端协议**，无需额外配置 `higress.io/backend-protocol` 注解。
+
+- gRPC 服务 → `metadata["protocol"] = "GRPC"`
+- HTTP 服务 → `metadata["protocol"] = "HTTP"`
+
+如需覆盖自动推断（例如 gRPC 服务使用 TLS），通过 `WithMetadata` 显式设置即可：
+
+```go
+grpcserver.WithMetadata(map[string]string{
+    "protocol": "GRPCS",  // 显式声明，不会被覆盖
+})
+```
+
+Higress 侧只需通过 McpBridge 配置 Nacos/Consul 服务来源，即可自动发现 beauty 服务：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    higress.io/destination: my-grpc-server.DEFAULT-GROUP.public.nacos
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          resource:
+            apiGroup: networking.higress.io
+            kind: McpBridge
+            name: default
+```
 
 ## 实现原理
 

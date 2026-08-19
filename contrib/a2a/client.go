@@ -3,6 +3,7 @@ package a2a
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -41,7 +42,19 @@ func (a *remoteAgent) Info() agent.Info {
 	return agent.Info{Name: a.cfg.Name, Description: a.cfg.Description}
 }
 
-func (a *remoteAgent) Run(ctx context.Context, req llm.Request) agent.RunOutcome {
+func (a *remoteAgent) Run(ctx context.Context, req llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		emitOutcome(yield, a.runOnce(ctx, req))
+	}
+}
+
+func (a *remoteAgent) Continue(ctx context.Context, runID string, resolutions []agent.Resolution, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		emitOutcome(yield, a.continueOnce(ctx, runID, resolutions))
+	}
+}
+
+func (a *remoteAgent) runOnce(ctx context.Context, req llm.Request) agent.RunOutcome {
 	msg := a.buildMessage(req)
 
 	result, err := a.client.SendMessage(ctx, &a2a.SendMessageRequest{
@@ -54,7 +67,7 @@ func (a *remoteAgent) Run(ctx context.Context, req llm.Request) agent.RunOutcome
 	return a.handleResult(result)
 }
 
-func (a *remoteAgent) Continue(ctx context.Context, runID string, resolutions []agent.Resolution) agent.RunOutcome {
+func (a *remoteAgent) continueOnce(ctx context.Context, _ string, resolutions []agent.Resolution) agent.RunOutcome {
 	var parts []*a2a.Part
 	for _, r := range resolutions {
 		if r.Approved {
@@ -76,6 +89,24 @@ func (a *remoteAgent) Continue(ctx context.Context, runID string, resolutions []
 		return agent.RunOutcome{Status: agent.StatusError, Err: fmt.Errorf("a2a: continue: %w", err)}
 	}
 	return a.handleResult(result)
+}
+
+func emitOutcome(yield func(agent.Event, error) bool, outcome agent.RunOutcome) {
+	switch outcome.Status {
+	case agent.StatusDone:
+		yield(agent.Event{Type: agent.EventFinal, RunID: outcome.RunID, Response: outcome.Response}, nil)
+	case agent.StatusPaused:
+		yield(agent.Event{
+			Type:         agent.EventPaused,
+			RunID:        outcome.RunID,
+			Response:     outcome.Response,
+			Requirements: outcome.Requirements,
+		}, nil)
+	case agent.StatusError, agent.StatusCancelled:
+		yield(agent.Event{Type: agent.EventError, RunID: outcome.RunID, Err: outcome.Err}, nil)
+	default:
+		yield(agent.Event{Type: agent.EventFinal, RunID: outcome.RunID, Response: outcome.Response}, nil)
+	}
 }
 
 func (a *remoteAgent) buildMessage(req llm.Request) *a2a.Message {

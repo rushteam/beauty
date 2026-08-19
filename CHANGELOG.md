@@ -4,7 +4,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 提交遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)。
-框架本身尚未打 tag，故以 `Unreleased` + 日期分组；`tools` 单独维护语义化版本
+框架已发布语义化版本（当前 v0.8.6），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
 
 ## [Unreleased]

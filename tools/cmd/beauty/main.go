@@ -83,6 +83,10 @@ func main() {
 						Usage: "包含CI配置(GitHub Actions + golangci-lint)",
 					},
 					&cli.BoolFlag{
+						Name:  "with-higress",
+						Usage: "包含Higress网关配置(McpBridge + Ingress路由)",
+					},
+					&cli.BoolFlag{
 						Name:  "dry-run",
 						Usage: "仅预览将生成的文件，不写入磁盘",
 					},

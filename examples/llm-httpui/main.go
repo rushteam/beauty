@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"strings"
 	"time"
@@ -56,26 +57,17 @@ type demoAgent struct{ name string }
 
 func (d demoAgent) Info() agent.Info { return agent.Info{Name: d.name} }
 
-func (d demoAgent) Run(ctx context.Context, req llm.Request) agent.RunOutcome {
-	return agent.RunOutcome{Status: agent.StatusDone, RunID: "run-demo", Response: &llm.Response{Content: "ok"}}
+func (d demoAgent) Run(_ context.Context, _ llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		if !yield(agent.Event{Type: agent.EventStep, RunID: "run-demo", Response: &llm.Response{Content: "thinking"}}, nil) {
+			return
+		}
+		yield(agent.Event{Type: agent.EventFinal, RunID: "run-demo", Response: &llm.Response{Content: "done"}}, nil)
+	}
 }
 
-func (d demoAgent) Continue(ctx context.Context, runID string, resolutions []agent.Resolution) agent.RunOutcome {
-	return d.Run(ctx, llm.Request{})
-}
-
-func (d demoAgent) RunStream(ctx context.Context, req llm.Request) <-chan agent.Event {
-	ch := make(chan agent.Event, 2)
-	go func() {
-		defer close(ch)
-		ch <- agent.Event{Type: agent.EventStep, RunID: "run-demo", Response: &llm.Response{Content: "thinking"}}
-		ch <- agent.Event{Type: agent.EventFinal, RunID: "run-demo", Response: &llm.Response{Content: "done"}}
-	}()
-	return ch
-}
-
-func (d demoAgent) ContinueStream(ctx context.Context, runID string, resolutions []agent.Resolution) <-chan agent.Event {
-	return d.RunStream(ctx, llm.Request{})
+func (d demoAgent) Continue(_ context.Context, _ string, _ []agent.Resolution, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return d.Run(context.Background(), llm.Request{})
 }
 
 func selfTest() (bool, string) {

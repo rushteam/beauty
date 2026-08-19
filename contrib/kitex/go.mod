@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/cloudwego/kitex v0.16.3
-	github.com/rushteam/beauty v0.7.3
+	github.com/rushteam/beauty v0.8.6
 )
 
 require (
@@ -50,5 +50,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/rushteam/beauty => ../../

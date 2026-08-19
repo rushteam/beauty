@@ -6,8 +6,8 @@ toolchain go1.26.5
 
 require (
 	github.com/99designs/gqlgen v0.17.73
-	github.com/rushteam/beauty v0.0.0
-	github.com/rushteam/beauty/contrib/graphql v0.0.0
+	github.com/rushteam/beauty v0.8.6
+	github.com/rushteam/beauty/contrib/graphql v0.8.6
 	github.com/vektah/gqlparser/v2 v2.5.27
 )
 
@@ -62,9 +62,4 @@ require (
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
-
-replace (
-	github.com/rushteam/beauty => ../..
-	github.com/rushteam/beauty/contrib/graphql => ../../contrib/graphql
 )

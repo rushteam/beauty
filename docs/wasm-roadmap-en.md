@@ -65,9 +65,33 @@ router.RegisterBytes(ctx, "/greet", greetWasm, wasm.WithHandlerPool(8))
 http.Handle("/fn/", http.StripPrefix("/fn", router))
 ```
 
+## Tier 5 — Proxy-Wasm ABI Compatibility · Shipped (`contrib/proxywasm`)
+
+Implements the HTTP Filter subset of Proxy-Wasm ABI v0.2.1 on wazero, enabling Higress/Envoy
+ecosystem WASM plugins (compiled with proxy-wasm-go-sdk / proxy-wasm-rust-sdk) to run
+unmodified as Beauty HTTP middleware.
+
+- Host functions: proxy_log, header map ops (6), buffer read/write, send_local_response,
+  properties, stream control, time, tick timer;
+- Minimal WASI (fd_write→slog, clock, random, environ/args);
+- Stateful instance pool (post-init reuse) + timeout interrupt + fail-open/closed + observer;
+- Outputs standard `func(http.Handler) http.Handler`;
+- Stubs for HTTP callout, gRPC, shared data/queue, metrics (to be filled on demand).
+
+Usage:
+
+```go
+rt, _ := proxywasm.New(ctx, proxywasm.WithMemoryLimitPages(32))
+mod, _ := rt.Compile(ctx, higressPluginWasm)
+filter := proxywasm.HTTPFilter(mod,
+    proxywasm.WithPluginConfig(configJSON),
+    proxywasm.WithPoolSize(16),
+)
+beauty.WithWebServer(":8080", mux, webserver.WithMiddleware(filter))
+```
+
 ## Alternatives (Not Scheduled)
 
-- Proxy-Wasm ABI compatibility: reuse existing Envoy Wasm filters (large engineering effort).
 - js/wasm: compile shared logic from `gameloop` / `spatial` (AOI) / `presence` to the browser for client-side prediction.
 - Deploy with GOOS=wasip1 to a wasm runtime: wasip1 networking is limited; currently suited only for pure compute handlers/workers.
 

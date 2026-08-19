@@ -49,10 +49,15 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		return func() {}, fmt.Errorf("consul register: invalid port %q for service %s: %w", portStr, info.Name(), err)
 	}
 
+	// 构建注册元数据：自动注入 "protocol" 使 Higress 等云原生网关能正确识别后端协议，
+	// 无需额外配置 higress.io/backend-protocol 注解。
 	meta := make(map[string]string)
 	maps.Copy(meta, info.Metadata())
 	if _, ok := meta["kind"]; !ok {
 		meta["kind"] = info.Kind()
+	}
+	if _, ok := meta["protocol"]; !ok {
+		meta["protocol"] = kindToProtocol(info.Kind())
 	}
 
 	reg := &api.AgentServiceRegistration{
@@ -196,4 +201,19 @@ func (r *Registry) filterEntries(entries []*api.ServiceEntry) []discover.Service
 		return ss[i].Name < ss[j].Name
 	})
 	return ss
+}
+
+// kindToProtocol 将 beauty 的 kind 映射为云原生网关识别的后端协议字符串。
+// Higress 通过 Consul service meta["protocol"] 判断转发协议。
+func kindToProtocol(kind string) string {
+	switch kind {
+	case "grpc":
+		return "GRPC"
+	case "grpcs":
+		return "GRPCS"
+	case "https":
+		return "HTTPS"
+	default:
+		return "HTTP"
+	}
 }

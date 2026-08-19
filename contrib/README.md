@@ -35,9 +35,13 @@ cd contrib/gorm && go test ./...
 
 | 模块 | 能力 | 主要依赖 |
 |---|---|---|
+| [`contrib/a2a`](a2a) | A2A (Agent-to-Agent) 协议胶水:beauty agent ↔ a2a-go;服务端 `RegisterRoutes` 暴露 StreamAgent,客户端 `NewAgent` 包装远程 agent | a2aproject/a2a-go、llm |
+| [`contrib/agui`](agui) | AG-UI SSE 流式协议:POST → SSE 事件流;服务端 `Handler` + 客户端远程 agent | llm |
 | [`contrib/connectrpc`](connectrpc) | Connect 协议一等公民集成:基于 `net/http` 的 Protobuf RPC,同时兼容 gRPC/gRPC-Web/Connect 三协议;服务端(`Server`)实现 `beauty.Service` + `discover.Service`,自动 H2C、gRPC 健康检查、OTel、按 protobuf 服务名注册到注册中心;客户端(`Transport`)实现 `http.RoundTripper`,集成服务发现 + 轮询负载均衡 | connectrpc.com/connect、grpchealth |
 | [`contrib/kitex`](kitex) | Kitex Thrift 一等公民集成:嵌入 `cloudwego/kitex` Server 为 `beauty.Service` + `discover.Service`,按 Thrift 服务名注册到注册中心;客户端 `ResolverAdapter` 将 beauty Discovery 适配为 Kitex Resolver | cloudwego/kitex |
 | [`contrib/codec/kitex`](codec/kitex) | Kitex 注册中心格式编解码:KVCodec (etcd) + Codec (nacos/consul),使 beauty 服务以 Kitex 原生格式注册,Kitex 客户端可直接发现 | 无(纯 beauty core) |
+| [`contrib/codec/gozero`](codec/gozero) | go-zero 注册中心格式编解码:KV key `{name}/{id}`, value `host:port` 纯文本 | 无(纯 beauty core) |
+| [`contrib/codec/kratos`](codec/kratos) | Kratos 注册中心格式编解码:KV key `/microservices/{name}/{id}`, value JSON endpoints | 无(纯 beauty core) |
 | [`contrib/gorm`](gorm) | GORM 集成:读写分离(dbresolver)、otelgorm 链路、slog 日志桥、错误映射 | gorm.io/gorm、driver/mysql、otelgorm |
 | [`contrib/sqldb`](sqldb) | database/sql 读写分离 + OTel(otelsql),配合 **sqlc**/sqlx/手写 SQL | XSAM/otelsql |
 | [`contrib/nats`](nats) | `pkg/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
@@ -45,22 +49,26 @@ cd contrib/gorm && go test ./...
 | [`contrib/kafka`](kafka) | `pkg/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
 | [`contrib/rabbitmq`](rabbitmq) | `pkg/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
 | [`contrib/redisstream`](redisstream) | `pkg/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
+| [`contrib/ginadapt`](ginadapt) | Gin ↔ beauty HTTP 中间件适配:标准 `func(http.Handler) http.Handler` 转 `gin.HandlerFunc` | gin-gonic/gin |
 | [`contrib/graphql`](graphql) | GraphQL/BFF 层:gqlgen schema-first 封装为 beauty.Service + DataLoader + 复杂度限制 + APQ + 认证透传 + Federation + Subscription(WS/SSE) | 99designs/gqlgen |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |
 | [`contrib/llm`](llm) | provider 无关 LLM 客户端:对话/流式/embedding/**工具调用** + Fallback/Retry/Metered/**Guard 护栏** + 多厂商(OpenAI 兼容 / Anthropic / **AWS Bedrock**)+ 薄 **agent 循环**(`llm/agent`,含审批/流式事件/Steer/Hooks + 统一 Agent 接口/**Planner**/**Team 移交**/**Parallel 并发**/**BestOfN**/**VerifyLoop** 编排 + 工具参数 **JSON 容错**/运行内**上下文压缩**/消息合并)+ **会话记忆** + **Agent Skills** | 无(纯 stdlib) |
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |
 | [`contrib/llmcheckpoint`](llmcheckpoint) | `llm/agent` RunStore / CheckpointStore 的 SQLite / Redis 持久化 | llm + modernc.org/sqlite、go-redis |
+| [`contrib/llmservice`](llmservice) | 胶水:把 llm/agent 包装为 beauty.Service;worker 池 + SSE HTTP + MQ 消费 + 分布式锁/亲和路由 | llm + beauty core |
 | [`contrib/agones`](agones) | Agones GameServer 生命周期 × `pkg/gameroom`(Ready/Drain/Shutdown + WatchContext) | agones.dev/agones |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 | [`contrib/memoryvector`](memoryvector) | 胶水:Embedder + vector → `llm/agent/memory.Store`(语义长期记忆) | llm + vector |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |
 | [`contrib/mcpagent`](mcpagent) | 胶水:把 `mcp` 的远程工具桥接成 `llm/agent.Tool`,喂给 agent.Runner 的工具循环 | llm + mcp + go-sdk |
 | [`contrib/wasm`](wasm) | WebAssembly 插件运行时(wazero):沙箱化 wasm 模块 + host functions + "HTTP 中间件即 wasm" | tetratelabs/wazero |
+| [`contrib/proxywasm`](proxywasm) | Proxy-Wasm ABI v0.2.1 兼容:Higress/Envoy 生态 WASM 插件无需修改即可作为 Beauty HTTP 中间件运行;HTTP Filter 子集(header/body/log/properties/send_local_response) | tetratelabs/wazero |
 | [`contrib/wasmagent`](wasmagent) | 胶水:把 `wasm` 的沙箱执行能力接到 `llm/agent`(技能脚本 wasm 执行 + wasm 模块即 agent.Tool) | wasm + llm |
 | [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
 | [`contrib/casbin`](casbin) | `pkg/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |
 | [`contrib/openfga`](openfga) | `pkg/authz` 的 OpenFGA 关系授权(ReBAC,细粒度) | openfga/go-sdk |
 | [`contrib/otelllm`](otelllm) | LLM AI 可观测性:OTel Trace/Metrics 装饰器(GenAI 语义约定)+ Agent run-tree Hooks + 增强版 Metered(含错误上报),可导出到 Jaeger/Tempo/Langfuse/LangSmith | otel/otel-sdk |
+| [`contrib/p2p-webrtc`](p2p-webrtc) | `pkg/p2p` 的 WebRTC DataChannel 传输:NAT 穿透(STUN/TURN) + 浏览器兼容;需信令服务配合 | pion/webrtc |
 | [`contrib/spire`](spire) | SPIFFE/SPIRE Workload API:X509-SVID mTLS + SPIFFE ID→auth/authz | go-spiffe/v2 |
 
 `contrib/connectrpc` 和 `contrib/kitex` 实现核心 `beauty.Service` 和 `discover.Service` 接口,
@@ -81,9 +89,9 @@ TLS 钩子(本地联调暂用 `replace`,发布前去掉);`contrib/gorm`、`contr
 各模块独立打 tag(`<模块目录>/vX.Y.Z`),独立 `go get`:
 
 ```bash
-go get github.com/rushteam/beauty/contrib/gorm@v0.1.0
-go get github.com/rushteam/beauty/contrib/sqldb@v0.1.0
-go get github.com/rushteam/beauty/contrib/nats@v0.1.0    # 依赖核心 beauty v0.1.0
+go get github.com/rushteam/beauty/contrib/gorm@v0.8.6
+go get github.com/rushteam/beauty/contrib/sqldb@v0.8.6
+go get github.com/rushteam/beauty/contrib/nats@v0.8.6    # 依赖核心 beauty v0.8.6
 ```
 
 依赖核心的 mq 模块默认按 `require` 的核心版本解析。若本地要同时改核心与该 contrib,临时在其

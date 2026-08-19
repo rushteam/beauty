@@ -9,7 +9,7 @@
 - `LabelFilter`：通用的标签过滤器，提供各种操作符和便捷方法
 - `FilterOperator`：支持的过滤操作符常量
 
-### gRPC 服务标签过滤器 (`pkg/client/grpc`)
+### gRPC 服务标签过滤器 (`pkg/client/grpcclient`)
 - `ServiceLabelFilter`：基于通用 `LabelFilter` 的服务专用过滤器
 - 提供服务发现相关的容错机制和日志记录
 

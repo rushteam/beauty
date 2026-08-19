@@ -5,8 +5,8 @@ go 1.26.0
 toolchain go1.26.5
 
 require (
-	github.com/rushteam/beauty v0.3.6
-	github.com/rushteam/beauty/contrib/spire v0.0.0
+	github.com/rushteam/beauty v0.8.6
+	github.com/rushteam/beauty/contrib/spire v0.8.6
 	github.com/spiffe/go-spiffe/v2 v2.6.0
 	google.golang.org/grpc v1.82.1
 )
@@ -59,9 +59,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
-
-replace (
-	github.com/rushteam/beauty => ../..
-	github.com/rushteam/beauty/contrib/spire => ../../contrib/spire
 )

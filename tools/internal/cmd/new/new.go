@@ -38,6 +38,7 @@ func Action(ctx context.Context, c *cli.Command) error {
 	withDocker := c.Bool("with-docker")
 	withK8s := c.Bool("with-k8s")
 	withCI := c.Bool("with-ci")
+	withHigress := c.Bool("with-higress")
 	dryRun := c.Bool("dry-run")
 	verbose := c.Bool("verbose")
 
@@ -134,6 +135,7 @@ func Action(ctx context.Context, c *cli.Command) error {
 	entity.Config.WithDocker = withDocker
 	entity.Config.WithK8s = withK8s
 	entity.Config.WithCI = withCI
+	entity.Config.WithHigress = withHigress
 	entity.Config.DryRun = dryRun
 	entity.Config.EnableWeb = enableWeb
 	entity.Config.EnableGrpc = enableGrpc
@@ -212,6 +214,11 @@ func Action(ctx context.Context, c *cli.Command) error {
 
 	if withDocker {
 		fmt.Println("  docker compose up -d        # 启动应用及本地依赖(etcd/jaeger)")
+	}
+
+	if withHigress {
+		fmt.Println("  # Higress 配置已生成到 deploy/higress/")
+		fmt.Println("  # 参见 deploy/higress/README.md 了解部署步骤")
 	}
 
 	return nil
@@ -876,6 +883,7 @@ func renderAddons(conf *entity.Project, verbose bool) error {
 		{conf.WithDocker, "docker", "Docker"},
 		{conf.WithK8s, "k8s", "Kubernetes"},
 		{conf.WithCI, "ci", "CI"},
+		{conf.WithHigress, "higress", "Higress"},
 	}
 
 	for _, a := range addons {

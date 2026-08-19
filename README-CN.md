@@ -35,7 +35,7 @@ Beauty 有一个很小的核心(`beauty.New(...).Start(ctx)`),把任意多个服
 - **统一生命周期**:一个 `app.Start(ctx)` 管 HTTP、gRPC、定时任务和任意 `Service`;配置/发现/韧性/可观测内建。
 - **实时 + 媒体**:WS/SSE/QUIC、定步长游戏循环、空间 AOI 与在线;P2P DataChannel 可插拔传输(TCP/QUIC/WebRTC)与拓扑(mesh/star/选主/凑人匹配);RTMP 采集、HLS / LL-HLS origin、WebRTC WHIP/WHEP + SFU、多路流管理。
 - **WASM · Agent**:[`contrib/wasm`](contrib/wasm)(中间件 / FaaS-lite 路由)、[`contrib/wasmopa`](contrib/wasmopa)(Rego→wasm 鉴权)、[`contrib/wasmagent`](contrib/wasmagent)(沙箱 agent 工具);LLM / RAG / MCP 见 [`contrib/llm`](contrib/llm) · [`contrib/vector`](contrib/vector) · [`contrib/mcp`](contrib/mcp)。路线图:[`docs/wasm-roadmap.md`](docs/wasm-roadmap.md)。
-- **其余能力**:配置热更新(nacos/etcd/consul/k8s)、服务发现、分布式锁/选主、限流/熔断/过载保护、传输无关 MQ、OpenTelemetry、一致性哈希分片,以及 contrib 里的数据/搜索/broker 模块。
+- **其余能力**:配置热更新(nacos/etcd/consul/k8s)、服务发现(自动注入 protocol 元数据,兼容 Higress 等云原生网关)、分布式锁/选主、限流/熔断/过载保护、传输无关 MQ、OpenTelemetry、一致性哈希分片,以及 contrib 里的数据/搜索/broker 模块。
 
 ## 安装
 

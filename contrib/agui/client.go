@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"strings"
 
@@ -24,24 +25,20 @@ type ClientConfig struct {
 	HTTPClient *http.Client
 }
 
-// remoteAgent 将远程 AG-UI 服务包装为 beauty agent.Agent / StreamAgent。
+// remoteAgent 将远程 AG-UI 服务包装为 beauty agent.Agent。
 type remoteAgent struct {
 	endpoint string
 	cfg      ClientConfig
 	threadID string
 }
 
-// NewAgent 将远程 AG-UI 端点包装为 beauty agent.Agent 和 StreamAgent。
+// NewAgent 将远程 AG-UI 端点包装为 beauty agent.Agent。
 //
 // 使用方式:
 //
 //	a := agui.NewAgent("http://remote:8080/agent", agui.ClientConfig{Name: "remote"})
-//	outcome := a.Run(ctx, llm.Request{Messages: msgs})
-//
-// 或流式:
-//
-//	ch := a.(agent.StreamAgent).RunStream(ctx, req)
-func NewAgent(endpoint string, cfg ClientConfig) agent.StreamAgent {
+//	for ev, err := range a.Run(ctx, llm.Request{Messages: msgs}) { ... }
+func NewAgent(endpoint string, cfg ClientConfig) agent.Agent {
 	return &remoteAgent{endpoint: endpoint, cfg: cfg}
 }
 
@@ -49,35 +46,15 @@ func (a *remoteAgent) Info() agent.Info {
 	return agent.Info{Name: a.cfg.Name, Description: a.cfg.Description}
 }
 
-func (a *remoteAgent) Run(ctx context.Context, req llm.Request) agent.RunOutcome {
-	var messages []llm.Message
-	var finalContent string
-
-	for ev := range a.RunStream(ctx, req) {
-		switch ev.Type {
-		case agent.EventFinal:
-			if ev.Response != nil {
-				finalContent = ev.Response.Content
-			}
-		case agent.EventToken:
-			if ev.Response != nil {
-				finalContent += ev.Response.Content
-			}
-		case agent.EventError:
-			return agent.RunOutcome{Status: agent.StatusError, Err: ev.Err}
+func (a *remoteAgent) Run(ctx context.Context, req llm.Request, _ ...agent.Option) iter.Seq2[agent.Event, error] {
+	return func(yield func(agent.Event, error) bool) {
+		if err := a.doStream(ctx, req, yield); err != nil {
+			yield(agent.Event{Type: agent.EventError, Err: err}, nil)
 		}
-	}
-
-	messages = append(messages, llm.Message{Role: llm.Assistant, Content: finalContent})
-	return agent.RunOutcome{
-		Status:   agent.StatusDone,
-		Messages: messages,
-		Response: &llm.Response{Content: finalContent},
 	}
 }
 
-func (a *remoteAgent) Continue(ctx context.Context, runID string, resolutions []agent.Resolution) agent.RunOutcome {
-	// AG-UI 不原生支持 continue,通过新消息模拟
+func (a *remoteAgent) Continue(ctx context.Context, _ string, resolutions []agent.Resolution, _ ...agent.Option) iter.Seq2[agent.Event, error] {
 	var parts []string
 	for _, r := range resolutions {
 		if r.Approved {
@@ -90,31 +67,7 @@ func (a *remoteAgent) Continue(ctx context.Context, runID string, resolutions []
 	return a.Run(ctx, req)
 }
 
-func (a *remoteAgent) RunStream(ctx context.Context, req llm.Request) <-chan agent.Event {
-	ch := make(chan agent.Event, 32)
-	go func() {
-		defer close(ch)
-		if err := a.doStream(ctx, req, ch); err != nil {
-			ch <- agent.Event{Type: agent.EventError, Err: err}
-		}
-	}()
-	return ch
-}
-
-func (a *remoteAgent) ContinueStream(ctx context.Context, runID string, resolutions []agent.Resolution) <-chan agent.Event {
-	var parts []string
-	for _, r := range resolutions {
-		if r.Approved {
-			parts = append(parts, fmt.Sprintf("[approved] %s", r.ID))
-		} else {
-			parts = append(parts, fmt.Sprintf("[denied] %s: %s", r.ID, r.Reason))
-		}
-	}
-	req := llm.Request{Messages: []llm.Message{{Role: llm.User, Content: strings.Join(parts, "\n")}}}
-	return a.RunStream(ctx, req)
-}
-
-func (a *remoteAgent) doStream(ctx context.Context, req llm.Request, ch chan<- agent.Event) error {
+func (a *remoteAgent) doStream(ctx context.Context, req llm.Request, yield func(agent.Event, error) bool) error {
 	input := a.buildInput(req)
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -144,7 +97,7 @@ func (a *remoteAgent) doStream(ctx context.Context, req llm.Request, ch chan<- a
 		return fmt.Errorf("agui client: status %d: %s", resp.StatusCode, string(b))
 	}
 
-	return a.parseSSE(resp.Body, ch)
+	return a.parseSSE(resp.Body, yield)
 }
 
 func (a *remoteAgent) buildInput(req llm.Request) *RunAgentInput {
@@ -181,10 +134,9 @@ func (a *remoteAgent) buildInput(req llm.Request) *RunAgentInput {
 	return input
 }
 
-func (a *remoteAgent) parseSSE(r io.Reader, ch chan<- agent.Event) error {
+func (a *remoteAgent) parseSSE(r io.Reader, yield func(agent.Event, error) bool) error {
 	scanner := bufio.NewScanner(r)
-	// 累积工具调用参数
-	toolCalls := make(map[string]*llm.ToolCall) // toolCallId → accumulated
+	toolCalls := make(map[string]*llm.ToolCall)
 
 	var allContent strings.Builder
 
@@ -211,15 +163,19 @@ func (a *remoteAgent) parseSSE(r io.Reader, ch chan<- agent.Event) error {
 
 		case EventTextMessageContent:
 			allContent.WriteString(ev.Delta)
-			ch <- agent.Event{
+			if !yield(agent.Event{
 				Type:     agent.EventToken,
 				Response: &llm.Response{Content: ev.Delta},
+			}, nil) {
+				return nil
 			}
 
 		case EventReasoningMessageContent:
-			ch <- agent.Event{
+			if !yield(agent.Event{
 				Type:     agent.EventToken,
 				Response: &llm.Response{Thinking: ev.Delta},
+			}, nil) {
+				return nil
 			}
 
 		case EventToolCallStart:
@@ -235,20 +191,24 @@ func (a *remoteAgent) parseSSE(r io.Reader, ch chan<- agent.Event) error {
 
 		case EventToolCallEnd:
 			if tc, ok := toolCalls[ev.ToolCallID]; ok {
-				ch <- agent.Event{
+				if !yield(agent.Event{
 					Type:     agent.EventToolStart,
 					ToolCall: tc,
+				}, nil) {
+					return nil
 				}
 				delete(toolCalls, ev.ToolCallID)
 			}
 
 		case EventToolCallResult:
-			ch <- agent.Event{
+			if !yield(agent.Event{
 				Type:   agent.EventToolResult,
 				Result: ev.Content,
 				ToolCall: &llm.ToolCall{
 					ID: ev.ToolCallID,
 				},
+			}, nil) {
+				return nil
 			}
 
 		case EventRunFinished:
@@ -256,21 +216,23 @@ func (a *remoteAgent) parseSSE(r io.Reader, ch chan<- agent.Event) error {
 			if ev.Result != "" {
 				content = ev.Result
 			}
-			ch <- agent.Event{
+			yield(agent.Event{
 				Type:     agent.EventFinal,
 				Response: &llm.Response{Content: content},
-			}
+			}, nil)
 			return nil
 
 		case EventRunError:
-			ch <- agent.Event{
+			yield(agent.Event{
 				Type: agent.EventError,
 				Err:  fmt.Errorf("agui remote error: %s", ev.Message),
-			}
+			}, nil)
 			return nil
 
 		case EventStepStarted:
-			ch <- agent.Event{Type: agent.EventStep}
+			if !yield(agent.Event{Type: agent.EventStep}, nil) {
+				return nil
+			}
 
 		case EventStepFinished:
 			// 忽略

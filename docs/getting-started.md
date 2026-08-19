@@ -309,6 +309,11 @@ On shutdown Beauty deregisters first, optionally waits (`beauty.WithShutdownDrai
 | Dial | `grpcclient.DialContext` |
 | HTTP client | `pkg/client/http` |
 
+> **Gateway compatibility (Higress / Envoy):** When registering to Nacos or Consul, Beauty
+> automatically injects `metadata["protocol"]` (`GRPC`/`HTTP`/`HTTPS`) so that
+> [Higress](https://higress.io) and other Envoy-based gateways can detect the backend protocol
+> without extra annotations. See [grpc-service-discovery.md](grpc-service-discovery.md) for details.
+
 Demos: [examples/grpc-service-discovery](../examples/grpc-service-discovery), [examples/grpc-dial-context](../examples/grpc-dial-context). Docs: [grpc-service-discovery.md](grpc-service-discovery.md), [grpc-dial-context.md](grpc-dial-context.md).
 
 ---

@@ -3,17 +3,18 @@ package entity
 import "github.com/gobuffalo/here"
 
 type Project struct {
-	Name       string
-	Module     string
-	Path       string
-	ImportPath string
-	Web        string
-	Template   string
-	WithDocker bool
-	WithK8s    bool
-	WithCI     bool
-	DryRun     bool
-	Info       here.Info
+	Name        string
+	Module      string
+	Path        string
+	ImportPath  string
+	Web         string
+	Template    string
+	WithDocker  bool
+	WithK8s     bool
+	WithCI      bool
+	WithHigress bool
+	DryRun      bool
+	Info        here.Info
 	// 服务类型选择
 	EnableWeb  bool // 是否启用 HTTP 服务
 	EnableGrpc bool // 是否启用 gRPC 服务

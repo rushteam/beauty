@@ -15,41 +15,30 @@ service demo {
 	rpc Index(getRequest) returns (getResponse)
 }
 `
-	// 	content := `
-	// service helloworld {
-	// 	@route GET|POST "/index/:id"
-	// 	rpc Index(getRequest) returns (getResponse)
-	// 	rpc Helloworld(getRequest) returns (getResponse)
-	// }
-	// `
 	stmts, err := Parser(strings.NewReader(content), "")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	fmt.Printf(">>> %+v", len(stmts))
-	var gen = ""
+	if len(stmts) == 0 {
+		t.Fatal("expected at least 1 statement, got 0")
+	}
+
+	var services []string
+	var rpcs []string
 	ast.Inspect(stmts, func(node ast.Node) bool {
-		// fmt.Printf("node: %+v \n", n)
 		switch n := node.(type) {
 		case *ast.Service:
-			gen += fmt.Sprintf("service %v: %+v\n", n.Name, n)
-		case *ast.Route:
-			gen += fmt.Sprintf("@route %v %v\n", strings.Join(n.Methods, "|"), n.URI)
+			services = append(services, n.Name)
 		case *ast.RPC:
-			gen += fmt.Sprintf("rpc %v(%v) returns %v\n", n.Handler, n.Request, n.Response)
+			rpcs = append(rpcs, fmt.Sprintf("%s(%s) returns %s", n.Handler, n.Request, n.Response))
 		}
 		return true
 	})
-	t.Log(gen)
-	t.Fail()
-	// v, _ := json.Marshal(stmts)
-	// fmt.Println(string(v))
-	// ast.Inspect(stmts, func(node ast.Node) bool {
-	// 	fmt.Printf("node: %+v \n", node)
-	// 	// switch n := node.(type) {
-	// 	// case *ast.Service:
-	// 	// 	fmt.Println(n.Name)
-	// 	// }
-	// 	return true
-	// })
+
+	if len(services) != 2 || services[0] != "helloworld" || services[1] != "demo" {
+		t.Fatalf("services = %v, want [helloworld demo]", services)
+	}
+	if len(rpcs) != 1 || rpcs[0] != "Index(getRequest) returns getResponse" {
+		t.Fatalf("rpcs = %v", rpcs)
+	}
 }

@@ -27,17 +27,17 @@ type ServerConfig struct {
 
 // executor 实现 a2asrv.AgentExecutor 接口。
 type executor struct {
-	agent agent.StreamAgent
+	agent agent.Agent
 	cfg   ServerConfig
 }
 
-// NewExecutor 把 beauty StreamAgent 桥接为 A2A a2asrv.AgentExecutor。
+// NewExecutor 把 beauty Agent 桥接为 A2A a2asrv.AgentExecutor。
 // 配合 a2a-go 的 server 包启动 HTTP 服务:
 //
 //	exec := a2a.NewExecutor(myAgent, a2a.ServerConfig{AgentCard: card})
 //	handler := a2asrv.NewHandler(exec)
 //	mux.Handle("/", a2asrv.NewJSONRPCHandler(handler))
-func NewExecutor(a agent.StreamAgent, cfg ServerConfig) a2asrv.AgentExecutor {
+func NewExecutor(a agent.Agent, cfg ServerConfig) a2asrv.AgentExecutor {
 	return &executor{agent: a, cfg: cfg}
 }
 
@@ -69,11 +69,16 @@ func (e *executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			return
 		}
 
-		ch := e.agent.RunStream(ctx, req)
 		var allText strings.Builder
 		var artifactID a2a.ArtifactID
 
-		for ev := range ch {
+		for ev, err := range e.agent.Run(ctx, req) {
+			if err != nil {
+				yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
+					a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(err.Error())),
+				), nil)
+				return
+			}
 			switch ev.Type {
 			case agent.EventToken:
 				if ev.Response != nil && ev.Response.Content != "" {
@@ -147,7 +152,7 @@ func (e *executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 //	mux := http.NewServeMux()
 //	a2a.RegisterRoutes(mux, myStreamAgent, a2a.ServerConfig{AgentCard: card})
 //	http.ListenAndServe(":5000", mux)
-func RegisterRoutes(mux *http.ServeMux, a agent.StreamAgent, cfg ServerConfig) {
+func RegisterRoutes(mux *http.ServeMux, a agent.Agent, cfg ServerConfig) {
 	exec := NewExecutor(a, cfg)
 	var opts []a2asrv.RequestHandlerOption
 	if cfg.AgentCard != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"sort"
 	"strconv"
@@ -70,13 +71,27 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 	if err != nil {
 		return func() {}, err
 	}
+
+	// 构建注册元数据：copy 一份避免修改调用方原始 map，并自动注入网关兼容字段。
+	// "protocol" 字段使 Higress 等云原生网关能自动识别后端协议（HTTP/GRPC/HTTPS/GRPCS），
+	// 无需额外配置 higress.io/backend-protocol 注解。
+	// 用户可通过 WithServiceMetadata 显式设置 "protocol" 来覆盖自动推断。
+	meta := make(map[string]string)
+	maps.Copy(meta, info.Metadata())
+	if _, ok := meta["kind"]; !ok {
+		meta["kind"] = info.Kind()
+	}
+	if _, ok := meta["protocol"]; !ok {
+		meta["protocol"] = kindToProtocol(info.Kind())
+	}
+
 	if _, err := registerClient.RegisterInstance(vo.RegisterInstanceParam{
 		Ip:          host,
 		Port:        portUint,
 		Weight:      r.c.Weight,
 		Enable:      true,
 		Healthy:     true,
-		Metadata:    info.Metadata(),
+		Metadata:    meta,
 		ServiceName: info.Name(),
 		ClusterName: r.c.Cluster,
 		GroupName:   r.c.Group,
@@ -88,7 +103,7 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		slog.String("svc.id", info.ID()),
 		slog.String("svc.name", info.Name()),
 		slog.String("svc.addr", info.Addr()),
-		slog.Any("svc.meta", info.Metadata()),
+		slog.Any("svc.meta", meta),
 	)
 	return func() {
 		_, err := registerClient.DeregisterInstance(vo.DeregisterInstanceParam{
@@ -218,4 +233,20 @@ func (r *Registry) filterInstances(services []model.Instance) []discover.Service
 		return ss[i].Name < ss[j].Name
 	})
 	return ss
+}
+
+// kindToProtocol 将 beauty 的 kind 映射为云原生网关识别的后端协议字符串。
+// Higress 通过 Nacos 实例 metadata["protocol"] 判断转发协议
+// (参见 higress registry/nacos/v2/watcher.go generateServiceEntry)。
+func kindToProtocol(kind string) string {
+	switch kind {
+	case "grpc":
+		return "GRPC"
+	case "grpcs":
+		return "GRPCS"
+	case "https":
+		return "HTTPS"
+	default:
+		return "HTTP"
+	}
 }

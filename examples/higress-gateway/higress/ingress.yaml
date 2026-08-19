@@ -1,0 +1,53 @@
+apiVersion: networking.higress.io/v1
+kind: McpBridge
+metadata:
+  name: default
+  namespace: higress-system
+spec:
+  registries:
+  - name: local-nacos
+    type: nacos2
+    domain: nacos
+    port: 8848
+    nacosNamespaceId: public
+    nacosGroups:
+    - DEFAULT_GROUP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    higress.io/destination: user-svc.DEFAULT-GROUP.public.nacos
+    higress.io/backend-protocol: "GRPC"
+  name: user-svc
+spec:
+  ingressClassName: higress
+  rules:
+  - http:
+      paths:
+      - path: /api.user.v1.UserService
+        pathType: Prefix
+        backend:
+          resource:
+            apiGroup: networking.higress.io
+            kind: McpBridge
+            name: default
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    higress.io/destination: web-svc.DEFAULT-GROUP.public.nacos
+  name: web-svc
+spec:
+  ingressClassName: higress
+  rules:
+  - http:
+      paths:
+      - path: /web
+        pathType: Prefix
+        backend:
+          resource:
+            apiGroup: networking.higress.io
+            kind: McpBridge
+            name: default

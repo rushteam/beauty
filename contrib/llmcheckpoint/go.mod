@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/redis/go-redis/v9 v9.21.0
-	github.com/rushteam/beauty/contrib/llm v0.0.0
+	github.com/rushteam/beauty/contrib/llm v0.8.6
 	modernc.org/sqlite v1.54.0
 )
 
@@ -23,5 +23,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/rushteam/beauty/contrib/llm => ../llm

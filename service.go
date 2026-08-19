@@ -1,11 +1,14 @@
 package beauty
 
 import (
+	"context"
+	"net"
 	"net/http"
 
 	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/pprof"
+	"github.com/rushteam/beauty/pkg/service/tcpserver"
 	"github.com/rushteam/beauty/pkg/service/webserver"
 	"google.golang.org/grpc"
 )
@@ -16,6 +19,12 @@ func WithWebServer(addr string, mux http.Handler, opts ...webserver.Option) Opti
 
 func WithGrpcServer(addr string, handler func(*grpc.Server), opts ...grpcserver.Option) Option {
 	return WithService(grpcserver.New(addr, handler, opts...))
+}
+
+// WithTcpServer 启动一个原生 TCP 服务。handler 处理每个接入的连接。
+// 适合自定义二进制协议的场景(IoT 设备接入、游戏网关等)。
+func WithTcpServer(addr string, handler func(ctx context.Context, conn net.Conn), opts ...tcpserver.Option) Option {
+	return WithService(tcpserver.New(addr, handler, opts...))
 }
 
 func WithCrontab(opts ...cron.CronOptions) Option {

@@ -282,6 +282,9 @@ func (r *repeater[T]) Tick(bb *T) Status {
 			return Running
 		default:
 			r.count++
+			if r.limit == 0 {
+				return Running
+			}
 		}
 	}
 }

@@ -124,7 +124,6 @@ func (s *Session[S, I]) Advance(predicted []I) (frame uint64, state S) {
 	s.inputs[frame] = predicted
 	s.currentState = s.sim.Simulate(s.currentState, frame, predicted)
 	s.snaps[frame] = s.currentState
-	s.gc()
 	s.stats.CurrentFrame = frame
 	return frame, s.currentState
 }
@@ -140,10 +139,15 @@ func (s *Session[S, I]) Confirm(frame uint64, serverState S, confirmedInputs []I
 	if frame <= s.confirmedFrame {
 		return false, 0, s.currentState
 	}
+	oldConfirmed := s.confirmedFrame
 	s.confirmedFrame = frame
 	s.confirmedState = serverState
 	s.stats.ConfirmedFrame = frame
 	s.inputs[frame] = confirmedInputs
+
+	if frame > oldConfirmed {
+		s.gc(oldConfirmed)
+	}
 
 	gap := int(s.currentFrame - frame)
 	if gap <= 0 {
@@ -207,19 +211,9 @@ func (s *Session[S, I]) SnapshotAt(frame uint64) (S, bool) {
 }
 
 // gc 清理过旧的快照和输入(保留 confirmed 帧之后的)。
-func (s *Session[S, I]) gc() {
-	cutoff := s.confirmedFrame
-	if cutoff == 0 {
-		return
-	}
-	for f := range s.snaps {
-		if f < cutoff {
-			delete(s.snaps, f)
-		}
-	}
-	for f := range s.inputs {
-		if f < cutoff {
-			delete(s.inputs, f)
-		}
+func (s *Session[S, I]) gc(oldConfirmed uint64) {
+	for f := oldConfirmed; f < s.confirmedFrame; f++ {
+		delete(s.snaps, f)
+		delete(s.inputs, f)
 	}
 }

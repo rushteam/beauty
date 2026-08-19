@@ -45,20 +45,22 @@ func NewTracker[K comparable]() *Tracker[K] {
 
 // SetField 标记实体 key 的字段 field 已修改。field 是字段的数字 ID(由业务约定,
 // 如 protobuf field number 或自定义的枚举常量)。
-// 每次调用自动递增该实体的版本号。
+// 仅当字段之前未标脏时递增版本号。
 func (t *Tracker[K]) SetField(key K, field int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	bm := t.dirty[key]
 	if bm == nil {
-		bm = bitmap.New(field + 1)
+		bm = bitmap.New(max(field+1, 64))
 		t.dirty[key] = bm
 	}
-	bm.Set(field)
-	t.version[key]++
+	if !bm.Test(field) {
+		bm.Set(field)
+		t.version[key]++
+	}
 }
 
-// SetFields 批量标记多个字段。
+// SetFields 批量标记多个字段。仅在至少有一个新脏字段时递增版本号。
 func (t *Tracker[K]) SetFields(key K, fields ...int) {
 	if len(fields) == 0 {
 		return
@@ -67,13 +69,25 @@ func (t *Tracker[K]) SetFields(key K, fields ...int) {
 	defer t.mu.Unlock()
 	bm := t.dirty[key]
 	if bm == nil {
-		bm = bitmap.New(64)
+		maxField := 0
+		for _, f := range fields {
+			if f > maxField {
+				maxField = f
+			}
+		}
+		bm = bitmap.New(max(maxField+1, 64))
 		t.dirty[key] = bm
 	}
+	changed := false
 	for _, f := range fields {
-		bm.Set(f)
+		if !bm.Test(f) {
+			bm.Set(f)
+			changed = true
+		}
 	}
-	t.version[key]++
+	if changed {
+		t.version[key]++
+	}
 }
 
 // IsDirty 检查实体 key 是否有脏字段。

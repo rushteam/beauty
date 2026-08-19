@@ -24,7 +24,10 @@
 // 重连 goroutine 读 Recover)。零值不可用:用 NewLog 构造。
 package cmdlog
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 // config 配置。
 type config struct {
@@ -97,18 +100,23 @@ func NewLog[S, C any](opts ...Option) *Log[S, C] {
 	}
 }
 
-// Record 记录一帧的指令。frame 应单调递增。
-func (l *Log[S, C]) Record(frame uint64, cmds []C) {
+// ErrFrameNotMonotonic 帧号未单调递增。
+var ErrFrameNotMonotonic = errors.New("cmdlog: frame must be monotonically increasing")
+
+// Record 记录一帧的指令。frame 必须严格大于上一次记录的帧号(单调递增)。
+func (l *Log[S, C]) Record(frame uint64, cmds []C) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.cmdCount > 0 && frame <= l.latestFrame {
+		return ErrFrameNotMonotonic
+	}
 	l.cmds[l.cmdHead] = cmdEntry[C]{frame: frame, cmds: cmds}
 	l.cmdHead = (l.cmdHead + 1) % l.cmdDepth
 	if l.cmdCount < l.cmdDepth {
 		l.cmdCount++
 	}
-	if frame > l.latestFrame {
-		l.latestFrame = frame
-	}
+	l.latestFrame = frame
+	return nil
 }
 
 // Checkpoint 存储一个快照检查点(由业务周期性调用,如每 N 帧一次)。

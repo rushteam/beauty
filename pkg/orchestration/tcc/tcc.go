@@ -105,7 +105,9 @@ func (r *Result) Failed() bool { return r.Status != StatusConfirmed }
 type config struct {
 	confirmRetries int
 	cancelRetries  int
-	retryDelay     time.Duration
+	confirmDelay   time.Duration
+	cancelDelay    time.Duration
+	maxRetryDelay  time.Duration
 	onCancel       func(branch string, attempt int, err error)
 	onConfirm      func(branch string, attempt int, err error)
 }
@@ -120,16 +122,28 @@ func WithConfirmRetry(retries int, delay time.Duration) Option {
 			c.confirmRetries = retries
 		}
 		if delay > 0 {
-			c.retryDelay = delay
+			c.confirmDelay = delay
 		}
 	}
 }
 
-// WithCancelRetry 设置 Cancel 失败重试次数。
-func WithCancelRetry(retries int) Option {
+// WithCancelRetry 设置 Cancel 失败重试次数与退避间隔。
+func WithCancelRetry(retries int, delays ...time.Duration) Option {
 	return func(c *config) {
 		if retries >= 0 {
 			c.cancelRetries = retries
+		}
+		if len(delays) > 0 && delays[0] > 0 {
+			c.cancelDelay = delays[0]
+		}
+	}
+}
+
+// WithMaxRetryDelay 设置指数退避的最大延迟上限,防止退避时间溢出。
+func WithMaxRetryDelay(d time.Duration) Option {
+	return func(c *config) {
+		if d > 0 {
+			c.maxRetryDelay = d
 		}
 	}
 }
@@ -153,7 +167,11 @@ type Tx struct {
 
 // New 创建 TCC 事务。name 用于结果与日志。
 func New(name string, opts ...Option) *Tx {
-	cfg := config{retryDelay: 100 * time.Millisecond}
+	cfg := config{
+		confirmDelay:  100 * time.Millisecond,
+		cancelDelay:   100 * time.Millisecond,
+		maxRetryDelay: 10 * time.Second,
+	}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -201,7 +219,9 @@ func (t *Tx) Execute(ctx context.Context) *Result {
 }
 
 // confirmAll 顺序确认所有已 Try 的分支(best-effort:一个失败不影响后续)。
+// 使用 context.WithoutCancel 保证父 ctx 取消不会中断 Confirm 流程。
 func (t *Tx) confirmAll(ctx context.Context, tried []int, res *Result) {
+	confirmCtx := context.WithoutCancel(ctx)
 	var confirmErrs []error
 	for _, idx := range tried {
 		b := t.branches[idx]
@@ -210,7 +230,7 @@ func (t *Tx) confirmAll(ctx context.Context, tried []int, res *Result) {
 			continue
 		}
 
-		err := t.retryOp(ctx, b.Name, b.Confirm, t.cfg.confirmRetries, t.cfg.onConfirm)
+		err := t.retryOp(confirmCtx, b.Name, b.Confirm, t.cfg.confirmRetries, t.cfg.confirmDelay, t.cfg.onConfirm)
 		res.Branches[idx].Confirmed = true
 		res.Branches[idx].ConfirmErr = err
 		if err != nil {
@@ -235,7 +255,7 @@ func (t *Tx) cancelAll(ctx context.Context, tried []int, res *Result) {
 			continue
 		}
 
-		err := t.retryOp(compCtx, b.Name, b.Cancel, t.cfg.cancelRetries, t.cfg.onCancel)
+		err := t.retryOp(compCtx, b.Name, b.Cancel, t.cfg.cancelRetries, t.cfg.cancelDelay, t.cfg.onCancel)
 		res.Branches[idx].Cancelled = true
 		res.Branches[idx].CancelErr = err
 		if err != nil {
@@ -244,7 +264,7 @@ func (t *Tx) cancelAll(ctx context.Context, tried []int, res *Result) {
 	}
 }
 
-func (t *Tx) retryOp(ctx context.Context, name string, op func(context.Context) error, retries int, hook func(string, int, error)) error {
+func (t *Tx) retryOp(ctx context.Context, name string, op func(context.Context) error, retries int, baseDelay time.Duration, hook func(string, int, error)) error {
 	attempts := retries + 1
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
@@ -256,7 +276,12 @@ func (t *Tx) retryOp(ctx context.Context, name string, op func(context.Context) 
 			return nil
 		}
 		if attempt < attempts {
-			time.Sleep(t.cfg.retryDelay * time.Duration(1<<(attempt-1)))
+			shift := min(attempt-1, 30)
+			delay := baseDelay * time.Duration(1<<shift)
+			if t.cfg.maxRetryDelay > 0 && delay > t.cfg.maxRetryDelay {
+				delay = t.cfg.maxRetryDelay
+			}
+			time.Sleep(delay)
 		}
 	}
 	return lastErr

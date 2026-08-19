@@ -18,7 +18,9 @@ func TestRecord_And_Recover_ShortDisconnect(t *testing.T) {
 
 	// 记录指令 f11-f20
 	for f := uint64(11); f <= 20; f++ {
-		log.Record(f, []cmd{"move"})
+		if err := log.Record(f, []cmd{"move"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 玩家在 f15 断线,f20 重连
@@ -54,7 +56,9 @@ func TestRecover_LongDisconnect_FullReset(t *testing.T) {
 
 	// 记录 5 帧后缓冲满,再记录覆盖旧帧
 	for f := uint64(2); f <= 10; f++ {
-		log.Record(f, []cmd{"action"})
+		if err := log.Record(f, []cmd{"action"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 快照在 f1,但指令缓冲只有 f6-f10(f2-f5 已被覆盖)
@@ -76,7 +80,9 @@ func TestRecover_WithRecentSnapshot(t *testing.T) {
 	log.Checkpoint(30, 300)
 
 	for f := uint64(31); f <= 40; f++ {
-		log.Record(f, []cmd{"step"})
+		if err := log.Record(f, []cmd{"step"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 断线在 f25,应选 f20 的快照(最近且 <= 25)
@@ -98,7 +104,9 @@ func TestRecover_DisconnectBeforeAnySnapshot(t *testing.T) {
 	// 快照在 f50,但玩家断线在 f10(所有快照都在断线之后)
 	log.Checkpoint(50, 500)
 	for f := uint64(51); f <= 60; f++ {
-		log.Record(f, []cmd{"late"})
+		if err := log.Record(f, []cmd{"late"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	r, ok := log.Recover(10)
@@ -113,7 +121,7 @@ func TestRecover_DisconnectBeforeAnySnapshot(t *testing.T) {
 
 func TestRecover_NoSnapshot(t *testing.T) {
 	log := cmdlog.NewLog[state, cmd]()
-	log.Record(1, []cmd{"hello"})
+	_ = log.Record(1, []cmd{"hello"})
 
 	_, ok := log.Recover(0)
 	if ok {
@@ -130,7 +138,9 @@ func TestMultipleCheckpoints(t *testing.T) {
 	log.Checkpoint(40, 400) // 覆盖 f10
 
 	for f := uint64(41); f <= 50; f++ {
-		log.Record(f, []cmd{"go"})
+		if err := log.Record(f, []cmd{"go"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 断线在 f15 → f10 的快照已被覆盖,应选 f20
@@ -151,8 +161,8 @@ func TestLatestFrame(t *testing.T) {
 	if log.LatestFrame() != 0 {
 		t.Fatal("initial latest should be 0")
 	}
-	log.Record(5, nil)
-	log.Record(10, nil)
+	_ = log.Record(5, nil)
+	_ = log.Record(10, nil)
 	if log.LatestFrame() != 10 {
 		t.Fatalf("latest = %d", log.LatestFrame())
 	}
@@ -163,8 +173,8 @@ func TestCounts(t *testing.T) {
 	if log.CmdCount() != 0 || log.SnapCount() != 0 {
 		t.Fatal("initial counts")
 	}
-	log.Record(1, nil)
-	log.Record(2, nil)
+	_ = log.Record(1, nil)
+	_ = log.Record(2, nil)
 	log.Checkpoint(1, 0)
 	if log.CmdCount() != 2 {
 		t.Fatalf("cmd count = %d", log.CmdCount())
@@ -177,12 +187,12 @@ func TestCounts(t *testing.T) {
 func TestConcurrentSafe(t *testing.T) {
 	log := cmdlog.NewLog[state, cmd]()
 	var wg sync.WaitGroup
-	// 并发写
+	// 并发写(跨 goroutine 帧号可能乱序,忽略单调性错误)
 	for i := range 50 {
 		wg.Go(func() {
 			f := uint64(i*10 + 1)
 			for j := range 10 {
-				log.Record(f+uint64(j), []cmd{"action"})
+				_ = log.Record(f+uint64(j), []cmd{"action"})
 			}
 			if i%5 == 0 {
 				log.Checkpoint(f, i*100)
@@ -198,6 +208,22 @@ func TestConcurrentSafe(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestRecord_NonMonotonic(t *testing.T) {
+	log := cmdlog.NewLog[state, cmd]()
+	if err := log.Record(5, []cmd{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Record(3, []cmd{"b"}); err == nil {
+		t.Fatal("should reject non-monotonic frame")
+	}
+	if err := log.Record(5, []cmd{"c"}); err == nil {
+		t.Fatal("should reject duplicate frame")
+	}
+	if err := log.Record(6, []cmd{"d"}); err != nil {
+		t.Fatalf("monotonic frame should succeed: %v", err)
+	}
 }
 
 func TestRecover_EmptyCommands(t *testing.T) {

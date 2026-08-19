@@ -201,7 +201,6 @@ func (ic *instrumentedClient) Stream(ctx context.Context, req llm.Request) iter.
 
 		start := time.Now()
 		var usage llm.Usage
-		var model string
 		var toolCallCount int
 		var streamErr error
 
@@ -225,17 +224,13 @@ func (ic *instrumentedClient) Stream(ctx context.Context, req llm.Request) iter.
 		duration := time.Since(start)
 		metricAttrs := ic.metricAttrs(req)
 
-		if model == "" {
-			model = req.Model
-		}
-
 		if streamErr != nil {
 			span.RecordError(streamErr)
 			span.SetStatus(codes.Error, streamErr.Error())
 			ic.errorCount.Add(ctx, 1, metric.WithAttributes(metricAttrs...))
 		} else {
 			span.SetAttributes(
-				attrResponseModel.String(model),
+				attrResponseModel.String(req.Model),
 				attrInputTokens.Int(usage.InputTokens),
 				attrOutputTokens.Int(usage.OutputTokens),
 			)

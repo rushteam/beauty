@@ -40,12 +40,14 @@ type Entry[E any] struct {
 // 零值可用。构造完成后通常一次性下发客户端,或由 Player 逐帧消费。
 type Timeline[E any] struct {
 	entries []Entry[E]
-	cursor  int // After 用:当前累计偏移
+	cursor  int  // After 用:当前累计偏移
+	sorted  bool // entries 是否已排序(添加后失效,Snapshot 后恢复)
 }
 
 // Append 在偏移 offset(帧数)处添加事件。offset 可乱序添加,Drain/Snapshot 时排序。
 func (t *Timeline[E]) Append(offset int, event E) {
 	t.entries = append(t.entries, Entry[E]{Offset: offset, Event: event})
+	t.sorted = false
 }
 
 // At 在固定帧偏移处添加事件(Append 的别名,语义更清晰)。
@@ -76,13 +78,17 @@ func (t *Timeline[E]) Stagger(interval int, events ...E) {
 	}
 }
 
-// Snapshot 返回排好序的事件列表(一次性下发客户端)。不修改内部状态。
+// Snapshot 返回排好序的事件列表(一次性下发客户端)。首次调用排序,后续调用
+// 如果没有新增事件则复用排序结果。
 func (t *Timeline[E]) Snapshot() []Entry[E] {
+	if !t.sorted {
+		slices.SortStableFunc(t.entries, func(a, b Entry[E]) int {
+			return a.Offset - b.Offset
+		})
+		t.sorted = true
+	}
 	out := make([]Entry[E], len(t.entries))
 	copy(out, t.entries)
-	slices.SortStableFunc(out, func(a, b Entry[E]) int {
-		return a.Offset - b.Offset
-	})
 	return out
 }
 

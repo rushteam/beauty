@@ -42,6 +42,7 @@ package handoff
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 // Phase 迁移阶段。
@@ -95,10 +96,11 @@ type Bundle[S, C any] struct {
 
 // Source 管理实体在源进程的迁移生命周期。
 type Source[S, C any] struct {
-	mu     sync.Mutex
-	phase  Phase
-	state  S
-	buffer []C
+	mu      sync.Mutex
+	phase   Phase
+	state   S
+	buffer  []C
+	beginAt time.Time
 }
 
 // NewSource 创建源端管理器。state 是实体当前状态。
@@ -122,6 +124,7 @@ func (s *Source[S, C]) Begin() error {
 	case PhaseOwned:
 		s.phase = PhaseExporting
 		s.buffer = nil
+		s.beginAt = time.Now()
 		return nil
 	case PhaseExporting:
 		return ErrAlreadyExport
@@ -202,6 +205,17 @@ func (s *Source[S, C]) Abort() ([]C, error) {
 	buf := s.buffer
 	s.buffer = nil
 	return buf, nil
+}
+
+// ExportingSince 返回迁移开始时间。如果当前不在 Exporting 阶段,返回零值和 false。
+// 调用方可用此判断迁移是否超时(如超过 5 秒未完成则 Abort)。
+func (s *Source[S, C]) ExportingSince() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.phase != PhaseExporting {
+		return time.Time{}, false
+	}
+	return s.beginAt, true
 }
 
 // ---------- Target(目标进程) ----------

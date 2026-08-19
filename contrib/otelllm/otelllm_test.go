@@ -3,6 +3,7 @@ package otelllm
 import (
 	"context"
 	"errors"
+	"iter"
 	"testing"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -29,18 +30,17 @@ func (f *fakeClient) Generate(_ context.Context, _ llm.Request) (*llm.Response, 
 	return f.resp, nil
 }
 
-func (f *fakeClient) Stream(_ context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakeClient) Stream(_ context.Context, _ llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		if f.err != nil {
+			yield(llm.Chunk{}, f.err)
+			return
+		}
+		if !yield(llm.Chunk{Delta: "hello"}, nil) {
+			return
+		}
+		yield(llm.Chunk{Usage: &f.resp.Usage}, nil)
 	}
-	ch := make(chan llm.Chunk, 2)
-	ch <- llm.Chunk{Delta: "hello"}
-	ch <- llm.Chunk{
-		Done:  true,
-		Usage: &f.resp.Usage,
-	}
-	close(ch)
-	return ch, nil
 }
 
 // --- tests ---
@@ -190,20 +190,17 @@ func TestInstrument_Stream_Success(t *testing.T) {
 		WithMeterProvider(mp),
 	)
 
-	ch, err := client.Stream(context.Background(), llm.Request{Model: "gpt-4o"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
 	var chunks int
-	for range ch {
+	for _, err := range client.Stream(context.Background(), llm.Request{Model: "gpt-4o"}) {
+		if err != nil {
+			t.Fatalf("unexpected stream error: %v", err)
+		}
 		chunks++
 	}
 	if chunks != 2 {
 		t.Errorf("expected 2 chunks, got %d", chunks)
 	}
 
-	// span 在 goroutine 中结束,等 exporter 刷新
 	tp.ForceFlush(context.Background())
 
 	spans := exporter.GetSpans()
@@ -229,9 +226,14 @@ func TestInstrument_Stream_Error(t *testing.T) {
 		WithMeterProvider(mp),
 	)
 
-	_, err := client.Stream(context.Background(), llm.Request{Model: "gpt-4"})
-	if err == nil {
-		t.Fatal("expected error")
+	var gotErr bool
+	for _, err := range client.Stream(context.Background(), llm.Request{Model: "gpt-4"}) {
+		if err != nil {
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Fatal("expected error from stream")
 	}
 
 	spans := exporter.GetSpans()

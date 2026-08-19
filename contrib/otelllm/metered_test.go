@@ -83,12 +83,10 @@ func TestMeteredWithErrors_Stream_Success(t *testing.T) {
 		reports = append(reports, r)
 	}, "openai")
 
-	ch, err := client.Stream(context.Background(), llm.Request{Model: "gpt-4o"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	for range ch {
+	for _, err := range client.Stream(context.Background(), llm.Request{Model: "gpt-4o"}) {
+		if err != nil {
+			t.Fatalf("unexpected stream error: %v", err)
+		}
 	}
 
 	if len(reports) != 1 {
@@ -114,9 +112,10 @@ func TestMeteredWithErrors_Stream_Error(t *testing.T) {
 		reports = append(reports, r)
 	}, "anthropic")
 
-	_, err := client.Stream(context.Background(), llm.Request{Model: "claude-3"})
-	if err == nil {
-		t.Fatal("expected error")
+	for _, err := range client.Stream(context.Background(), llm.Request{Model: "claude-3"}) {
+		if err == nil {
+			t.Fatal("expected error from stream")
+		}
 	}
 
 	if len(reports) != 1 {

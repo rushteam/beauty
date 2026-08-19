@@ -3,7 +3,7 @@ package mcpagent_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"iter"
 	"strconv"
 	"strings"
 	"testing"
@@ -61,8 +61,8 @@ func (c *scriptedClient) Generate(_ context.Context, req llm.Request) (*llm.Resp
 	c.i++
 	return r, nil
 }
-func (c *scriptedClient) Stream(context.Context, llm.Request) (<-chan llm.Chunk, error) {
-	return nil, errors.New("unused")
+func (c *scriptedClient) Stream(context.Context, llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {}
 }
 
 // 桥接:MCP 工具应转成带 schema 的 agent.Tool。
@@ -113,14 +113,14 @@ func TestRunner_WithMCPTools(t *testing.T) {
 	}}
 	r := &agent.Runner{Client: fc, Tools: tools}
 
-	resp, err := r.Run(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "2+3=?"}}})
+	out := agent.CollectOutcome(r.Run(ctx, llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.User, Content: "2+3=?"}}}))
+	resp, err := out.Final()
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if resp.Content != "结果是 5" {
 		t.Fatalf("final = %q", resp.Content)
 	}
-	// 第二轮请求里,MCP 工具的真实结果 "5" 应作为 tool 消息被喂回。
 	last := fc.last.Messages
 	tail := last[len(last)-1]
 	if tail.Role != llm.Tool || tail.ToolCallID != "c1" || tail.Content != "5" {

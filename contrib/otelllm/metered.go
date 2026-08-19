@@ -2,6 +2,7 @@ package otelllm
 
 import (
 	"context"
+	"iter"
 	"time"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -56,35 +57,26 @@ func (m *meteredErr) Generate(ctx context.Context, req llm.Request) (*llm.Respon
 	return resp, err
 }
 
-func (m *meteredErr) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	start := time.Now()
-	src, err := m.c.Stream(ctx, req)
-	if err != nil {
-		if m.hook != nil {
-			m.hook(ctx, UsageReport{
-				Model:   req.Model,
-				Latency: time.Since(start),
-				System:  m.system,
-				Stream:  true,
-				Err:     err,
-			})
-		}
-		return nil, err
-	}
-	out := make(chan llm.Chunk)
-	go func() {
-		defer close(out)
+func (m *meteredErr) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		start := time.Now()
 		var usage llm.Usage
 		var streamErr error
-		for ch := range src {
+
+		for ch, err := range m.c.Stream(ctx, req) {
+			if err != nil {
+				streamErr = err
+				yield(ch, err)
+				break
+			}
 			if ch.Usage != nil {
 				usage = *ch.Usage
 			}
-			if ch.Err != nil {
-				streamErr = ch.Err
+			if !yield(ch, nil) {
+				break
 			}
-			out <- ch
 		}
+
 		if m.hook != nil {
 			m.hook(ctx, UsageReport{
 				Model:   req.Model,
@@ -95,8 +87,7 @@ func (m *meteredErr) Stream(ctx context.Context, req llm.Request) (<-chan llm.Ch
 				Err:     streamErr,
 			})
 		}
-	}()
-	return out, nil
+	}
 }
 
 // OTelUsageHook 返回一个 UsageReportHook,将用量数据上报到 OTel Metrics。

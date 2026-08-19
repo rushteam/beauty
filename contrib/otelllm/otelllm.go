@@ -25,6 +25,7 @@ package otelllm
 import (
 	"context"
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -181,57 +182,44 @@ func (ic *instrumentedClient) Generate(ctx context.Context, req llm.Request) (*l
 	return resp, nil
 }
 
-func (ic *instrumentedClient) Stream(ctx context.Context, req llm.Request) (<-chan llm.Chunk, error) {
-	spanName := "chat"
-	if req.Model != "" {
-		spanName = fmt.Sprintf("chat %s", req.Model)
-	}
+func (ic *instrumentedClient) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chunk, error] {
+	return func(yield func(llm.Chunk, error) bool) {
+		spanName := "chat"
+		if req.Model != "" {
+			spanName = fmt.Sprintf("chat %s", req.Model)
+		}
 
-	ctx, span := ic.tracer.Start(ctx, spanName,
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(ic.requestAttrs(req, true)...),
-	)
-
-	if ic.cfg.recordPrompt {
-		ic.recordPromptEvents(span, req)
-	}
-
-	start := time.Now()
-	src, err := ic.inner.Stream(ctx, req)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		span.End()
-
-		metricAttrs := ic.metricAttrs(req)
-		ic.errorCount.Add(ctx, 1, metric.WithAttributes(metricAttrs...))
-		ic.callCount.Add(ctx, 1, metric.WithAttributes(metricAttrs...))
-		ic.latencyHist.Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(metricAttrs...))
-		return nil, err
-	}
-
-	out := make(chan llm.Chunk)
-	go func() {
-		defer close(out)
+		ctx, span := ic.tracer.Start(ctx, spanName,
+			trace.WithSpanKind(trace.SpanKindClient),
+			trace.WithAttributes(ic.requestAttrs(req, true)...),
+		)
 		defer span.End()
 
+		if ic.cfg.recordPrompt {
+			ic.recordPromptEvents(span, req)
+		}
+
+		start := time.Now()
 		var usage llm.Usage
 		var model string
-		var stopReason string
 		var toolCallCount int
 		var streamErr error
 
-		for ch := range src {
+		for ch, err := range ic.inner.Stream(ctx, req) {
+			if err != nil {
+				streamErr = err
+				yield(ch, err)
+				break
+			}
 			if ch.Usage != nil {
 				usage = *ch.Usage
 			}
-			if ch.Err != nil {
-				streamErr = ch.Err
-			}
-			if ch.Done && len(ch.ToolCalls) > 0 {
+			if len(ch.ToolCalls) > 0 {
 				toolCallCount = len(ch.ToolCalls)
 			}
-			out <- ch
+			if !yield(ch, nil) {
+				break
+			}
 		}
 
 		duration := time.Since(start)
@@ -251,9 +239,6 @@ func (ic *instrumentedClient) Stream(ctx context.Context, req llm.Request) (<-ch
 				attrInputTokens.Int(usage.InputTokens),
 				attrOutputTokens.Int(usage.OutputTokens),
 			)
-			if stopReason != "" {
-				span.SetAttributes(attrFinishReason.StringSlice([]string{stopReason}))
-			}
 			if toolCallCount > 0 {
 				span.SetAttributes(attrToolCallCount.Int(toolCallCount))
 			}
@@ -269,8 +254,7 @@ func (ic *instrumentedClient) Stream(ctx context.Context, req llm.Request) (<-ch
 
 		ic.callCount.Add(ctx, 1, metric.WithAttributes(metricAttrs...))
 		ic.latencyHist.Record(ctx, duration.Seconds(), metric.WithAttributes(metricAttrs...))
-	}()
-	return out, nil
+	}
 }
 
 func (ic *instrumentedClient) requestAttrs(req llm.Request, stream bool) []attribute.KeyValue {

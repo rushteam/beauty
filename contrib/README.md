@@ -49,6 +49,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/kafka`](kafka) | `pkg/messaging/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
 | [`contrib/rabbitmq`](rabbitmq) | `pkg/messaging/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
 | [`contrib/redisstream`](redisstream) | `pkg/messaging/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
+| [`contrib/redisqueue`](redisqueue) | Redis 分布式任务队列(BullMQ 风格):优先级 + 延迟 + 重试 + 可见性超时 stalled 检测 + 生命周期事件;at-least-once,多 worker 水平扩展 | redis/go-redis/v9 |
 | [`contrib/ginadapt`](ginadapt) | Gin ↔ beauty HTTP 中间件适配:标准 `func(http.Handler) http.Handler` 转 `gin.HandlerFunc` | gin-gonic/gin |
 | [`contrib/graphql`](graphql) | GraphQL/BFF 层:gqlgen schema-first 封装为 beauty.Service + DataLoader + 复杂度限制 + APQ + 认证透传 + Federation + Subscription(WS/SSE) | 99designs/gqlgen |
 | [`contrib/elasticsearch`](elasticsearch) | Elasticsearch 集成:健康 / 搜索 / 写入,暴露原始 JSON | go-elasticsearch/v8 |

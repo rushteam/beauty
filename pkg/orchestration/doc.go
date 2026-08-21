@@ -13,4 +13,5 @@
 //	scheduler   — 异步任务调度器(Submit/Pause/Resume)
 //	timerqueue  — 最小堆延时队列(beauty.Service 集成,适合大量倒计时)
 //	delayqueue  — 精确 time.Timer 延时队列(一次性任务)
+//	jobqueue    — 带优先级/进度/生命周期事件的任务队列(BullMQ 风格)
 package orchestration

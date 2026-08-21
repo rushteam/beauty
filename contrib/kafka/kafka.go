@@ -11,6 +11,11 @@
 // 投递保证:at-least-once——handler 成功后才 CommitRecords(处理失败不提交,下次重投/
 // rebalance 后重投)。故 handler 应幂等。订阅随 ctx 取消停止。
 //
+// 消费起始位置:新 consumer group 首次消费时默认从**最早消息**开始(AtStart),
+// 与 franz-go 及 Kafka auto.offset.reset=earliest 默认行为一致;
+// 可用 WithStartFromEnd 改为从最新开始(忽略历史)。已有 committed offset 时
+// 从上次提交的位置续读,不受此设置影响。
+//
 // OTel:默认启用 kotel(使用全局 TracerProvider/MeterProvider/Propagator;未配 beauty.WithTrace
 // 时为 noop)。可用 WithoutOTel 关闭。Kafka 场景优先用本模块内置 kotel,不必再套
 // pkg/mq/otelmq(避免双重 Inject);otelmq 仍适用于 InProc/NATS 等非 franz 传输。
@@ -113,13 +118,13 @@ func (p *Publisher) Close() { p.cl.Close() }
 
 // Subscriber 实现 mq.Subscriber。每个 Subscribe 起一个独立 consumer group client。
 type Subscriber struct {
-	brokers    []string
-	minBytes   int32
-	maxBytes   int32
-	startFirst bool
-	otel       bool
-	extraOpts  []kgo.Opt
-	wg         sync.WaitGroup
+	brokers   []string
+	minBytes  int32
+	maxBytes  int32
+	startEnd  bool
+	otel      bool
+	extraOpts []kgo.Opt
+	wg        sync.WaitGroup
 }
 
 var _ mq.Subscriber = (*Subscriber)(nil)
@@ -139,9 +144,15 @@ func WithFetchBounds(minBytes, maxBytes int) SubscriberOption {
 	}
 }
 
-// WithStartFromFirst 无已提交位点时从最早消息开始消费(默认从最新)。
+// WithStartFromFirst 无已提交位点时从最早消息开始消费(默认从最早,与 franz-go / Kafka 默认行为一致)。
+// Deprecated: 默认已是 AtStart,无需调用。保留仅为兼容。
 func WithStartFromFirst() SubscriberOption {
-	return func(s *Subscriber) { s.startFirst = true }
+	return func(s *Subscriber) {}
+}
+
+// WithStartFromEnd 无已提交位点时从最新消息开始消费(忽略历史)。
+func WithStartFromEnd() SubscriberOption {
+	return func(s *Subscriber) { s.startEnd = true }
 }
 
 // WithSubscriberClientOpts 透传任意 franz-go Opt 到每次 Subscribe 创建的 client。
@@ -179,9 +190,9 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h mq.Handler, 
 		return ErrGroupRequired
 	}
 
-	reset := kgo.NewOffset().AtEnd()
-	if s.startFirst {
-		reset = kgo.NewOffset().AtStart()
+	reset := kgo.NewOffset().AtStart()
+	if s.startEnd {
+		reset = kgo.NewOffset().AtEnd()
 	}
 
 	var tracer *kotel.Tracer

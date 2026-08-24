@@ -3,6 +3,8 @@ package workflow_test
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -299,5 +301,325 @@ func TestOnStepCallback(t *testing.T) {
 	}
 	if len(stepNodes) != 1 || stepNodes[0] != "1:a" {
 		t.Errorf("stepNodes = %v", stepNodes)
+	}
+}
+
+func TestBuildValidatesEdgeTargets(t *testing.T) {
+	b := workflow.NewBuilder("test-edge-validation")
+	b.AddNode("a", func(_ context.Context, _ *workflow.State) (string, error) { return "", nil })
+	b.SetEntryPoint("a")
+	b.AddEdge("a", "nonexistent")
+
+	_, err := b.Build()
+	if err == nil {
+		t.Fatal("expected build error for edge to unknown node")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error should mention unknown node: %v", err)
+	}
+}
+
+func TestBuildValidatesConditionalEdgeTargets(t *testing.T) {
+	b := workflow.NewBuilder("test-cond-validation")
+	b.AddNode("a", func(_ context.Context, _ *workflow.State) (string, error) { return "", nil })
+	b.SetEntryPoint("a")
+	b.AddConditionalEdge("a", map[string]workflow.NodeID{
+		"x": "ghost",
+	}, "")
+
+	_, err := b.Build()
+	if err == nil {
+		t.Fatal("expected build error for conditional edge to unknown node")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should mention unknown node: %v", err)
+	}
+}
+
+func TestBuildRejectsMultipleRoutingEdges(t *testing.T) {
+	b := workflow.NewBuilder("test-multi-route")
+	b.AddNode("a", func(_ context.Context, _ *workflow.State) (string, error) { return "", nil })
+	b.AddNode("b", func(_ context.Context, _ *workflow.State) (string, error) { return "", nil })
+	b.AddNode("c", func(_ context.Context, _ *workflow.State) (string, error) { return "", nil })
+	b.SetEntryPoint("a")
+	b.AddEdge("a", "b")
+	b.AddEdge("a", "c")
+
+	_, err := b.Build()
+	if err == nil {
+		t.Fatal("expected build error for multiple routing edges")
+	}
+	if !strings.Contains(err.Error(), "routing edges") {
+		t.Errorf("error should mention routing edges: %v", err)
+	}
+}
+
+func TestFanOutPropagatesContext(t *testing.T) {
+	type ctxKey struct{}
+	b := workflow.NewBuilder("test-fanout-ctx")
+
+	var gotValue atomic.Value
+
+	b.AddNode("start", func(_ context.Context, state *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("worker", func(ctx context.Context, state *workflow.State) (string, error) {
+		if v := ctx.Value(ctxKey{}); v != nil {
+			gotValue.Store(v)
+		}
+		state.SetOutput(&llm.Response{Content: "done"})
+		return "", nil
+	})
+	b.SetEntryPoint("start")
+	b.AddFanOut("start", "worker")
+	b.SetFinishPoint("worker")
+
+	wf, err := b.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.WithValue(context.Background(), ctxKey{}, "hello")
+	eng := workflow.NewEngine(wf)
+	_, err = eng.Run(ctx, llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v := gotValue.Load()
+	if v != "hello" {
+		t.Errorf("fan-out node did not receive parent context value: got %v", v)
+	}
+}
+
+func TestFanOutCancellation(t *testing.T) {
+	b := workflow.NewBuilder("test-fanout-cancel")
+
+	b.AddNode("start", func(_ context.Context, _ *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("blocker", func(ctx context.Context, _ *workflow.State) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	b.SetEntryPoint("start")
+	b.AddFanOut("start", "blocker")
+	b.SetFinishPoint("blocker")
+
+	wf, err := b.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	eng := workflow.NewEngine(wf)
+	_, err = eng.Run(ctx, llm.Request{})
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+}
+
+func TestFanOutJoinsAllErrors(t *testing.T) {
+	b := workflow.NewBuilder("test-fanout-errors")
+
+	b.AddNode("start", func(_ context.Context, _ *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("fail1", func(_ context.Context, _ *workflow.State) (string, error) {
+		return "", fmt.Errorf("error-one")
+	})
+	b.AddNode("fail2", func(_ context.Context, _ *workflow.State) (string, error) {
+		return "", fmt.Errorf("error-two")
+	})
+	b.SetEntryPoint("start")
+	b.AddFanOut("start", "fail1", "fail2")
+	b.SetFinishPoint("fail1")
+	b.SetFinishPoint("fail2")
+
+	wf, err := b.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eng := workflow.NewEngine(wf)
+	_, err = eng.Run(context.Background(), llm.Request{})
+	if err == nil {
+		t.Fatal("expected fan-out error")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "error-one") || !strings.Contains(errStr, "error-two") {
+		t.Errorf("error should contain both errors: %v", err)
+	}
+}
+
+func TestFanOutEmitsStepEvents(t *testing.T) {
+	b := workflow.NewBuilder("test-fanout-events")
+
+	b.AddNode("start", func(_ context.Context, _ *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("w1", func(_ context.Context, state *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("w2", func(_ context.Context, state *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("merge", func(_ context.Context, state *workflow.State) (string, error) {
+		state.SetOutput(&llm.Response{Content: "merged"})
+		return "", nil
+	})
+	b.SetEntryPoint("start")
+	b.AddFanOut("start", "w1", "w2")
+	b.AddFanIn([]workflow.NodeID{"w1", "w2"}, "merge")
+	b.SetFinishPoint("merge")
+
+	wf, err := b.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eng := workflow.NewEngine(wf)
+	var stepNames []string
+	for ev, err := range eng.RunIter(context.Background(), llm.Request{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Type == agent.EventStep {
+			stepNames = append(stepNames, ev.AgentName)
+		}
+	}
+	// start + w1 + w2 (fan-out step events) + merge = 4 step events
+	if len(stepNames) != 4 {
+		t.Errorf("stepNames = %v, want 4 steps", stepNames)
+	}
+}
+
+func TestWithMaxFanOut(t *testing.T) {
+	b := workflow.NewBuilder("test-maxfanout")
+
+	var peak atomic.Int32
+	var running atomic.Int32
+
+	makeWorker := func(name string) workflow.NodeFunc {
+		return func(_ context.Context, state *workflow.State) (string, error) {
+			cur := running.Add(1)
+			defer running.Add(-1)
+			for {
+				old := peak.Load()
+				if cur <= old || peak.CompareAndSwap(old, cur) {
+					break
+				}
+			}
+			return "", nil
+		}
+	}
+
+	b.AddNode("start", func(_ context.Context, _ *workflow.State) (string, error) {
+		return "", nil
+	})
+	b.AddNode("w1", makeWorker("w1"))
+	b.AddNode("w2", makeWorker("w2"))
+	b.AddNode("w3", makeWorker("w3"))
+	b.AddNode("w4", makeWorker("w4"))
+	b.AddNode("done", func(_ context.Context, state *workflow.State) (string, error) {
+		state.SetOutput(&llm.Response{Content: "done"})
+		return "", nil
+	})
+	b.SetEntryPoint("start")
+	b.AddFanOut("start", "w1", "w2", "w3", "w4")
+	b.AddFanIn([]workflow.NodeID{"w1", "w2", "w3", "w4"}, "done")
+	b.SetFinishPoint("done")
+
+	wf, err := b.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eng := workflow.NewEngine(wf, workflow.WithMaxFanOut(2))
+	resp, err := eng.Run(context.Background(), llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "done" {
+		t.Errorf("content = %q", resp.Content)
+	}
+	if p := peak.Load(); p > 2 {
+		t.Errorf("peak concurrency = %d, want <= 2", p)
+	}
+}
+
+func TestCompletedMapLazyInit(t *testing.T) {
+	b := workflow.NewBuilder("test-lazy-completed")
+	b.AddNode("a", func(_ context.Context, state *workflow.State) (string, error) {
+		state.SetOutput(&llm.Response{Content: "ok"})
+		return "", nil
+	})
+	b.SetEntryPoint("a")
+	b.SetFinishPoint("a")
+	wf, _ := b.Build()
+
+	eng := workflow.NewEngine(wf)
+	resp, err := eng.Run(context.Background(), llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "ok" {
+		t.Errorf("content = %q", resp.Content)
+	}
+}
+
+func TestCheckpointHasCompletedMap(t *testing.T) {
+	b := workflow.NewBuilder("test-cp-completed")
+	b.AddNode("a", func(_ context.Context, state *workflow.State) (string, error) {
+		state.SetOutput(&llm.Response{Content: "ok"})
+		return "", nil
+	})
+	b.SetEntryPoint("a")
+	b.SetFinishPoint("a")
+	wf, _ := b.Build()
+
+	var cps []*workflow.Checkpoint
+	eng := workflow.NewEngine(wf, workflow.WithCheckpointFunc(func(_ context.Context, cp *workflow.Checkpoint) error {
+		cps = append(cps, cp)
+		return nil
+	}))
+
+	_, err := eng.Run(context.Background(), llm.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cps) != 1 {
+		t.Fatalf("checkpoints = %d", len(cps))
+	}
+	if !cps[0].Completed["a"] {
+		t.Error("checkpoint should have node 'a' completed")
+	}
+}
+
+func TestMessagesLen(t *testing.T) {
+	state := workflow.NewState()
+	if n := state.MessagesLen(); n != 0 {
+		t.Errorf("MessagesLen = %d, want 0", n)
+	}
+	state.AppendMessage(llm.Message{Role: llm.User, Content: "hi"})
+	if n := state.MessagesLen(); n != 1 {
+		t.Errorf("MessagesLen = %d, want 1", n)
+	}
+}
+
+func TestBuildValidatesFanOutTargets(t *testing.T) {
+	b := workflow.NewBuilder("test-fanout-validation")
+	b.AddNode("a", func(_ context.Context, _ *workflow.State) (string, error) { return "", nil })
+	b.SetEntryPoint("a")
+	b.AddFanOut("a", "ghost1", "ghost2")
+
+	_, err := b.Build()
+	if err == nil {
+		t.Fatal("expected build error for fan-out to unknown nodes")
+	}
+	if !strings.Contains(err.Error(), "ghost1") {
+		t.Errorf("error should mention ghost1: %v", err)
 	}
 }

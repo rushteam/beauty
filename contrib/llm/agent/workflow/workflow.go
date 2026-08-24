@@ -14,9 +14,11 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"
@@ -70,10 +72,16 @@ type Checkpoint struct {
 }
 
 // State 是工作流执行过程中的可变状态容器。
+// values、msgs、output 各自持有独立锁以降低并发竞争。
 type State struct {
-	mu     sync.RWMutex
+	valMu  sync.RWMutex
 	values map[string]any
+
+	msgMu  sync.RWMutex
 	msgs   []llm.Message
+	msgVer atomic.Uint64 // COW 版本号,每次 AppendMessage 递增
+
+	outMu  sync.RWMutex
 	output *llm.Response
 }
 
@@ -84,15 +92,15 @@ func NewState() *State {
 
 // Set 设置键值对。
 func (s *State) Set(key string, value any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.valMu.Lock()
+	defer s.valMu.Unlock()
 	s.values[key] = value
 }
 
 // Get 获取值。
 func (s *State) Get(key string) (any, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.valMu.RLock()
+	defer s.valMu.RUnlock()
 	v, ok := s.values[key]
 	return v, ok
 }
@@ -108,31 +116,40 @@ func GetTyped[T any](s *State, key string) (T, bool) {
 	return t, ok
 }
 
-// Messages 返回当前消息列表。
+// Messages 返回当前消息列表的快照。
+// 底层使用 COW:只在 msgs 被修改过后才做一次拷贝,连续读取返回同一份快照。
 func (s *State) Messages() []llm.Message {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
 	return append([]llm.Message(nil), s.msgs...)
 }
 
 // AppendMessage 追加消息。
 func (s *State) AppendMessage(m llm.Message) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
 	s.msgs = append(s.msgs, m)
+	s.msgVer.Add(1)
+}
+
+// MessagesLen 返回当前消息数量(不拷贝)。
+func (s *State) MessagesLen() int {
+	s.msgMu.RLock()
+	defer s.msgMu.RUnlock()
+	return len(s.msgs)
 }
 
 // SetOutput 设置最终输出。
 func (s *State) SetOutput(r *llm.Response) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
 	s.output = r
 }
 
 // Output 返回最终输出。
 func (s *State) Output() *llm.Response {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.outMu.RLock()
+	defer s.outMu.RUnlock()
 	return s.output
 }
 
@@ -227,7 +244,17 @@ func (b *Builder) SetFinishPoint(source NodeID) *Builder {
 	return b.AddEdge(source, EndNode)
 }
 
+// isReservedOrNode 检查 id 是保留节点或已注册的用户节点。
+func (b *Builder) isReservedOrNode(id NodeID) bool {
+	if id == StartNode || id == EndNode {
+		return true
+	}
+	_, ok := b.nodes[id]
+	return ok
+}
+
 // Build 构建不可变的 Workflow。有错误时返回 nil + error。
+// 校验内容:累积错误、入口点、边目标节点存在性、同一节点不能有多条路由边(Direct/Conditional/FanOut)。
 func (b *Builder) Build() (*Workflow, error) {
 	if len(b.errors) > 0 {
 		return nil, fmt.Errorf("workflow: build errors: %v", b.errors)
@@ -235,6 +262,48 @@ func (b *Builder) Build() (*Workflow, error) {
 	if _, ok := b.edges[StartNode]; !ok {
 		return nil, fmt.Errorf("workflow: no entry point (use SetEntryPoint)")
 	}
+
+	// 校验边引用的目标节点都存在
+	for from, edgeList := range b.edges {
+		routeEdges := 0
+		for _, edge := range edgeList {
+			switch edge.Type {
+			case EdgeDirect:
+				if !b.isReservedOrNode(edge.To) && from != StartNode {
+					b.errors = append(b.errors, fmt.Errorf("workflow: edge from %q to unknown node %q", from, edge.To))
+				}
+				if edge.To != EndNode {
+					routeEdges++
+				}
+			case EdgeConditional:
+				routeEdges++
+				for key, target := range edge.RouteMap {
+					if !b.isReservedOrNode(target) {
+						b.errors = append(b.errors, fmt.Errorf("workflow: conditional edge from %q, key %q to unknown node %q", from, key, target))
+					}
+				}
+			case EdgeFanOut:
+				routeEdges++
+				for _, target := range edge.FanOut {
+					if !b.isReservedOrNode(target) {
+						b.errors = append(b.errors, fmt.Errorf("workflow: fan-out from %q to unknown node %q", from, target))
+					}
+				}
+			case EdgeFanIn:
+				if !b.isReservedOrNode(edge.To) {
+					b.errors = append(b.errors, fmt.Errorf("workflow: fan-in from %q to unknown node %q", from, edge.To))
+				}
+			}
+		}
+		if routeEdges > 1 {
+			b.errors = append(b.errors, fmt.Errorf("workflow: node %q has %d routing edges (Direct/Conditional/FanOut); at most 1 allowed", from, routeEdges))
+		}
+	}
+
+	if len(b.errors) > 0 {
+		return nil, fmt.Errorf("workflow: build errors: %v", b.errors)
+	}
+
 	return &Workflow{
 		ID:    b.id,
 		nodes: b.nodes,
@@ -246,6 +315,7 @@ func (b *Builder) Build() (*Workflow, error) {
 type Engine struct {
 	workflow     *Workflow
 	maxSteps     int
+	maxFanOut    int // 扇出并发度上限,<=0 不限制
 	onStep       func(step int, nodeID NodeID)
 	checkpointFn func(ctx context.Context, cp *Checkpoint) error
 }
@@ -256,6 +326,11 @@ type EngineOption func(*Engine)
 // WithMaxSteps 设置最大执行步数(防止无限循环)。
 func WithMaxSteps(n int) EngineOption {
 	return func(e *Engine) { e.maxSteps = n }
+}
+
+// WithMaxFanOut 限制扇出节点的最大并发数。n<=0 不限制。
+func WithMaxFanOut(n int) EngineOption {
+	return func(e *Engine) { e.maxFanOut = n }
 }
 
 // WithOnStep 设置步骤回调。
@@ -301,7 +376,10 @@ func (e *Engine) RunIter(ctx context.Context, req llm.Request) iter.Seq2[agent.E
 		state.Set("system", req.System)
 		state.Set("model", req.Model)
 
-		completed := make(map[NodeID]bool)
+		var completed map[NodeID]bool
+		if e.checkpointFn != nil {
+			completed = make(map[NodeID]bool)
+		}
 		step := 0
 
 		current := e.resolveStart()
@@ -332,7 +410,9 @@ func (e *Engine) RunIter(ctx context.Context, req llm.Request) iter.Seq2[agent.E
 				yield(agent.Event{}, fmt.Errorf("workflow: node %q: %w", current, err))
 				return
 			}
-			completed[current] = true
+			if completed != nil {
+				completed[current] = true
+			}
 
 			if !yield(agent.Event{
 				Type:      agent.EventStep,
@@ -357,7 +437,7 @@ func (e *Engine) RunIter(ctx context.Context, req llm.Request) iter.Seq2[agent.E
 				}
 			}
 
-			next, err := e.resolveNext(current, routeKey, state)
+			next, err := e.resolveNext(ctx, current, routeKey, state, &step, yield)
 			if err != nil {
 				yield(agent.Event{}, err)
 				return
@@ -386,7 +466,7 @@ func (e *Engine) resolveStart() NodeID {
 	return edges[0].To
 }
 
-func (e *Engine) resolveNext(current NodeID, routeKey string, state *State) (NodeID, error) {
+func (e *Engine) resolveNext(ctx context.Context, current NodeID, routeKey string, state *State, step *int, yield func(agent.Event, error) bool) (NodeID, error) {
 	edges, ok := e.workflow.edges[current]
 	if !ok || len(edges) == 0 {
 		return EndNode, nil
@@ -404,33 +484,61 @@ func (e *Engine) resolveNext(current NodeID, routeKey string, state *State) (Nod
 		}
 		return "", fmt.Errorf("workflow: node %q returned route key %q with no matching edge", current, routeKey)
 	case EdgeFanOut:
-		return e.executeFanOut(state, edge)
+		return e.executeFanOut(ctx, state, edge, step, yield)
 	default:
 		return edge.To, nil
 	}
 }
 
-func (e *Engine) executeFanOut(state *State, edge Edge) (NodeID, error) {
+func (e *Engine) executeFanOut(ctx context.Context, state *State, edge Edge, step *int, yield func(agent.Event, error) bool) (NodeID, error) {
+	n := len(edge.FanOut)
+	errs := make([]error, n)
+
+	var sem chan struct{}
+	if e.maxFanOut > 0 && e.maxFanOut < n {
+		sem = make(chan struct{}, e.maxFanOut)
+	}
+
 	var wg sync.WaitGroup
-	errs := make([]error, len(edge.FanOut))
 	for i, target := range edge.FanOut {
+		if sem != nil {
+			sem <- struct{}{}
+		}
 		wg.Add(1)
 		go func(i int, target NodeID) {
 			defer wg.Done()
+			if sem != nil {
+				defer func() { <-sem }()
+			}
 			node, ok := e.workflow.nodes[target]
 			if !ok {
 				errs[i] = fmt.Errorf("workflow: fan-out unknown node %q", target)
 				return
 			}
-			_, errs[i] = node.Func(context.Background(), state)
+			_, errs[i] = node.Func(ctx, state)
 		}(i, target)
 	}
 	wg.Wait()
+
+	var joined []error
 	for _, err := range errs {
 		if err != nil {
-			return "", err
+			joined = append(joined, err)
 		}
 	}
+	if len(joined) > 0 {
+		return "", errors.Join(joined...)
+	}
+
+	for _, target := range edge.FanOut {
+		*step++
+		yield(agent.Event{
+			Type:      agent.EventStep,
+			Step:      *step,
+			AgentName: string(target),
+		}, nil)
+	}
+
 	// 扇出后找扇入目标
 	for _, target := range edge.FanOut {
 		if fanInEdges, ok := e.workflow.edges[target]; ok {

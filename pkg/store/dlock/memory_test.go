@@ -67,6 +67,28 @@ func TestLock_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestLock_PreCancelledContext(t *testing.T) {
+	m := dlock.NewMemory()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := m.Lock(ctx, "k")
+	if err == nil {
+		t.Fatal("Lock with cancelled ctx should fail")
+	}
+}
+
+func TestTryLock_PreCancelledContext(t *testing.T) {
+	m := dlock.NewMemory()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := m.TryLock(ctx, "k")
+	if err == nil {
+		t.Fatal("TryLock with cancelled ctx should return error")
+	}
+}
+
 func TestElector_MutualExclusion(t *testing.T) {
 	m := dlock.NewMemory()
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -153,5 +175,55 @@ func TestElector_StopsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Run did not stop after ctx cancel")
+	}
+}
+
+func TestElector_OnElectedPanicDoesNotStickLock(t *testing.T) {
+	m := dlock.NewMemory()
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	var rounds atomic.Int32
+	done := make(chan error, 1)
+	go func() {
+		done <- m.Run(ctx, "k", func(leaderCtx context.Context) {
+			n := rounds.Add(1)
+			if n == 1 {
+				panic("boom")
+			}
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return")
+	}
+
+	if r := rounds.Load(); r < 2 {
+		t.Fatalf("rounds = %d, want >= 2 (panic should not stick lock)", r)
+	}
+}
+
+func TestLock_WaiterNotification(t *testing.T) {
+	m := dlock.NewMemory()
+	ctx := context.Background()
+
+	l1, _ := m.Lock(ctx, "k")
+
+	acquired := make(chan struct{})
+	go func() {
+		l2, _ := m.Lock(ctx, "k")
+		close(acquired)
+		l2.Unlock(ctx)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	l1.Unlock(ctx)
+
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("waiter should be notified on unlock")
 	}
 }

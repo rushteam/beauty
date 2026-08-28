@@ -87,6 +87,9 @@ func TestExecute_CompensationFailure(t *testing.T) {
 	if res.Status != saga.StatusCompensationFailed {
 		t.Fatalf("status = %v, want compensation_failed", res.Status)
 	}
+	if res.CompensationErr == nil {
+		t.Fatal("CompensationErr should be set")
+	}
 	// step a 补偿失败应记录在明细里。
 	var found bool
 	for _, sr := range res.Steps {
@@ -190,5 +193,78 @@ func TestExecute_CompensationRunsDespiteCancelledCtx(t *testing.T) {
 	}
 	if res.Status != saga.StatusCompensated {
 		t.Fatalf("status = %v", res.Status)
+	}
+}
+
+func TestExecute_StepsLenAlwaysEqualsRegistered(t *testing.T) {
+	s := saga.New("s").
+		Step("a", noop, nil).
+		Step("b", noop, nil).
+		Step("c", func(context.Context) error { return errors.New("fail") }, nil).
+		Step("d", noop, nil)
+
+	res := s.Execute(context.Background())
+	if len(res.Steps) != 4 {
+		t.Fatalf("len(Steps) = %d, want 4", len(res.Steps))
+	}
+	if res.Steps[3].Name != "d" {
+		t.Fatalf("Steps[3].Name = %q, want 'd'", res.Steps[3].Name)
+	}
+}
+
+func TestExecute_OnCompensatePanicRecovered(t *testing.T) {
+	s := saga.New("s", saga.WithOnCompensate(func(step string, attempt int, err error) {
+		panic("callback boom")
+	})).
+		Step("a", noop, func(context.Context) error { return nil }).
+		Step("b", func(context.Context) error { return errors.New("fail") }, nil)
+
+	res := s.Execute(context.Background())
+	if res.Status != saga.StatusCompensated {
+		t.Fatalf("status = %v, want compensated", res.Status)
+	}
+}
+
+func TestExecute_PanicInCompensateTreatedAsError(t *testing.T) {
+	s := saga.New("s").
+		Step("a", noop, func(context.Context) error { panic("comp panic") }).
+		Step("b", func(context.Context) error { return errors.New("fail") }, nil)
+
+	res := s.Execute(context.Background())
+	if res.Status != saga.StatusCompensationFailed {
+		t.Fatalf("status = %v, want compensation_failed", res.Status)
+	}
+	if res.CompensationErr == nil {
+		t.Fatal("CompensationErr should be set for panic in compensate")
+	}
+}
+
+func TestExecute_EmptySaga(t *testing.T) {
+	s := saga.New("empty")
+	res := s.Execute(context.Background())
+	if res.Status != saga.StatusCommitted {
+		t.Fatalf("status = %v, want committed", res.Status)
+	}
+	if len(res.Steps) != 0 {
+		t.Fatalf("len(Steps) = %d, want 0", len(res.Steps))
+	}
+}
+
+func TestExecute_CompensationErrOnResult(t *testing.T) {
+	s := saga.New("s").
+		Step("a", noop, func(context.Context) error { return errors.New("comp-a-fail") }).
+		Step("b", noop, func(context.Context) error { return errors.New("comp-b-fail") }).
+		Step("c", func(context.Context) error { return errors.New("action-fail") }, nil)
+
+	res := s.Execute(context.Background())
+	if res.Status != saga.StatusCompensationFailed {
+		t.Fatalf("status = %v", res.Status)
+	}
+	if res.CompensationErr == nil {
+		t.Fatal("CompensationErr should be set")
+	}
+	// CompensationErr 应该是逆序补偿时第一个失败(b 先补偿)
+	if res.CompensationErr.Error() != "comp-b-fail" {
+		t.Fatalf("CompensationErr = %v, want comp-b-fail", res.CompensationErr)
 	}
 }

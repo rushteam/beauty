@@ -2,13 +2,7 @@
 // 经过冷却期后进入半开探测,探测成功则恢复、失败则继续断开。
 //
 // 三态:Closed(正常) → Open(熔断,快速失败) → HalfOpen(探测) → Closed / Open。
-// 错误率用固定窗口(ring bucket)统计;Open 期间 Do 立即返回 ErrCircuitOpen。
-//
-// 与 beauty 弹性三件套互补:
-//   - backoff:退避计算(延迟多久)
-//   - hedge:对冲请求(备份并发)
-//   - ratelimit:限速率(每秒多少)
-//   - circuitbreaker:熔断(错误率过高时切断)
+// 错误率用固定窗口统计;Open 期间 Do 立即返回 ErrCircuitOpen。
 //
 // 纯标准库、并发安全。
 package circuitbreaker
@@ -16,7 +10,6 @@ package circuitbreaker
 import (
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -103,6 +96,7 @@ func WithMinRequests(n int) Option {
 }
 
 // WithOnStateChange 注册状态变化回调(用于日志/埋点)。
+// 回调在状态转换时异步执行,不阻塞熔断器主路径;回调 panic 会被静默恢复。
 func WithOnStateChange(fn func(from, to State)) Option {
 	return func(c *config) { c.onChange = fn }
 }
@@ -113,6 +107,7 @@ type Breaker struct {
 
 	mu       sync.Mutex
 	state    State
+	epoch    uint64    // 每次状态转换递增,用于丢弃过期的 in-flight 结果
 	openedAt time.Time // Open 生效时刻
 
 	// Closed 统计
@@ -121,8 +116,9 @@ type Breaker struct {
 	windowStart time.Time
 
 	// HalfOpen 统计
-	halfSucc int
-	halfFail int
+	halfSucc     int
+	halfFail     int
+	halfInflight int // 正在执行中的半开探针数
 }
 
 // New 创建熔断器。
@@ -152,6 +148,20 @@ func (b *Breaker) State() State {
 	return b.state
 }
 
+// Successes 返回当前窗口成功数(仅 Closed 态有效)。
+func (b *Breaker) Successes() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.total - b.failures
+}
+
+// Failures 返回当前窗口失败数。
+func (b *Breaker) Failures() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.failures
+}
+
 // Do 包装一次调用:Closed 正常执行并统计;Open 快速失败;HalfOpen 执行探测。
 // fn 返回 error 视为失败;返回 nil 视为成功。
 func (b *Breaker) Do(fn func() error) error {
@@ -164,31 +174,24 @@ func (b *Breaker) Do(fn func() error) error {
 		return ErrCircuitOpen
 
 	case StateHalfOpen:
-		if b.halfSucc+b.halfFail >= b.cfg.halfOpenMax {
+		if b.halfInflight+b.halfSucc+b.halfFail >= b.cfg.halfOpenMax {
 			b.mu.Unlock()
 			return ErrCircuitOpen
 		}
+		b.halfInflight++
+		epoch := b.epoch
 		b.mu.Unlock()
 		err := fn()
-		b.recordHalfOpen(err)
+		b.recordHalfOpen(err, epoch)
 		return err
 
 	default: // Closed
+		epoch := b.epoch
 		b.mu.Unlock()
 		err := fn()
-		b.recordClosed(err)
+		b.recordClosed(err, epoch)
 		return err
 	}
-}
-
-// Successes 返回当前窗口成功数(仅 Closed 态有效)。
-func (b *Breaker) Successes() int64 {
-	return atomic.LoadInt64(&b.total) - atomic.LoadInt64(&b.failures)
-}
-
-// Failures 返回当前窗口失败数。
-func (b *Breaker) Failures() int64 {
-	return atomic.LoadInt64(&b.failures)
 }
 
 func (b *Breaker) checkStateTransition() {
@@ -198,6 +201,7 @@ func (b *Breaker) checkStateTransition() {
 			b.transition(StateHalfOpen)
 			b.halfSucc = 0
 			b.halfFail = 0
+			b.halfInflight = 0
 		}
 	case StateClosed:
 		if time.Since(b.windowStart) >= b.cfg.window {
@@ -206,9 +210,13 @@ func (b *Breaker) checkStateTransition() {
 	}
 }
 
-func (b *Breaker) recordClosed(err error) {
+func (b *Breaker) recordClosed(err error, epoch uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if b.state != StateClosed || b.epoch != epoch {
+		return
+	}
 
 	if time.Since(b.windowStart) >= b.cfg.window {
 		b.resetWindow()
@@ -228,9 +236,15 @@ func (b *Breaker) recordClosed(err error) {
 	}
 }
 
-func (b *Breaker) recordHalfOpen(err error) {
+func (b *Breaker) recordHalfOpen(err error, epoch uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	b.halfInflight--
+
+	if b.state != StateHalfOpen || b.epoch != epoch {
+		return
+	}
 
 	if err != nil {
 		b.halfFail++
@@ -252,8 +266,13 @@ func (b *Breaker) transition(to State) {
 		return
 	}
 	b.state = to
+	b.epoch++
 	if b.cfg.onChange != nil {
-		b.cfg.onChange(from, to)
+		fn := b.cfg.onChange
+		go func() {
+			defer func() { recover() }()
+			fn(from, to)
+		}()
 	}
 }
 

@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -10,13 +11,16 @@ import (
 var errTest = errors.New("test error")
 
 func TestBreaker_ClosedToOpen(t *testing.T) {
+	var mu sync.Mutex
 	var transitions []string
 	b := New(
 		WithThreshold(0.5),
 		WithWindow(10*time.Second),
 		WithMinRequests(4),
 		WithOnStateChange(func(from, to State) {
+			mu.Lock()
 			transitions = append(transitions, from.String()+"->"+to.String())
+			mu.Unlock()
 		}),
 	)
 
@@ -33,6 +37,9 @@ func TestBreaker_ClosedToOpen(t *testing.T) {
 	if b.State() != StateOpen {
 		t.Fatalf("state = %v, want open", b.State())
 	}
+	time.Sleep(5 * time.Millisecond) // let async callback fire
+	mu.Lock()
+	defer mu.Unlock()
 	if len(transitions) != 1 || transitions[0] != "closed->open" {
 		t.Fatalf("transitions = %v", transitions)
 	}
@@ -49,6 +56,7 @@ func TestBreaker_OpenRejectsRequests(t *testing.T) {
 }
 
 func TestBreaker_HalfOpenToClosedOnSuccess(t *testing.T) {
+	var mu sync.Mutex
 	var transitions []string
 	b := New(
 		WithThreshold(0.5),
@@ -56,7 +64,9 @@ func TestBreaker_HalfOpenToClosedOnSuccess(t *testing.T) {
 		WithCooldown(10*time.Millisecond),
 		WithHalfOpenMax(2),
 		WithOnStateChange(func(from, to State) {
+			mu.Lock()
 			transitions = append(transitions, from.String()+"->"+to.String())
+			mu.Unlock()
 		}),
 	)
 
@@ -83,6 +93,9 @@ func TestBreaker_HalfOpenToClosedOnSuccess(t *testing.T) {
 		t.Fatalf("state = %v, want closed", b.State())
 	}
 
+	time.Sleep(5 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
 	expected := []string{"closed->open", "open->half-open", "half-open->closed"}
 	if len(transitions) != len(expected) {
 		t.Fatalf("transitions = %v, want %v", transitions, expected)
@@ -182,5 +195,102 @@ func TestBreaker_Concurrent(t *testing.T) {
 	s := b.State()
 	if s != StateClosed && s != StateOpen && s != StateHalfOpen {
 		t.Fatalf("invalid state %v", s)
+	}
+}
+
+func TestBreaker_HalfOpenMaxEnforced(t *testing.T) {
+	b := New(
+		WithThreshold(0.5),
+		WithMinRequests(2),
+		WithCooldown(10*time.Millisecond),
+		WithHalfOpenMax(1),
+	)
+
+	b.Do(func() error { return errTest })
+	b.Do(func() error { return errTest })
+	time.Sleep(20 * time.Millisecond)
+
+	if b.State() != StateHalfOpen {
+		t.Fatalf("state = %v, want half-open", b.State())
+	}
+
+	// Launch many concurrent Do calls; only 1 should actually execute fn
+	var executed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b.Do(func() error {
+				executed.Add(1)
+				time.Sleep(10 * time.Millisecond)
+				return nil
+			})
+		}()
+	}
+	wg.Wait()
+
+	if n := executed.Load(); n > 1 {
+		t.Fatalf("executed = %d, want <= 1 (halfOpenMax enforcement)", n)
+	}
+}
+
+func TestBreaker_StaleClosedResultDiscarded(t *testing.T) {
+	b := New(
+		WithThreshold(0.5),
+		WithMinRequests(2),
+		WithCooldown(10*time.Millisecond),
+		WithHalfOpenMax(2),
+	)
+
+	b.Do(func() error { return errTest })
+	b.Do(func() error { return errTest })
+	time.Sleep(20 * time.Millisecond)
+
+	// Now half-open; successful probes close it
+	b.Do(func() error { return nil })
+	b.Do(func() error { return nil })
+
+	if b.State() != StateClosed {
+		t.Fatalf("state = %v, want closed", b.State())
+	}
+
+	// Verify counters are clean (fresh window after recovery)
+	if f := b.Failures(); f != 0 {
+		t.Fatalf("failures = %d after recovery, want 0", f)
+	}
+}
+
+func TestBreaker_SuccessesAndFailures(t *testing.T) {
+	b := New(WithMinRequests(100))
+
+	b.Do(func() error { return nil })
+	b.Do(func() error { return nil })
+	b.Do(func() error { return errTest })
+
+	if s := b.Successes(); s != 2 {
+		t.Fatalf("successes = %d, want 2", s)
+	}
+	if f := b.Failures(); f != 1 {
+		t.Fatalf("failures = %d, want 1", f)
+	}
+}
+
+func TestBreaker_OnChangeCallbackPanicRecovered(t *testing.T) {
+	b := New(
+		WithThreshold(0.5),
+		WithMinRequests(2),
+		WithOnStateChange(func(from, to State) {
+			panic("callback panic")
+		}),
+	)
+
+	b.Do(func() error { return errTest })
+	b.Do(func() error { return errTest })
+
+	// Should not panic; state should still transition
+	time.Sleep(5 * time.Millisecond)
+	if b.State() != StateOpen {
+		t.Fatalf("state = %v, want open", b.State())
 	}
 }

@@ -42,6 +42,7 @@ package saga
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/foundation/safe"
@@ -88,7 +89,7 @@ func (s Status) String() string {
 type StepResult struct {
 	Name          string        // 步骤名
 	ActionErr     error         // 正向操作错误(nil=成功)
-	Compensated   bool          // 是否执行了补偿
+	Compensated   bool          // 是否实际执行了补偿(至少调用了一次 Compensate)
 	CompensateErr error         // 补偿错误(仅 Compensated=true 时有意义)
 	CompensateTry int           // 补偿实际尝试次数
 	Duration      time.Duration // 正向操作耗时
@@ -102,14 +103,19 @@ type Result struct {
 	Status Status
 	// Err 触发补偿的原始失败(StatusCommitted 时为 nil)。
 	Err error
+	// CompensationErr 补偿阶段第一个失败(StatusCompensationFailed 时非 nil)。
+	CompensationErr error
 	// FailedStep 失败步骤名(StatusCommitted 时为空)。
 	FailedStep string
-	// Steps 各步骤执行明细(按注册顺序)。
+	// Steps 各步骤执行明细(长度始终等于注册步骤数)。
 	Steps []StepResult
 }
 
 // Failed 返回 Saga 是否未成功提交(需要调用方处理)。
 func (r *Result) Failed() bool { return r.Status != StatusCommitted }
+
+// maxCompRetries 补偿重试上限,防止溢出。
+const maxCompRetries = 1000
 
 // config 配置。
 type config struct {
@@ -133,6 +139,7 @@ func WithCompensationRetry(retries int, delay time.Duration) Option {
 
 // WithOnCompensate 设置补偿回调(每次补偿尝试后触发,用于日志 / metric / 审计)。
 // attempt 从 1 计数,err==nil 表示该次补偿成功。
+// 回调 panic 会被静默恢复,不影响补偿链继续执行。
 func WithOnCompensate(fn func(step string, attempt int, err error)) Option {
 	return func(c *config) { c.onCompensate = fn }
 }
@@ -152,6 +159,9 @@ func New(name string, opts ...Option) *Saga {
 	}
 	if cfg.compRetries < 0 {
 		cfg.compRetries = 0
+	}
+	if cfg.compRetries > maxCompRetries {
+		cfg.compRetries = maxCompRetries
 	}
 	return &Saga{name: name, cfg: cfg}
 }
@@ -175,28 +185,38 @@ func (s *Saga) AddStep(step Step) *Saga {
 // 响应 ctx;随后对已成功步骤执行补偿。补偿阶段用 context.WithoutCancel 派生,
 // 不受原 ctx 取消影响。
 func (s *Saga) Execute(ctx context.Context) *Result {
-	res := &Result{Name: s.name, Status: StatusCommitted}
+	// 快照 steps 防止并发修改
+	steps := append([]Step(nil), s.steps...)
 
-	completed := make([]int, 0, len(s.steps)) // 已成功步骤的下标(供逆序补偿)
-	for i, step := range s.steps {
-		// 进入下一步前检查 ctx,已取消则失败并补偿。
+	res := &Result{
+		Name:   s.name,
+		Status: StatusCommitted,
+		Steps:  make([]StepResult, len(steps)),
+	}
+	// 预填所有步骤名
+	for i, step := range steps {
+		res.Steps[i].Name = step.Name
+	}
+
+	completed := make([]int, 0, len(steps))
+	for i, step := range steps {
 		if err := ctx.Err(); err != nil {
 			res.Err = fmt.Errorf("saga %q: context done before step %q: %w", s.name, step.Name, err)
 			res.FailedStep = step.Name
-			res.Steps = append(res.Steps, StepResult{Name: step.Name, ActionErr: res.Err})
-			s.compensate(ctx, completed, res)
+			res.Steps[i].ActionErr = res.Err
+			s.compensate(ctx, steps, completed, res)
 			return res
 		}
 
 		start := time.Now()
 		err := safe.Run(func() error { return step.Action(ctx) })
-		sr := StepResult{Name: step.Name, ActionErr: err, Duration: time.Since(start)}
-		res.Steps = append(res.Steps, sr)
+		res.Steps[i].ActionErr = err
+		res.Steps[i].Duration = time.Since(start)
 
 		if err != nil {
 			res.Err = fmt.Errorf("saga %q: step %q action failed: %w", s.name, step.Name, err)
 			res.FailedStep = step.Name
-			s.compensate(ctx, completed, res)
+			s.compensate(ctx, steps, completed, res)
 			return res
 		}
 		completed = append(completed, i)
@@ -206,50 +226,59 @@ func (s *Saga) Execute(ctx context.Context) *Result {
 
 // compensate 逆序补偿 completed 中的步骤,把结果写回 res.Steps 对应项。
 // 任一步补偿最终失败 → res.Status = StatusCompensationFailed;否则 StatusCompensated。
-func (s *Saga) compensate(ctx context.Context, completed []int, res *Result) {
-	// 补偿不受原 ctx 取消影响:副作用须补完。
+func (s *Saga) compensate(ctx context.Context, steps []Step, completed []int, res *Result) {
 	compCtx := context.WithoutCancel(ctx)
 	res.Status = StatusCompensated
 
-	// 补偿重试的退避序列复用 pkg/backoff:base=compRetryDelay、factor=2、无抖动,
-	// 与历史行为(delay<<(attempt-1))一致。
-	policy := backoff.New(
-		backoff.WithBase(s.cfg.compRetryDelay),
-		backoff.WithFactor(2),
-		backoff.WithJitter(backoff.JitterNone),
-		backoff.WithMax(0),
-	)
+	var policy *backoff.Policy
+	if s.cfg.compRetries > 0 {
+		policy = backoff.New(
+			backoff.WithBase(s.cfg.compRetryDelay),
+			backoff.WithFactor(2),
+			backoff.WithJitter(backoff.JitterNone),
+			backoff.WithMax(0),
+		)
+	}
+
+	attempts := s.cfg.compRetries + 1
+	if attempts <= 0 || attempts > math.MaxInt-1 {
+		attempts = 1
+	}
 
 	for i := len(completed) - 1; i >= 0; i-- {
 		idx := completed[i]
-		step := s.steps[idx]
+		step := steps[idx]
 		if step.Compensate == nil {
-			continue // 无补偿的步骤跳过
+			continue
 		}
 
 		var lastErr error
-		attempts := s.cfg.compRetries + 1
 		var tried int
 		for attempt := 1; attempt <= attempts; attempt++ {
 			tried = attempt
 			lastErr = safe.Run(func() error { return step.Compensate(compCtx) })
 			if s.cfg.onCompensate != nil {
-				s.cfg.onCompensate(step.Name, attempt, lastErr)
+				func() {
+					defer func() { recover() }()
+					s.cfg.onCompensate(step.Name, attempt, lastErr)
+				}()
 			}
 			if lastErr == nil {
 				break
 			}
-			if attempt < attempts {
-				// 指数退避后重试(attempt 从 1 计,Duration(attempt-1) 对应 base<<(attempt-1))。
+			if attempt < attempts && policy != nil {
 				time.Sleep(policy.Duration(attempt - 1))
 			}
 		}
 
-		res.Steps[idx].Compensated = true
+		res.Steps[idx].Compensated = tried > 0
 		res.Steps[idx].CompensateErr = lastErr
 		res.Steps[idx].CompensateTry = tried
 		if lastErr != nil {
 			res.Status = StatusCompensationFailed
+			if res.CompensationErr == nil {
+				res.CompensationErr = lastErr
+			}
 		}
 	}
 }

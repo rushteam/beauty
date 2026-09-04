@@ -79,6 +79,8 @@ beauty 在 `pkg/transport/ws`（WebSocket 薄封装）和 `pkg/transport/sse`（
 | `pkg/game/snapbuf` | 环形快照缓冲 | 延迟补偿 rewind | — |
 | `pkg/game/inputclock` | 客户端帧映射 + RTT | 延迟补偿 | — |
 | `pkg/game/lagcomp` | 补偿帧查询 WorldAt | FPS 命中判定 | — |
+| `pkg/game/voxel` | 体素世界原语(Chunk/World/Mutation/RLE/Snapshot) | Minecraft 类体素游戏 | ✓ |
+| `pkg/game/voxel/octree` | 八叉树 3D 空间索引 | 体素世界实体 AOI | — |
 | `pkg/game/gameroom` | Dedicated 房间 FSM | Waiting→Running→Draining | — |
 | `pkg/game/gameloop` | 定步 tick + 输入扇出 | lockstep / 状态同步骨架 | ✓ |
 | `pkg/game/geohash` | 经纬度地理编码(编码/邻居/覆盖查询/距离) | LBS 附近的人/店铺(前缀检索) | ✓ |

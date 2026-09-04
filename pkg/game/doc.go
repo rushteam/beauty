@@ -20,6 +20,8 @@
 //	rating      — 评分系统(Glicko-2、TrueSkill 子包)
 //	pathfind    — A* 寻路
 //	geohash     — GeoHash 编码
+//	voxel       — 体素世界原语(Chunk/World/Mutation/RLE/Snapshot)
+//	voxel/octree— 八叉树 3D 空间索引
 //
 // Meta 子包(成长/社交机制):
 //

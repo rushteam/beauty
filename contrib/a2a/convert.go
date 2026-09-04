@@ -24,7 +24,7 @@ import (
 
 // messagesToParts 将 beauty 消息列表转为 A2A 内容块。
 func messagesToParts(messages []llm.Message) []*a2a.Part {
-	var parts []*a2a.Part
+	parts := make([]*a2a.Part, 0, len(messages))
 	for _, m := range messages {
 		if m.Content != "" {
 			parts = append(parts, a2a.NewTextPart(m.Content))
@@ -55,8 +55,8 @@ func messagesToParts(messages []llm.Message) []*a2a.Part {
 
 // partsToMessage 将 A2A 内容块列表转为单条 beauty Message。
 func partsToMessage(parts a2a.ContentParts, role llm.Role) llm.Message {
-	var texts []string
-	var multimodal []llm.Part
+	texts := make([]string, 0, len(parts))
+	multimodal := make([]llm.Part, 0, len(parts))
 
 	for _, p := range parts {
 		switch {
@@ -77,10 +77,12 @@ func partsToMessage(parts a2a.ContentParts, role llm.Role) llm.Message {
 
 	msg := llm.Message{Role: role}
 	if len(multimodal) > 0 {
-		for _, t := range texts {
-			multimodal = append([]llm.Part{{Type: llm.PartText, Text: t}}, multimodal...)
+		combined := make([]llm.Part, 0, len(texts)+len(multimodal))
+		for i := len(texts) - 1; i >= 0; i-- {
+			combined = append(combined, llm.Part{Type: llm.PartText, Text: texts[i]})
 		}
-		msg.Parts = multimodal
+		combined = append(combined, multimodal...)
+		msg.Parts = combined
 	} else {
 		msg.Content = strings.Join(texts, "\n")
 	}

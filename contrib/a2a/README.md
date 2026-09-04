@@ -10,16 +10,34 @@ go get github.com/rushteam/beauty/contrib/a2a@latest
 
 ## 服务端:暴露 beauty agent
 
+### 推荐:WithA2AServer(纳入 beauty 生命周期)
+
 ```go
 import (
     "github.com/a2aproject/a2a-go/v2/a2a"
     a2ax "github.com/rushteam/beauty/contrib/a2a"
+    "github.com/rushteam/beauty/pkg/service/webserver"
 )
 
 card := &a2a.AgentCard{Name: "reviewer", /* ... */}
+app := beauty.New(
+    a2ax.WithA2AServer(":5000", myAgent, a2ax.ServerConfig{AgentCard: card},
+        webserver.WithServiceName("a2a-agent"),
+    ),
+)
+app.Start(ctx)
+```
+
+自动享受 beauty 的优雅生命周期(启动→就绪→注册→排空→关闭)、OTel 追踪、中间件链及服务发现。
+
+### 手动:RegisterRoutes(与其他路由共享 ServeMux)
+
+```go
+card := &a2a.AgentCard{Name: "reviewer", /* ... */}
 mux := http.NewServeMux()
 a2ax.RegisterRoutes(mux, myStreamAgent, a2ax.ServerConfig{AgentCard: card})
-// JSON-RPC 在 "/" , AgentCard 在 /.well-known/agent.json
+// JSON-RPC 在 "/" , AgentCard 在 /.well-known/agent-card.json
+beauty.New(beauty.WithWebServer(":5000", mux)).Start(ctx)
 ```
 
 `NewExecutor` 也可单独配合 a2a-go 的 `a2asrv.NewHandler` 使用。流式 token 映射为 Artifact 增量,

@@ -11,8 +11,10 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
+	beauty "github.com/rushteam/beauty"
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"
+	"github.com/rushteam/beauty/pkg/service/webserver"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -147,7 +149,25 @@ func (e *executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 // 便捷路由注册
 // ──────────────────────────────────────────────────────────────────────────────
 
+// WithA2AServer 返回一个 beauty.Option，将 beauty agent 作为 A2A HTTP 服务
+// 纳入 beauty 应用的生命周期管理（启动、就绪信号、优雅关闭、服务发现注册）。
+//
+//	app := beauty.New(
+//	    a2a.WithA2AServer(":5000", myAgent, a2a.ServerConfig{AgentCard: card},
+//	        webserver.WithServiceName("a2a-agent"),
+//	        webserver.WithMiddleware(recovery.HTTPMiddleware()),
+//	    ),
+//	)
+//	app.Start(ctx)
+func WithA2AServer(addr string, a agent.Agent, cfg ServerConfig, opts ...webserver.Option) beauty.Option {
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, a, cfg)
+	return beauty.WithService(webserver.New(addr, mux, opts...))
+}
+
 // RegisterRoutes 在 mux 上注册完整的 A2A 端点(JSON-RPC + AgentCard well-known)。
+// 如果需要和其他路由共享同一个 ServeMux，使用本函数;
+// 如果只需要独立的 A2A 服务，推荐直接使用 WithA2AServer。
 //
 //	mux := http.NewServeMux()
 //	a2a.RegisterRoutes(mux, myStreamAgent, a2a.ServerConfig{AgentCard: card})

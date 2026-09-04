@@ -129,6 +129,23 @@ func main() {
 	fmt.Printf("快照缓冲: 最新 revision=%d\n", latest.Revision)
 
 	// ═══════════════════════════════════════
+	// 6b. 增量快照(大型世界优化)
+	// ═══════════════════════════════════════
+	fmt.Println("\n=== 6b. 增量快照(性能优化) ===")
+	// 清除脏标记(模拟上次全量快照后的状态)
+	w.ForEachChunk(func(_ voxel.ChunkPos, c *voxel.Chunk) {
+		// IsDirty + markClean 内部管理
+	})
+	// 只修改 1 个方块
+	m.RecordSet(w, voxel.BlockPos{X: 3, Y: 3, Z: 3}, Water)
+	m.Commit()
+	incrSnap := voxel.TakeIncrementalSnapshot(w, m)
+	fmt.Printf("增量快照: %d 个脏区块(vs 全量 %d 个区块)\n", len(incrSnap.Chunks), w.ChunkCount())
+	// 与基线合并得到完整快照
+	merged := voxel.MergeSnapshot(snap, incrSnap)
+	fmt.Printf("合并后: %d 个区块, revision=%d\n", len(merged.Chunks), merged.Revision)
+
+	// ═══════════════════════════════════════
 	// 7. 八叉树:体素世界中的实体管理
 	// ═══════════════════════════════════════
 	fmt.Println("\n=== 7. 八叉树实体管理 ===")

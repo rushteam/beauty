@@ -84,3 +84,94 @@ func TestSnapshotRing(t *testing.T) {
 		t.Error("Nearest(2) should be false (no snapshot <= 2)")
 	}
 }
+
+func TestTakeIncrementalSnapshot(t *testing.T) {
+	w := NewWorld()
+	m := NewMutation()
+
+	// 初始填充 3 个区块
+	for i := int32(0); i < 3; i++ {
+		c, _ := w.LoadChunk(ChunkPos{X: i, Y: 0, Z: 0})
+		c.Fill(BlockID(i + 1))
+	}
+
+	// 全量快照作为基线
+	base := TakeSnapshot(w, nil)
+	if len(base.Chunks) != 3 {
+		t.Fatalf("base chunks = %d, want 3", len(base.Chunks))
+	}
+
+	// 清除脏标记(模拟快照后清理)
+	w.ForEachChunk(func(_ ChunkPos, c *Chunk) {
+		c.markClean()
+	})
+
+	// 无修改 → 增量快照应为空
+	incr := TakeIncrementalSnapshot(w, nil)
+	if len(incr.Chunks) != 0 {
+		t.Errorf("no-dirty incremental chunks = %d, want 0", len(incr.Chunks))
+	}
+
+	// 修改 1 个区块
+	m.RecordSet(w, BlockPos{X: 0, Y: 0, Z: 0}, 99)
+	cm := m.Commit()
+	_ = cm
+
+	// 增量快照应只含 1 个区块
+	incr = TakeIncrementalSnapshot(w, m)
+	if len(incr.Chunks) != 1 {
+		t.Errorf("1-dirty incremental chunks = %d, want 1", len(incr.Chunks))
+	}
+	if incr.Chunks[0].Pos != (ChunkPos{X: 0, Y: 0, Z: 0}) {
+		t.Errorf("dirty chunk pos = %v, want {0,0,0}", incr.Chunks[0].Pos)
+	}
+
+	// 脏标记应已清除
+	c := w.Chunk(ChunkPos{X: 0, Y: 0, Z: 0})
+	if c.IsDirty() {
+		t.Error("chunk should be clean after incremental snapshot")
+	}
+}
+
+func TestMergeSnapshot(t *testing.T) {
+	w := NewWorld()
+
+	// 建立 3 个区块
+	for i := int32(0); i < 3; i++ {
+		c, _ := w.LoadChunk(ChunkPos{X: i, Y: 0, Z: 0})
+		c.Fill(BlockID(i + 1))
+	}
+
+	// 全量基线
+	base := TakeSnapshot(w, nil)
+	w.ForEachChunk(func(_ ChunkPos, c *Chunk) { c.markClean() })
+
+	// 修改区块 0 并增加新区块 3
+	w.SetBlock(BlockPos{X: 0, Y: 0, Z: 0}, 99)
+	c3, _ := w.LoadChunk(ChunkPos{X: 3, Y: 0, Z: 0})
+	c3.Fill(10)
+
+	delta := TakeIncrementalSnapshot(w, nil)
+	if len(delta.Chunks) != 2 {
+		t.Fatalf("delta chunks = %d, want 2", len(delta.Chunks))
+	}
+
+	// 合并
+	merged := MergeSnapshot(base, delta)
+	if len(merged.Chunks) != 4 {
+		t.Errorf("merged chunks = %d, want 4", len(merged.Chunks))
+	}
+
+	// 恢复验证
+	w2 := NewWorld()
+	RestoreSnapshot(w2, merged)
+	if w2.GetBlock(BlockPos{X: 0, Y: 0, Z: 0}) != 99 {
+		t.Error("merged block at (0,0,0) should be 99")
+	}
+	if w2.GetBlock(BlockPos{X: ChunkSize, Y: 0, Z: 0}) != 2 {
+		t.Error("unmodified block at chunk 1 should be 2")
+	}
+	if w2.ChunkCount() != 4 {
+		t.Errorf("restored ChunkCount = %d, want 4", w2.ChunkCount())
+	}
+}

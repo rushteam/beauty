@@ -47,6 +47,59 @@ func TakeSnapshot(w *World, mutation *Mutation) WorldSnapshot {
 	return snap
 }
 
+// TakeIncrementalSnapshot 只对被修改过的区块拍摄快照(增量快照)。
+//
+// 对于 10 万区块的世界,若每帧只修改了几十个区块,增量快照比全量快照快数千倍。
+// 拍摄完成后自动清除脏标记。结合 MergeSnapshot 使用可维护完整世界状态。
+//
+// 返回的快照仅包含脏区块。如果没有脏区块,Chunks 为 nil。
+func TakeIncrementalSnapshot(w *World, mutation *Mutation) WorldSnapshot {
+	var rev uint64
+	if mutation != nil {
+		rev = mutation.Revision()
+	}
+
+	snap := WorldSnapshot{Revision: rev}
+	w.ForEachChunk(func(pos ChunkPos, c *Chunk) {
+		if !c.IsDirty() {
+			return
+		}
+		cs := ChunkSnapshot{
+			Pos:      pos,
+			Revision: c.Revision(),
+			Blocks:   c.Blocks(),
+		}
+		if rev == 0 && cs.Revision > snap.Revision {
+			snap.Revision = cs.Revision
+		}
+		snap.Chunks = append(snap.Chunks, cs)
+		c.markClean()
+	})
+	return snap
+}
+
+// MergeSnapshot 将增量快照合并到基础快照。
+// base 中已有的区块会被 delta 覆盖,delta 中新区块会追加。
+func MergeSnapshot(base, delta WorldSnapshot) WorldSnapshot {
+	idx := make(map[ChunkPos]int, len(base.Chunks))
+	for i, cs := range base.Chunks {
+		idx[cs.Pos] = i
+	}
+	merged := WorldSnapshot{
+		Revision: delta.Revision,
+		Chunks:   make([]ChunkSnapshot, len(base.Chunks)),
+	}
+	copy(merged.Chunks, base.Chunks)
+	for _, cs := range delta.Chunks {
+		if i, ok := idx[cs.Pos]; ok {
+			merged.Chunks[i] = cs
+		} else {
+			merged.Chunks = append(merged.Chunks, cs)
+		}
+	}
+	return merged
+}
+
 // RestoreSnapshot 从快照恢复 World 状态。会清除现有区块并加载快照中的所有区块。
 func RestoreSnapshot(w *World, snap WorldSnapshot) {
 	for _, pos := range w.LoadedChunks() {

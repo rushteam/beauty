@@ -1,6 +1,9 @@
 package voxel
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // Chunk 是一个 ChunkSize³ 的方块数组,是体素世界的最小加载/传输单元。
 //
@@ -11,7 +14,8 @@ type Chunk struct {
 	pos      ChunkPos
 	blocks   [blocksPerChunk]BlockID
 	revision uint64
-	nonAir   int // 非空气方块计数,用于快速判空
+	nonAir   int         // 非空气方块计数,用于快速判空
+	dirty    atomic.Bool // 脏标记:自上次 markClean 后是否有修改,用于增量快照
 }
 
 // NewChunk 创建位于 pos 的空区块(全部为 Air)。
@@ -40,7 +44,7 @@ func (c *Chunk) Get(x, y, z int) BlockID {
 }
 
 // Set 设置局部坐标 (x,y,z) 处的方块,返回被替换的旧方块。
-// 坐标越界时无操作返回 Air。每次成功修改会递增 Revision。
+// 坐标越界时无操作返回 Air。每次成功修改会递增 Revision 并标记脏。
 func (c *Chunk) Set(x, y, z int, block BlockID) (old BlockID) {
 	if !inBounds(x, y, z) {
 		return Air
@@ -54,6 +58,7 @@ func (c *Chunk) Set(x, y, z int, block BlockID) (old BlockID) {
 	}
 	c.blocks[idx] = block
 	c.revision++
+	c.dirty.Store(true)
 
 	switch {
 	case old == Air && block != Air:
@@ -72,6 +77,7 @@ func (c *Chunk) Fill(block BlockID) {
 		c.blocks[i] = block
 	}
 	c.revision++
+	c.dirty.Store(true)
 	if block == Air {
 		c.nonAir = 0
 	} else {
@@ -116,6 +122,7 @@ func (c *Chunk) LoadBlocks(data []BlockID) bool {
 	}
 	c.nonAir = count
 	c.revision++
+	c.dirty.Store(true)
 	return true
 }
 
@@ -130,6 +137,24 @@ func (c *Chunk) ForEach(fn func(x, y, z int, block BlockID)) {
 		x, y, z := deindex(i)
 		fn(x, y, z, b)
 	}
+}
+
+// IsDirty 返回区块是否在上次 markClean 之后被修改过。
+func (c *Chunk) IsDirty() bool {
+	return c.dirty.Load()
+}
+
+// markClean 清除脏标记(由增量快照调用)。
+func (c *Chunk) markClean() {
+	c.dirty.Store(false)
+}
+
+// EncodeRLE 在持有读锁期间直接对内部方块数组进行 RLE 编码。
+// 相比 Blocks() + EncodeRLE() 省掉一次 8KB 数组拷贝,大规模场景推荐使用。
+func (c *Chunk) EncodeRLE() []RLERun {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return EncodeRLE(c.blocks[:])
 }
 
 func inBounds(x, y, z int) bool {

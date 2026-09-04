@@ -49,9 +49,9 @@ func DecodeRLE(runs []RLERun) []BlockID {
 }
 
 // EncodeChunkRLE 对 Chunk 的方块数据进行 RLE 压缩。
+// 内部使用零拷贝编码,避免 8KB 数组拷贝开销。
 func EncodeChunkRLE(c *Chunk) []RLERun {
-	b := c.Blocks()
-	return EncodeRLE(b[:])
+	return c.EncodeRLE()
 }
 
 // DecodeChunkRLE 从 RLE 数据恢复到 Chunk。

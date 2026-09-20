@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beauty Console</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a2e; color: #e0e0e0; font-family: 'Courier New', monospace; height: 100vh; display: flex; flex-direction: column; }
+#header { background: #16213e; padding: 8px 16px; border-bottom: 1px solid #0f3460; display: flex; justify-content: space-between; align-items: center; }
+#header h1 { font-size: 14px; color: #e94560; }
+#header .status { font-size: 12px; }
+.connected { color: #4ecca3; }
+.disconnected { color: #e94560; }
+#output { flex: 1; overflow-y: auto; padding: 12px 16px; white-space: pre-wrap; word-wrap: break-word; font-size: 13px; line-height: 1.5; }
+.msg-output { color: #e0e0e0; }
+.msg-error { color: #e94560; }
+.msg-push { color: #4ecca3; }
+.msg-system { color: #7b7b8e; font-style: italic; }
+#hints { padding: 4px 16px; color: #7b7b8e; font-size: 12px; min-height: 20px; }
+#inputLine { display: flex; background: #16213e; border-top: 1px solid #0f3460; padding: 8px 16px; }
+#inputLine span { color: #e94560; margin-right: 8px; line-height: 28px; }
+#inputLine input { flex: 1; background: transparent; border: none; color: #e0e0e0; font-family: inherit; font-size: 14px; outline: none; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>🎮 Beauty Console</h1>
+  <span id="status" class="disconnected">● disconnected</span>
+</div>
+<div id="output"></div>
+<div id="hints"></div>
+<div id="inputLine">
+  <span>&gt;</span>
+  <input id="cmd" type="text" placeholder="Type a command... (help for list)" autofocus>
+</div>
+<script>
+(function() {
+  const output = document.getElementById('output');
+  const cmdInput = document.getElementById('cmd');
+  const statusEl = document.getElementById('status');
+  const hintsEl = document.getElementById('hints');
+  const history = [];
+  let histIdx = -1;
+  let ws;
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    ws.onopen = () => {
+      statusEl.className = 'connected';
+      statusEl.textContent = '● connected';
+      appendLine('system', '[connected]');
+    };
+    ws.onclose = () => {
+      statusEl.className = 'disconnected';
+      statusEl.textContent = '● disconnected';
+      appendLine('system', '[disconnected, reconnecting in 3s...]');
+      setTimeout(connect, 3000);
+    };
+    ws.onerror = () => {};
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        switch (msg.op) {
+          case 'output': appendLine('output', msg.data); break;
+          case 'error':  appendLine('error', '⚠ ' + msg.data); break;
+          case 'push':   appendLine('push', '📡 ' + msg.data); break;
+          case 'hint':
+            try {
+              const hints = JSON.parse(msg.data);
+              hintsEl.textContent = hints.length ? 'Tab: ' + hints.join('  ') : '';
+            } catch(_) { hintsEl.textContent = ''; }
+            break;
+          case 'auth':
+            appendLine(msg.data === 'ok' ? 'output' : 'error',
+                       msg.data === 'ok' ? '🔓 authenticated' : '🔒 auth failed');
+            break;
+        }
+      } catch(_) {}
+    };
+  }
+
+  function appendLine(cls, text) {
+    const div = document.createElement('div');
+    div.className = 'msg-' + cls;
+    div.textContent = text;
+    output.appendChild(div);
+    output.scrollTop = output.scrollHeight;
+  }
+
+  function send(op, data) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ op, data }));
+    }
+  }
+
+  cmdInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const val = cmdInput.value.trim();
+      if (!val) return;
+      history.unshift(val);
+      histIdx = -1;
+      appendLine('output', '> ' + val);
+      if (val.startsWith('auth ')) {
+        send('auth', val.slice(5));
+      } else {
+        send('command', val);
+      }
+      cmdInput.value = '';
+      hintsEl.textContent = '';
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      send('hint', cmdInput.value);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (histIdx < history.length - 1) {
+        histIdx++;
+        cmdInput.value = history[histIdx];
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (histIdx > 0) {
+        histIdx--;
+        cmdInput.value = history[histIdx];
+      } else {
+        histIdx = -1;
+        cmdInput.value = '';
+      }
+    }
+  });
+
+  cmdInput.addEventListener('input', () => {
+    if (cmdInput.value.length > 0) {
+      send('hint', cmdInput.value);
+    } else {
+      hintsEl.textContent = '';
+    }
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>

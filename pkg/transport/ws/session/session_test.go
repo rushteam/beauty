@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -155,3 +156,339 @@ var errBoom = &boom{}
 type boom struct{}
 
 func (boom) Error() string { return "boom" }
+
+// TestSession_Schedule 验证 Schedule 把回调投递到读循环 goroutine 串行执行。
+func TestSession_Schedule(t *testing.T) {
+	var scheduledVal atomic.Int32
+
+	h := &scheduleHandler{
+		closeCh: make(chan struct{}),
+		onMsg: func(s *session.Session) {
+			// 从 OnMessage(读线程)里 Schedule 一个回调
+			ok := s.Schedule(func() {
+				scheduledVal.Store(42)
+			})
+			if !ok {
+				t.Error("Schedule should return true")
+			}
+		},
+	}
+	srv := startServer(t, h, session.WithPingPeriod(0))
+	c := dial(t, srv)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.Write(ctx, websocket.MessageText, []byte("trigger")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// 读回声确认消息被处理
+	_, _, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// 给 drainSchedule 一点时间执行回调
+	time.Sleep(50 * time.Millisecond)
+
+	if scheduledVal.Load() != 42 {
+		t.Fatalf("scheduled callback not executed, val=%d", scheduledVal.Load())
+	}
+
+	c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.closeCh:
+	case <-time.After(time.Second):
+		t.Fatal("OnClose not called")
+	}
+}
+
+// TestSession_ScheduleFromOtherGoroutine 从外部 goroutine 投递回调。
+func TestSession_ScheduleFromOtherGoroutine(t *testing.T) {
+	var scheduledVal atomic.Int32
+	var sessionRef atomic.Pointer[session.Session]
+
+	h := &scheduleHandler{
+		closeCh: make(chan struct{}),
+		onOpen: func(s *session.Session) {
+			sessionRef.Store(s)
+		},
+	}
+	srv := startServer(t, h, session.WithPingPeriod(0))
+	c := dial(t, srv)
+
+	// 等 OnOpen 完成
+	time.Sleep(50 * time.Millisecond)
+
+	s := sessionRef.Load()
+	if s == nil {
+		t.Fatal("session not captured")
+	}
+
+	// 从另一 goroutine Schedule
+	ok := s.Schedule(func() {
+		scheduledVal.Store(99)
+	})
+	if !ok {
+		t.Fatal("Schedule should succeed")
+	}
+
+	// 发消息触发读循环处理 scheduleCh
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = c.Write(ctx, websocket.MessageText, []byte("ping"))
+	_, _, _ = c.Read(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+	if scheduledVal.Load() != 99 {
+		t.Fatalf("scheduled from external goroutine not executed, val=%d", scheduledVal.Load())
+	}
+
+	c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.closeCh:
+	case <-time.After(time.Second):
+	}
+}
+
+type scheduleHandler struct {
+	closeOnce sync.Once
+	closeCh   chan struct{}
+	onMsg     func(s *session.Session)
+	onOpen    func(s *session.Session)
+}
+
+func (h *scheduleHandler) OnOpen(s *session.Session) error {
+	if h.onOpen != nil {
+		h.onOpen(s)
+	}
+	return nil
+}
+
+func (h *scheduleHandler) OnMessage(s *session.Session, typ session.MessageType, data []byte) error {
+	if h.onMsg != nil {
+		h.onMsg(s)
+	}
+	s.Send(typ, data) // echo
+	return nil
+}
+
+func (h *scheduleHandler) OnClose(s *session.Session, reason string) {
+	h.closeOnce.Do(func() { close(h.closeCh) })
+}
+
+// ---- Attachment 测试 ----
+
+func TestSession_Attachment(t *testing.T) {
+	var sessionRef atomic.Pointer[session.Session]
+	h := &scheduleHandler{
+		closeCh: make(chan struct{}),
+		onOpen: func(s *session.Session) {
+			sessionRef.Store(s)
+			s.Set("uid", "player-42")
+			s.Set("level", 10)
+		},
+	}
+	srv := startServer(t, h, session.WithPingPeriod(0))
+	c := dial(t, srv)
+	time.Sleep(50 * time.Millisecond)
+
+	s := sessionRef.Load()
+	if s == nil {
+		t.Fatal("session not captured")
+	}
+
+	uid, ok := session.Get[string](s, "uid")
+	if !ok || uid != "player-42" {
+		t.Fatalf("Get uid=%q ok=%v", uid, ok)
+	}
+	level, ok := session.Get[int](s, "level")
+	if !ok || level != 10 {
+		t.Fatalf("Get level=%d ok=%v", level, ok)
+	}
+
+	// 类型不匹配
+	_, ok = session.Get[float64](s, "uid")
+	if ok {
+		t.Fatal("wrong type should return false")
+	}
+
+	// 不存在
+	_, ok = session.Get[string](s, "missing")
+	if ok {
+		t.Fatal("missing key should return false")
+	}
+
+	// Delete
+	s.Delete("uid")
+	_, ok = session.Get[string](s, "uid")
+	if ok {
+		t.Fatal("deleted key should return false")
+	}
+
+	// MustGet
+	got := session.MustGet[int](s, "level")
+	if got != 10 {
+		t.Fatalf("MustGet=%d", got)
+	}
+
+	c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.closeCh:
+	case <-time.After(time.Second):
+	}
+}
+
+// ---- Interceptor 测试 ----
+
+func TestSession_Interceptor_Passthrough(t *testing.T) {
+	var intercepted atomic.Int32
+	interceptor := func(s *session.Session, typ session.MessageType, data []byte) (bool, error) {
+		intercepted.Add(1)
+		return false, nil // 不消费,继续传给 OnMessage
+	}
+	h := newEcho()
+	srv := startServer(t, h, session.WithPingPeriod(0), session.WithInterceptor(interceptor))
+	c := dial(t, srv)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = c.Write(ctx, websocket.MessageText, []byte("hello"))
+	_, data, _ := c.Read(ctx)
+	if string(data) != "hello" {
+		t.Fatalf("echo=%q", data)
+	}
+	if intercepted.Load() != 1 {
+		t.Fatalf("interceptor calls=%d want 1", intercepted.Load())
+	}
+
+	c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.closeCh:
+	case <-time.After(time.Second):
+	}
+}
+
+func TestSession_Interceptor_Consume(t *testing.T) {
+	interceptor := func(s *session.Session, typ session.MessageType, data []byte) (bool, error) {
+		if string(data) == "secret" {
+			s.SendText([]byte("intercepted"))
+			return true, nil // 消费掉,不传给 OnMessage
+		}
+		return false, nil
+	}
+	h := newEcho()
+	srv := startServer(t, h, session.WithPingPeriod(0), session.WithInterceptor(interceptor))
+	c := dial(t, srv)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// secret 被拦截消费
+	_ = c.Write(ctx, websocket.MessageText, []byte("secret"))
+	_, data, _ := c.Read(ctx)
+	if string(data) != "intercepted" {
+		t.Fatalf("expected intercepted, got %q", data)
+	}
+
+	// 普通消息放行
+	_ = c.Write(ctx, websocket.MessageText, []byte("normal"))
+	_, data, _ = c.Read(ctx)
+	if string(data) != "normal" {
+		t.Fatalf("echo=%q", data)
+	}
+
+	c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.closeCh:
+	case <-time.After(time.Second):
+	}
+}
+
+func TestSession_Interceptor_Error_ClosesSession(t *testing.T) {
+	interceptor := func(s *session.Session, typ session.MessageType, data []byte) (bool, error) {
+		return false, errors.New("auth failed")
+	}
+	h := newEcho()
+	srv := startServer(t, h, session.WithPingPeriod(0), session.WithInterceptor(interceptor))
+	c := dial(t, srv)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = c.Write(ctx, websocket.MessageText, []byte("anything"))
+	_, _, err := c.Read(ctx) // 应收到 close
+	if err == nil {
+		t.Fatal("interceptor error should close session")
+	}
+
+	select {
+	case <-h.closeCh:
+	case <-time.After(time.Second):
+		t.Fatal("OnClose not called after interceptor error")
+	}
+}
+
+// ---- Kick 测试 ----
+
+func TestSession_Kick(t *testing.T) {
+	var sessionRef atomic.Pointer[session.Session]
+	wrapper := &kickTestHandler{
+		inner: &scheduleHandler{
+			closeCh: make(chan struct{}),
+			onOpen: func(s *session.Session) {
+				sessionRef.Store(s)
+			},
+		},
+		reasonCh: make(chan string, 1),
+		closeCh:  make(chan struct{}),
+	}
+	srv := startServer(t, wrapper, session.WithPingPeriod(0))
+	c := dial(t, srv)
+	time.Sleep(50 * time.Millisecond)
+
+	s := sessionRef.Load()
+	if s == nil {
+		t.Fatal("session not captured")
+	}
+
+	// 踢人
+	s.Kick(1, "duplicate login")
+
+	// 客户端应收到 kick 消息
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, data, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("read kick msg: %v", err)
+	}
+	if !strings.Contains(string(data), `"kick"`) {
+		t.Fatalf("expected kick message, got %q", data)
+	}
+	if !strings.Contains(string(data), `"duplicate login"`) {
+		t.Fatalf("kick reason not in message: %q", data)
+	}
+
+	// 等 OnClose
+	select {
+	case <-wrapper.closeCh:
+	case <-time.After(time.Second):
+		t.Fatal("OnClose not called")
+	}
+}
+
+type kickTestHandler struct {
+	inner    *scheduleHandler
+	reasonCh chan string
+	closeCh  chan struct{}
+	once     sync.Once
+}
+
+func (h *kickTestHandler) OnOpen(s *session.Session) error { return h.inner.OnOpen(s) }
+func (h *kickTestHandler) OnMessage(s *session.Session, typ session.MessageType, data []byte) error {
+	return h.inner.OnMessage(s, typ, data)
+}
+func (h *kickTestHandler) OnClose(s *session.Session, reason string) {
+	h.once.Do(func() { close(h.closeCh) })
+	select {
+	case h.reasonCh <- reason:
+	default:
+	}
+}

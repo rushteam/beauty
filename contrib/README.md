@@ -71,6 +71,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/otelllm`](otelllm) | LLM AI 可观测性:OTel Trace/Metrics 装饰器(GenAI 语义约定)+ Agent run-tree Hooks + 增强版 Metered(含错误上报),可导出到 Jaeger/Tempo/Langfuse/LangSmith | otel/otel-sdk |
 | [`contrib/p2p-webrtc`](p2p-webrtc) | `pkg/transport/p2p` 的 WebRTC DataChannel 传输:NAT 穿透(STUN/TURN) + 浏览器兼容;需信令服务配合 | pion/webrtc |
 | [`contrib/spire`](spire) | SPIFFE/SPIRE Workload API:X509-SVID mTLS + SPIFFE ID→auth/authz | go-spiffe/v2 |
+| [`contrib/console`](console) | Web 远程控制台:WebSocket 交互式命令行;命令注册 + Tab 补全 + Topic 推送 + 内嵌前端;适合线上运维/调试 | beauty core(ws) |
 
 `contrib/connectrpc` 和 `contrib/kitex` 实现核心 `beauty.Service` 和 `discover.Service` 接口,
 分别将 Connect 协议和 Kitex Thrift 协议作为与 `grpcserver` 对等的一等公民服务类型(依赖核心)。

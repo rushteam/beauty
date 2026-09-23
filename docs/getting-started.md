@@ -432,12 +432,17 @@ Connect with any WebSocket client to `ws://localhost:8080/echo`. For JSON broadc
 Heavy deps are separate Go modules under [`contrib/`](../contrib/):
 
 ```bash
+# 持久层: beauty new 不带 ORM,未指定时优先 Bun
+go get github.com/rushteam/beauty/contrib/bun@latest    # Bun ORM(推荐默认)
 go get github.com/rushteam/beauty/contrib/gorm@latest   # GORM + OTel
-go get github.com/rushteam/beauty/contrib/kafka@latest # Kafka for pkg/messaging/mq
-go get github.com/rushteam/beauty/contrib/llm@latest   # LLM client
+go get github.com/rushteam/beauty/contrib/sqldb@latest  # sqlc / 原生 database/sql
+go get github.com/rushteam/beauty/contrib/kafka@latest    # Kafka for pkg/messaging/mq
+go get github.com/rushteam/beauty/contrib/llm@latest     # LLM client
 ```
 
-Full list: [contrib/README.md](../contrib/README.md).
+Bun 使用注意:`Update` 默认跳过零值,需 `Set` / `Column` 才能写入 `0`、`""` 等 — [contrib/bun/README.md](../contrib/bun/README.md#update-与零值)。
+
+Full list: [contrib/README.md](../contrib/README.md). DB 弹性: [db-resilience.md](db-resilience.md).
 
 ### CLI
 

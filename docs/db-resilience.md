@@ -4,6 +4,24 @@
 
 > **定位**:防雪崩的**机制**,不是业务修复。热点行同步写仍需异步 / 批量 / 节流。
 
+## ORM 选型（脚手架 / 新项目）
+
+`beauty new` 生成的项目**默认不带 ORM**,持久层需自行接入 `contrib/`。若创建项目时**未指定** ORM,推荐优先级:
+
+| 优先级 | 模块 | 适用场景 |
+|--------|------|----------|
+| **1（默认推荐）** | [`contrib/bun`](../contrib/bun) | 常规 CRUD、关系查询、需要较轻依赖的 ORM |
+| 2 | [`contrib/gorm`](../contrib/gorm) | 团队已有 GORM 经验、生态插件 |
+| 3 | [`contrib/sqldb`](../contrib/sqldb) | sqlc / sqlx / 手写 SQL、强类型查询生成 |
+
+```bash
+go get github.com/rushteam/beauty/contrib/bun@latest    # 未指定时优先
+go get github.com/rushteam/beauty/contrib/gorm@latest   # 可选
+go get github.com/rushteam/beauty/contrib/sqldb@latest  # sqlc 场景
+```
+
+> **Bun 注意**: `Update` 默认**跳过 Go 零值**(`0`、`""`、`false`、`nil` 等),无法把字段「更新为零值」。需显式 `Set("col = ?", val)` 或 `Column("col")` — 见 [contrib/bun/README.md](../contrib/bun/README.md#update-与零值)。
+
 ## 模块对照
 
 | 场景 | 模块 | 底层 |

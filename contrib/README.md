@@ -42,8 +42,8 @@ cd contrib/gorm && go test ./...
 | [`contrib/codec/kitex`](codec/kitex) | Kitex 注册中心格式编解码:KVCodec (etcd) + Codec (nacos/consul),使 beauty 服务以 Kitex 原生格式注册,Kitex 客户端可直接发现 | 无(纯 beauty core) |
 | [`contrib/codec/gozero`](codec/gozero) | go-zero 注册中心格式编解码:KV key `{name}/{id}`, value `host:port` 纯文本 | 无(纯 beauty core) |
 | [`contrib/codec/kratos`](codec/kratos) | Kratos 注册中心格式编解码:KV key `/microservices/{name}/{id}`, value JSON endpoints | 无(纯 beauty core) |
+| [`contrib/bun`](bun) | **推荐默认 ORM**(未指定时优先):读写句柄、连接池、**DB 弹性**;注意 Update 零值需 `Set`/`Column` | uptrace/bun、sqldb |
 | [`contrib/gorm`](gorm) | GORM 集成:读写分离(dbresolver)、otelgorm 链路、slog 日志桥、错误映射、**DB 弹性** | gorm.io/gorm、driver/mysql、otelgorm、sqldb |
-| [`contrib/bun`](bun) | Bun ORM 集成:读写句柄、连接池、**DB 弹性**(QueryHook + sqldb.Guard) | uptrace/bun、sqldb |
 | [`contrib/sqldb`](sqldb) | database/sql 读写分离 + OTel(otelsql) + **DB 弹性**,配合 **sqlc**/sqlx/手写 SQL | XSAM/otelsql |
 | [`contrib/nats`](nats) | `pkg/messaging/mq` 的 NATS broker 绑定(queue group 竞争 / 扇出;at-most-once) | nats.go |
 | [`contrib/natsjs`](natsjs) | `pkg/messaging/mq` 的 NATS **JetStream** 绑定(持久化、at-least-once、重投、断线续) | nats.go/jetstream |

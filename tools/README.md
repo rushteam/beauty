@@ -151,6 +151,22 @@ go run main.go
 - **交互式选择** - 支持交互式选择要添加的服务类型
 - **保持配置** - 保持现有项目配置不变，只添加缺失的服务文件
 
+#### 持久层 / ORM（脚手架不内置,需自行接入）
+
+`beauty new` **不会**自动生成 GORM/Bun/sqlc 代码。创建项目后按需 `go get`:
+
+| 场景 | 推荐 |
+|------|------|
+| **未指定 ORM（默认推荐）** | [`contrib/bun`](../contrib/bun) |
+| 团队已有 GORM | [`contrib/gorm`](../contrib/gorm) |
+| sqlc / 手写 SQL | [`contrib/sqldb`](../contrib/sqldb) |
+
+```bash
+go get github.com/rushteam/beauty/contrib/bun@latest
+```
+
+**Bun 零值**: `Update().Model(&m)` 默认跳过 `0` / `""` / `false`,要把字段更新为零值须用 `Set("col = ?", val)` 或 `Column("col")` — 详见 [contrib/bun/README.md](../contrib/bun/README.md#update-与零值) 与 [docs/db-resilience.md](../docs/db-resilience.md)。
+
 #### 示例
 
 ```bash

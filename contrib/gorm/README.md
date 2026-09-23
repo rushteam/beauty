@@ -9,6 +9,8 @@
 go get github.com/rushteam/beauty/contrib/gorm@latest
 ```
 
+> **选型**: `beauty new` 不带 ORM;未指定时团队约定**优先 [`contrib/bun`](../bun)**。已有 GORM 存量或插件生态时再选本模块。见 [docs/db-resilience.md](../../docs/db-resilience.md#orm-选型脚手架--新项目)。
+
 ## 用法
 
 ```go

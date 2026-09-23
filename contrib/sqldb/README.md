@@ -68,6 +68,34 @@ q.GetUser(sqldb.Primary(ctx), id)  // 读己之写:显式强制主库
 - **连接池**:`MaxOpenConns`/`MaxIdleConns`/`ConnMaxLifetime`(默认 1h)/`ConnMaxIdleTime`。
 - **健康**:`Ping(ctx)`(探主 + 所有副本)。
 
+## DB 弹性(熔断 + 舱壁)
+
+> 完整文档:[docs/db-resilience.md](../../docs/db-resilience.md)(含 GORM / Bun 用法)。
+
+针对 **锁等待超时(1205) → 连接池耗尽 → 全站雪崩** 类故障,可在 DBTX 层套可选保护。
+**读写应分别包装**,避免写热点误伤读路径:
+
+```go
+writeQ := db.New(db.ResilientWriter(sqldb.DefaultWriteResilience(db.Primary())))
+readQ  := db.New(db.ResilientReader(sqldb.DefaultReadResilience(db.Primary())))
+
+// 或手动:
+write := sqldb.WithResilience(db.Writer(), sqldb.PathResilience{
+    Breaker: &sqldb.BreakerSettings{Threshold: 0.3, MinRequests: 5},
+    MaxConcurrent: 20, // 写并发舱壁(可选)
+    Pool: db.Primary(), // 池满 + WaitCount 增长时快速失败
+})
+```
+
+能力:
+
+- **熔断**:1205/1213/deadline/连接错误计入失败率,超阈快速返回 `ErrCircuitOpen`
+- **舱壁**:`MaxConcurrent` 限制同时在途 SQL(主要覆盖 Exec/Query)
+- **池饱和**:`InUse == MaxOpen` 且等待数增长时返回 `ErrPoolSaturated`
+
+`QueryRow` 因标准库在 `Scan` 才发 SQL,仅做熔断/池检查(不做舱壁持有)。
+根因(热点行同步写)仍需业务层异步/批量/节流。
+
 ## 边界
 
 不 import 数据库驱动(使用方空导入 mysql/pgx/sqlite);建模、迁移、查询 SQL(交给 sqlc)在使用方。

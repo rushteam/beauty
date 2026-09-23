@@ -9,7 +9,8 @@
 //     (Postgres/SQLite/测试);
 //   - 连接池设置、PrepareStmt、TranslateError(把驱动错误翻成 gorm 语义错误);
 //   - otelgorm 链路追踪(Tracing 开关)、gorm→slog 日志桥(含慢查询告警);
-//   - DB.Write()/Read() 手动切主从、Close() 优雅关闭;IsDuplicatedKey 错误判定。
+//   - DB.Write()/Read() 手动切主从、ResilientWrite()/ResilientRead() DB 弹性、Close() 优雅关闭;
+//     IsDuplicatedKey 错误判定。
 //
 // 边界(机制而非策略):建模、迁移、仓储模式、事务编排都在使用方——本包只负责"把 GORM
 // 按 beauty 的可观测/配置约定接好"。

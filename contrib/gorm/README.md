@@ -47,6 +47,18 @@ db, _ := bgorm.OpenWith(postgres.Open(dsn), nil, bgorm.Config{})
 - **连接池**:`MaxOpenConns`/`MaxIdleConns`/`ConnMaxLifetime`(默认 1h)/`ConnMaxIdleTime`。
 - **健康检查**:`Ping(ctx)`。
 
+## DB 弹性(熔断 + 舱壁)
+
+> 完整文档:[docs/db-resilience.md](../../docs/db-resilience.md)。
+
+```go
+sqlDB, _ := db.SQLDB()
+write, _ := db.ResilientWrite(sqldb.DefaultWriteResilience(sqlDB))
+read,  _ := db.ResilientRead(sqldb.DefaultReadResilience(sqlDB))
+```
+
+读写分开包装;底层复用 `contrib/sqldb.Guard`。详见文档。
+
 ## 边界
 
 建模、迁移、仓储模式、事务编排都在使用方——本模块只负责把 GORM 接好。要 Outbox(可靠"改库+

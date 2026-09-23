@@ -10,6 +10,9 @@
 //     (走 QueryRow 却是写)与 SELECT...FOR UPDATE(读却要走主)会被路由错——这类语句用
 //     Primary(ctx) 强制走主库。
 //
+// 弹性(可选):WithResilience / ResilientWriter / ResilientReader 在 DBTX 层提供
+// 读写分离熔断、并发舱壁、连接池饱和保护(见 resilience.go),用于缓解锁等待/池耗尽雪崩。
+//
 // 边界(机制而非策略):不 import 数据库驱动(使用方自行空导入,如
 // _ "github.com/go-sql-driver/mysql");建模、迁移、查询 SQL(交给 sqlc)都在使用方。
 // otelsql 提供命令级 trace/metrics(用 beauty telemetry 的全局 Provider,未配则 no-op)。

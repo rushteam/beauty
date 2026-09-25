@@ -4,6 +4,10 @@
 // 设计:
 //   - 每个连接由用户传入的 Handler 处理(handler 返回即连接关闭);
 //   - 内置连接准入控制(MaxConns)、TLS、优雅关停(先停止 Accept,再等活跃连接排空);
+//   - 空闲超时(WithReadTimeout/WithWriteTimeout):对每次 Read/Write 施加滚动 deadline,
+//     长时间无收发的连接会在 handler 的读写处返回超时错误,从而被回收,避免连接泄漏;
+//   - 连接预检与生命周期钩子(WithOnAccept/WithOnClose):接入后、交给 handler 前先做准入
+//     (如扫描器过滤、心跳探活),关闭时回调清理。钩子只提供机制,准入策略由调用方注入;
 //   - 满足 beauty.Service + ReadyNotifier + discover.Service。
 //
 // 用法:
@@ -84,6 +88,38 @@ func WithShutdownTimeout(d time.Duration) Option {
 	return func(s *Server) { s.shutdownTimeout = d }
 }
 
+// WithReadTimeout 设置读空闲超时:每次 Read 前将 read deadline 顺延 d。
+// 连接在 d 内没有可读数据时,handler 的 Read 会返回超时错误(net.Error.Timeout()),
+// handler 据此退出即回收该连接,避免空闲/半开连接长期占用。<=0(默认)禁用。
+func WithReadTimeout(d time.Duration) Option {
+	return func(s *Server) { s.readTimeout = d }
+}
+
+// WithWriteTimeout 设置写超时:每次 Write 前将 write deadline 顺延 d,
+// 防止对端不收数据导致的写阻塞长期挂起。<=0(默认)禁用。
+func WithWriteTimeout(d time.Duration) Option {
+	return func(s *Server) { s.writeTimeout = d }
+}
+
+// WithOnAccept 设置连接预检钩子:在连接被交给 handler 之前调用。
+// 返回非 nil 错误则该连接被直接关闭、不进入 handler(用于扫描器过滤、心跳探活、
+// 黑名单等准入控制)。本选项只提供机制,准入策略由调用方在 fn 中实现。例如接入
+// pkg/transport/scandefender:
+//
+//	sd := scandefender.New()
+//	tcpserver.WithOnAccept(func(_ context.Context, conn net.Conn) error {
+//	    return sd.Admit(conn.RemoteAddr().String())
+//	})
+func WithOnAccept(fn func(ctx context.Context, conn net.Conn) error) Option {
+	return func(s *Server) { s.onAccept = fn }
+}
+
+// WithOnClose 设置连接关闭回调:在每个连接结束(handler 返回或预检拒绝后)时调用,
+// 用于释放与该连接相关的资源(如 scandefender.OnClose、在线表清理等)。
+func WithOnClose(fn func(conn net.Conn)) Option {
+	return func(s *Server) { s.onClose = fn }
+}
+
 // New 创建 TCP 服务。handler 处理每个接入的连接。
 func New(listenAddr string, handler Handler, opts ...Option) *Server {
 	s := &Server{
@@ -115,6 +151,10 @@ type Server struct {
 	keepAlive       time.Duration
 	tlsConfig       *tls.Config
 	shutdownTimeout time.Duration
+	readTimeout     time.Duration
+	writeTimeout    time.Duration
+	onAccept        func(ctx context.Context, conn net.Conn) error
+	onClose         func(conn net.Conn)
 
 	activeConns atomic.Int64
 	connWg      sync.WaitGroup
@@ -188,11 +228,49 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) serve(ctx context.Context, conn net.Conn) {
 	defer func() {
+		if s.onClose != nil {
+			s.onClose(conn)
+		}
 		_ = conn.Close()
 		s.activeConns.Add(-1)
 		s.connWg.Done()
 	}()
-	s.handler(ctx, conn)
+
+	// 连接预检:准入失败直接关闭,不进入 handler。
+	if s.onAccept != nil {
+		if err := s.onAccept(ctx, conn); err != nil {
+			logger.Debug("tcp server connection rejected", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+	}
+
+	// 按需包装读写超时,使空闲连接可被回收。
+	c := conn
+	if s.readTimeout > 0 || s.writeTimeout > 0 {
+		c = &timeoutConn{Conn: conn, readTimeout: s.readTimeout, writeTimeout: s.writeTimeout}
+	}
+	s.handler(ctx, c)
+}
+
+// timeoutConn 在每次 Read/Write 前顺延对应的 deadline,实现"空闲超时"语义。
+type timeoutConn struct {
+	net.Conn
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+}
+
+func (c *timeoutConn) Read(b []byte) (int, error) {
+	if c.readTimeout > 0 {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout))
+	}
+	return c.Conn.Read(b)
+}
+
+func (c *timeoutConn) Write(b []byte) (int, error) {
+	if c.writeTimeout > 0 {
+		_ = c.Conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+	}
+	return c.Conn.Write(b)
 }
 
 // Ready 在端口监听成功后关闭。满足 beauty.ReadyNotifier。

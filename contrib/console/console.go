@@ -1,6 +1,6 @@
 // Package console 提供 Web 远程控制台——通过 WebSocket 在浏览器中交互式执行命令。
 //
-// 借鉴 gonsole 的设计思想,将远程运维/调试控制台作为一等公民服务接入 beauty 框架:
+// 将远程运维/调试控制台作为一等公民服务接入 beauty 框架:
 //
 //   - 可注册自定义命令(Command),支持参数、描述、示例;
 //   - 内置命令:help、info、uptime、env、pprof;

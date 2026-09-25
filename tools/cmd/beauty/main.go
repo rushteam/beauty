@@ -12,6 +12,7 @@ import (
 	"github.com/rushteam/beauty/tools/internal/cmd/add"
 	"github.com/rushteam/beauty/tools/internal/cmd/api"
 	"github.com/rushteam/beauty/tools/internal/cmd/dev"
+	"github.com/rushteam/beauty/tools/internal/cmd/doctor"
 	"github.com/rushteam/beauty/tools/internal/cmd/new"
 	"github.com/urfave/cli/v3"
 )
@@ -28,6 +29,8 @@ func main() {
    • 快速创建项目模板
    • 解析API定义（支持protobuf和传统格式）
    • 自动生成代码和文档
+   • 增量添加 handler/job/middleware/Connect 与 contrib 模块
+   • 环境与项目自检(beauty doctor)
    • 集成服务发现、监控、中间件等`,
 		// Authors: []*cli.Author{
 		// 	{Name: "Beauty Team", Email: "team@beauty.dev"},
@@ -106,6 +109,7 @@ func main() {
 				Action: new.Action,
 			},
 			add.Command(),
+			doctor.Command(),
 			{
 				Name:    "api",
 				Aliases: []string{"a", "parse"},

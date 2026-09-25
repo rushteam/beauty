@@ -18,6 +18,10 @@
 //	chanx       — channel 扩展(如无界 chan)
 //	fixedpoint  — 定点数运算
 //	sketch      — 概率数据结构(HyperLogLog、Count-Min 等)
+//	filter      — 近似集合过滤器(Bloom、Cuckoo,纯内存)
+//	skiplist    — 泛型有序跳表映射(点查/范围/名次)
+//	actrie      — Aho-Corasick 多模匹配(敏感词/词典)
+//	diff        — LCS 差异计算与补丁应用
 //	pagination  — 分页工具
 //	priority    — 优先队列
 //	pipeline    — 管道(stage→stage)

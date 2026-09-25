@@ -15,10 +15,13 @@ import (
 func Command() *cli.Command {
 	return &cli.Command{
 		Name:  "add",
-		Usage: "➕ 向现有项目增量添加代码骨架(handler/job)",
+		Usage: "➕ 向现有项目增量添加代码骨架(handler/job/middleware/connect)或 contrib 模块",
 		Description: `在现有 Beauty 项目中快速生成新的代码骨架：
-   • beauty add handler Order   # 生成 HTTP handler 骨架
-   • beauty add job Cleanup     # 生成定时任务骨架
+   • beauty add handler Order          # 生成 HTTP handler 骨架
+   • beauty add job Cleanup            # 生成定时任务骨架
+   • beauty add middleware Tenant      # 生成 HTTP 中间件骨架(--grpc 同时生成拦截器)
+   • beauty add connect                # 启用 Connect 协议(buf 插件 + 服务骨架)
+   • beauty add contrib gorm kafka     # go get contrib 模块；不带参数列出全部
 生成的文件不会覆盖已有同名文件，并会打印注册方式。`,
 		Commands: []*cli.Command{
 			{
@@ -33,6 +36,9 @@ func Command() *cli.Command {
 				ArgsUsage: "<Name>",
 				Action:    actionJob,
 			},
+			middlewareCommand(),
+			connectCommand(),
+			contribCommand(),
 		},
 	}
 }

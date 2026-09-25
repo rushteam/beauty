@@ -222,11 +222,15 @@ app := beauty.New(beauty.WithService(consumer))
 
 OpenTelemetry 贯穿框架:trace 与 metrics 走 `pkg/service/telemetry`,日志走 `pkg/service/logger`
 (slog,自动注入 `trace_id`/`span_id`),运行时构建信息用 `pkg/foundation/buildinfo`。配好一次导出器,
-媒体/mq/客户端各层就会自动上报指标。
+媒体/mq/客户端各层就会自动上报指标。[`examples/observability`](examples/observability) 用
+`docker compose up` 一键拉起 OTel Collector + Tempo + Prometheus + Grafana,并预置看板
+(HTTP/gRPC RED、熔断器状态、Go runtime、exemplar 跳转 trace)。
 
 ## 文档
 
-- [`docs/`](docs) —— 配置、中间件、服务发现、日志、实时组件等。
+- [`docs/README.md`](docs/README.md) —— **文档索引**:每个主题对应的包、示例与中英文版本。
+- [`docs/`](docs) —— 配置、中间件、服务发现、日志、实时组件等,每篇中文文档都有英文版(`*-en.md`)。
+- [`tools/README.md`](tools/README.md) —— `beauty` 命令行:`new`、`add`(handler / job / middleware / connect / contrib)、`api`、`dev`、`doctor`、`build`。
 - [`docs/k8s-rbac.md`](docs/k8s-rbac.md) —— k8s RBAC / ServiceAccount 配置指南(选主 + 配置中心)。
 - [`docs/cross-service-interop.md`](docs/cross-service-interop.md) —— 跨服务互通：非 Beauty 服务如何发现并调用 Beauty gRPC 服务。
 - [`docs/wasm-roadmap.md`](docs/wasm-roadmap.md) —— WASM 分层(运行时、agent、OPA、FaaS)。

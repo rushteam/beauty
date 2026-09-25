@@ -17,4 +17,5 @@
 //	featureflag  — 特性开关
 //	afterwork    — 请求结束后的异步清理任务
 //	callbacks    — 回调构建器(Builder 模式)
+//	expr         — 表达式求值器 / 规则引擎(AST,风控/优惠/打标签)
 package api

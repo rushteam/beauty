@@ -13,6 +13,8 @@ Beauty Framework 是一个现代化的Go微服务开发框架，提供完整的�
 - 🛡️ **中间件支持** - 认证、限流、超时、熔断器等
 - 📊 **监控集成** - 链路追踪、指标监控、日志管理
 - 🔍 **服务发现** - 支持etcd、nacos等服务注册中心
+- ➕ **增量生成** - `add` 生成 handler/job/middleware/Connect 骨架，一键引入 contrib 模块
+- 🩺 **环境自检** - `doctor` 检查 Go 版本、依赖、protobuf 工具链与项目配置
 
 ## 🏗️ 工具架构
 
@@ -238,9 +240,47 @@ go get github.com/rushteam/beauty/contrib/bun@latest
 
 # 生成定时任务骨架
 ./beauty add job Cleanup
+
+# 生成中间件骨架：func(http.Handler) http.Handler，--grpc 同时生成 UnaryServerInterceptor
+./beauty add middleware Tenant --grpc
+
+# 启用 Connect 协议：向 buf.gen.yaml 追加 protoc-gen-connect-go 插件、
+# 生成 internal/endpoint/connect/server.go、go get contrib/connectrpc
+./beauty add connect            # --no-get 跳过 go get
+
+# 引入 contrib 模块(go get 并打印 import 与最小用法)
+./beauty add contrib            # 列出全部可用模块
+./beauty add contrib gorm kafka # 一次引入多个
+./beauty add contrib redisqueue --version v0.9.6 --dry-run
 ```
 
-### 4. 开发模式 (`dev`)
+`add middleware` 按 `internal/infra/middleware` → `internal/middleware` → `internal/adapter/http/middleware`
+的顺序查找目录，都不存在时创建第一个。`add contrib` 会校验模块名，拼错时给出相近候选(如 `redis` →
+`redisqueue, redisstream`)。
+
+> Kitex 使用 Thrift IDL 与 `kitex` 工具生成代码，不走 buf 流程；接入方式见
+> [`contrib/kitex`](../contrib/kitex)，`beauty add contrib kitex` 可引入依赖。
+
+### 4. 环境自检 (`doctor`)
+
+检查本地环境与当前项目，逐项给出 ✅ / ⚠️ / ❌ 和修复建议：
+
+- Go 版本(>= 1.26)、`go.mod` 的 `go` 指令
+- 是否 require 了 `github.com/rushteam/beauty`、已引入哪些 contrib 模块
+- 遗留的本地 `replace`(发布/部署前应去掉)
+- buf / protoc-gen-go / protoc-gen-go-grpc / protoc-gen-connect-go / docker 是否安装
+- 配置文件 `config/dev/app.yaml`、gofmt
+- 在 beauty 仓库本身运行时，额外执行 CI 的「核心不得依赖 contrib」检查
+
+```bash
+./beauty doctor                  # 检查当前目录
+./beauty doctor --path ./my-svc  # 检查指定项目
+./beauty doctor --strict         # 有警告也返回非 0，适合放进 CI
+```
+
+有 ❌ 项时退出码为 1。
+
+### 5. 开发模式 (`dev`)
 
 在开发模式下运行服务，`--watch` 基于 fsnotify 监听 `.go` 变化自动重启。
 
@@ -255,7 +295,7 @@ go get github.com/rushteam/beauty/contrib/bun@latest
 ./beauty dev --watch
 ```
 
-### 5. 构建项目 (`build`)
+### 6. 构建项目 (`build`)
 
 构建项目为可执行文件。
 
@@ -614,7 +654,8 @@ A: 目前支持：
 
 ### Q: 如何添加新的中间件？
 
-A: 在生成的 `internal/infra/middleware/middleware.go` 文件中添加新的中间件配置。
+A: 用 `./beauty add middleware <Name>` 生成骨架，再在 `internal/infra/middleware/middleware.go`
+的 `GetWebServerOptions` / `GetGrpcServerOptions` 中注册。
 
 ### Q: 如何向现有项目添加新的服务类型？
 
@@ -683,10 +724,12 @@ cat config/dev/app.yaml
 
 ## 📚 相关文档
 
-- [Beauty Framework 主文档](../../README.md)
-- [API 设计指南](../../docs/api-protobuf-integration.md)
-- [中间件使用指南](../../docs/middleware.md)
-- [服务发现配置](../../docs/directory-upgrade.md)
+- [Beauty Framework 主文档](../README.md)
+- [文档索引](../docs/README.md)
+- [API 设计指南](../docs/api-protobuf-integration.md)
+- [中间件使用指南](../docs/middleware.md)
+- [目录结构升级](../docs/directory-upgrade.md)
+- [可观测性示例](../examples/observability/README.md)
 
 ## 📝 更新日志
 

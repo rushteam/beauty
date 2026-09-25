@@ -4,18 +4,42 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 提交遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)。
-框架已发布语义化版本（当前 v0.8.6），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
+框架已发布语义化版本（当前 v0.10.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
 
-## [Unreleased]
+## [0.10.0] - 2026-09-26
 
 ### Changed
 - **`contrib/kafka`**:底层从 segmentio/kafka-go 换为 **twmb/franz-go**,默认挂载官方 **kotel**
   OTel(publish/receive/process span + metrics)。`NewPublisher` 现返回 `(*Publisher, error)`;
   原 `WithBalancer`/`WithWriterTimeout` 改为 `WithPartitioner`/`WithProduceTimeout`/
   `WithClientOpts`。Kafka 场景用内置 kotel,不必再套 `pkg/messaging/mq/otelmq`。
+- **CI**:contrib 矩阵补上此前漏掉的 `bun`、`console`、`modbus`、`mqtt`、`opcua`、`proxywasm`、
+  `redisqueue`;`contrib/README.md` 补齐 `mqtt`/`modbus`/`opcua` 说明。
 
 ### Added
+- **foundation 数据结构**:新增 4 个纯标准库、零依赖数据结构包 —
+  **`pkg/foundation/filter`**(布隆 + 布谷鸟概率过滤器,缓存穿透防护/海量去重,Cuckoo 支持删除);
+  **`pkg/foundation/skiplist`**(泛型有序跳表映射,期望 O(log n) 点查/插删 + 名次/范围查询,排行榜底座);
+  **`pkg/foundation/actrie`**(Aho-Corasick 多模匹配,一次扫描匹配海量敏感词,含 rune 级归一化反绕过
+  与携带元数据的泛型 `Dict[T]`);**`pkg/foundation/diff`**(LCS 差异计算与补丁应用,含基线漂移检测)。
+  文档见 [data-structures](docs/data-structures.md) / [sensitive-words](docs/sensitive-words.md),
+  示例 filter/skiplist/actrie/diff。全部 `-race` 单测通过。
+- **expr**:新增 `pkg/api/expr`——轻量表达式求值器 / 规则引擎(纯 stdlib):把动态业务规则(风控、
+  优惠叠加、动态打标签、灰度)抽成可配置表达式,`Compile` 成 AST 后并发复用求值。支持字面量/变量/
+  嵌套 map 点号访问/算术/比较/短路逻辑/`in`/数组/函数调用。文档 [expr](docs/expr.md),示例 expr。
+- **middleware/sensitive**:新增即插即用 HTTP 敏感词中间件——基于 `actrie`,支持拦截(403)与脱敏
+  (打码后改写请求体)两种模式,可选扫描 query、大体保护、反绕过归一化、自定义 `OnBlocked` 审计;
+  `sensitive.Block(words...)` / `sensitive.Mask(words...)` 一行接入。示例 sensitive-middleware。
+- **tools**:`beauty doctor` 环境/项目自检(Go 版本、beauty 依赖、本地 replace、protobuf 工具链、
+  gofmt;在 beauty 仓库内额外检查核心不依赖 contrib);`beauty add middleware`(HTTP 中间件骨架,
+  `--grpc` 同时生成拦截器)、`beauty add connect`(buf 追加 connect-go 插件 + `contrib/connectrpc`
+  服务骨架)、`beauty add contrib`(列出/引入 contrib 模块,拼错给出候选)。
+- **examples/observability**:OTel Collector + Tempo + Prometheus + Grafana 的 docker compose 栈,
+  预置「Beauty 服务总览」看板(HTTP/gRPC RED、熔断器状态、业务指标、Go runtime、exemplar → trace)
+  与自带流量发生器的 demo 服务。
+- **docs**:新增 `docs/README.md` 文档索引(主题 → 包 → 示例 → 中英文);补齐 18 篇中文文档的
+  英文版(`*-en.md`)。
 - **authz**：新增 `pkg/api/authz`——授权机制,补齐"只认证不授权"的空白(在 `middleware/auth`/`token`
   确认身份+角色之上,判"能否对某资源做某动作")。`Subject`(id/角色/属性,放 context)+ `Enforcer`
   接口(`Authorize(sub,action,resource)`→nil/ErrDenied)+ 内置 **RBAC**(`Grant` + 通配 `*` / `/*`

@@ -48,11 +48,13 @@ jobs:
           - a2a
           - agones
           - agui
+          - bun
           - casbin
           - codec/gozero
           - codec/kitex
           - codec/kratos
           - connectrpc
+          - console
           - elasticsearch
           - ginadapt
           - gorm
@@ -66,12 +68,17 @@ jobs:
           - mcp
           - mcpagent
           - memoryvector
+          - modbus
+          - mqtt
           - nats
           - natsjs
+          - opcua
           - openfga
           - otelllm
           - p2p-webrtc
+          - proxywasm
           - rabbitmq
+          - redisqueue
           - redisstream
           - spire
           - sqldb

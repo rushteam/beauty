@@ -25,9 +25,9 @@ import (
 
 // Config 是数据库连接配置。
 type Config struct {
-	Driver          string        // database/sql 驱动名,如 "sqlite" / "mysql" / "pgx"
-	DSN             string        // 主库 DSN
-	Replicas        []string      // 只读副本(空则读回退主库)
+	Driver          string   // database/sql 驱动名,如 "sqlite" / "mysql" / "pgx"
+	DSN             string   // 主库 DSN
+	Replicas        []string // 只读副本(空则读回退主库)
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration // 默认 1h

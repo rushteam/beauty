@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/rushteam/beauty/pkg/service/console"
 	"github.com/rushteam/beauty/pkg/service/cron"
 	"github.com/rushteam/beauty/pkg/service/grpcserver"
 	"github.com/rushteam/beauty/pkg/service/pprof"
@@ -35,6 +36,14 @@ func WithCrontab(opts ...cron.CronOptions) Option {
 // 仅在需要线上排查时挂载，生产环境建议通过 SSH 隧道访问而非对外暴露。
 func WithPprof(opts ...pprof.Option) Option {
 	return WithService(pprof.New(opts...))
+}
+
+// WithConsole 启动一个远程 Web 控制台服务，默认监听 127.0.0.1:6070。
+// 浏览器打开 http://<addr>/console 即可交互式执行命令（内置 env/mem/gc/goroutine/deadlock
+// 等排障命令，支持自定义命令、Tab 补全、历史重放与 Topic 周期推送）。
+// 生产环境务必配置账号（console.WithUser）或通过反向代理鉴权，避免对外暴露。
+func WithConsole(opts ...console.Option) Option {
+	return WithService(console.New(opts...))
 }
 
 // var WebLogger = middleware.Logger

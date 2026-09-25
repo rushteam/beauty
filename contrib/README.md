@@ -50,6 +50,9 @@ cd contrib/gorm && go test ./...
 | [`contrib/kafka`](kafka) | `pkg/messaging/mq` 的 Kafka broker 绑定(franz-go + kotel OTel;consumer group;at-least-once) | twmb/franz-go、plugin/kotel |
 | [`contrib/rabbitmq`](rabbitmq) | `pkg/messaging/mq` 的 RabbitMQ (AMQP 0-9-1) 绑定(topic exchange;confirm 模式;at-least-once;竞争消费/扇出) | rabbitmq/amqp091-go |
 | [`contrib/redisstream`](redisstream) | `pkg/messaging/mq` 的 Redis Streams 绑定(XREADGROUP 竞争消费;XREAD 扇出;at-least-once;无额外 broker) | redis/go-redis/v9 |
+| [`contrib/mqtt`](mqtt) | `pkg/messaging/mq` 的 MQTT broker 绑定(IoT 设备接入):topic 通配符 `+`/`#`;`WithGroup` → MQTT v5 Shared Subscription 竞争消费;Headers → v5 UserProperties;QoS 0/1/2 决定投递保证;作为 beauty.Service 自动保活重连 | eclipse/paho.mqtt.golang |
+| [`contrib/modbus`](modbus) | Modbus Master 采集器:按 `DeviceConfig` 周期轮询 Slave 寄存器(Coil/Discrete/Holding/Input)交给 Handler;`Writer` 写寄存器;`MQBridge` 把采集数据桥接到任意 `mq.Publisher`;支持 Modbus TCP / RTU over TCP | grid-x/modbus |
+| [`contrib/opcua`](opcua) | OPC-UA 客户端(PLC/SCADA 数据采集与控制):`Client` 直接读写节点;`Subscriber` 基于 MonitoredItems 值变化通知并实现 `mq.Subscriber`(topic = NodeID);`Poller` 周期轮询一组节点;三者均为 beauty.Service | gopcua/opcua |
 | [`contrib/redisqueue`](redisqueue) | Redis 分布式任务队列(BullMQ 风格):优先级 + 延迟 + 重试 + 可见性超时 stalled 检测 + 生命周期事件;at-least-once,多 worker 水平扩展 | redis/go-redis/v9 |
 | [`contrib/ginadapt`](ginadapt) | Gin ↔ beauty HTTP 中间件适配:标准 `func(http.Handler) http.Handler` 转 `gin.HandlerFunc` | gin-gonic/gin |
 | [`contrib/graphql`](graphql) | GraphQL/BFF 层:gqlgen schema-first 封装为 beauty.Service + DataLoader + 复杂度限制 + APQ + 认证透传 + Federation + Subscription(WS/SSE) | 99designs/gqlgen |
@@ -78,7 +81,7 @@ cd contrib/gorm && go test ./...
 分别将 Connect 协议和 Kitex Thrift 协议作为与 `grpcserver` 对等的一等公民服务类型(依赖核心)。
 `contrib/codec/kitex` 与 `contrib/codec/gozero`、`contrib/codec/kratos` 同级,提供 Kitex 注册
 格式编解码,实现跨框架服务互通。
-`contrib/nats`、`contrib/natsjs`、`contrib/kafka`、`contrib/rabbitmq`、`contrib/redisstream` 实现核心 `pkg/messaging/mq` 的 `Publisher`/`Subscriber`
+`contrib/nats`、`contrib/natsjs`、`contrib/kafka`、`contrib/rabbitmq`、`contrib/redisstream`、`contrib/mqtt` 实现核心 `pkg/messaging/mq` 的 `Publisher`/`Subscriber`
 接口,`contrib/casbin`、`contrib/openfga` 实现核心 `pkg/api/authz.Enforcer` 接口——这些都 `require
 github.com/rushteam/beauty`(已对齐发布版本,无 `replace`);`contrib/spire` 对接核心 auth/authz 与
 TLS 钩子(本地联调暂用 `replace`,发布前去掉);`contrib/gorm`、`contrib/sqldb`、

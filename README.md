@@ -231,11 +231,16 @@ OpenTelemetry is wired through the framework: traces and metrics via
 `pkg/service/telemetry`, logs via `pkg/service/logger` (slog with automatic
 `trace_id`/`span_id` injection), and runtime build info via `pkg/foundation/buildinfo`.
 Configure an exporter once and the media/mq/client layers emit metrics automatically.
+[`examples/observability`](examples/observability) brings up OTel Collector + Tempo +
+Prometheus + Grafana with `docker compose up` and ships a ready-made dashboard
+(HTTP/gRPC RED, circuit breaker state, Go runtime, exemplar → trace).
 
 ## Documentation
 
+- [`docs/README.md`](docs/README.md) — **documentation index**: every topic with its package, example, and Chinese / English versions.
 - [`docs/getting-started.md`](docs/getting-started.md) — **Getting Started** (15-minute tutorial, English).
-- [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more. English translations (`*-en.md`) available for core docs.
+- [`docs/`](docs) — configuration, middleware, discovery, logging, realtime, and more. Every Chinese doc has an English translation (`*-en.md`).
+- [`tools/README.md`](tools/README.md) — the `beauty` CLI: `new`, `add` (handler / job / middleware / connect / contrib), `api`, `dev`, `doctor`, `build`.
 - [`docs/case-study-template.md`](docs/case-study-template.md) — template for documenting production deployments.
 - [`docs/k8s-rbac.md`](docs/k8s-rbac.md) — k8s RBAC / ServiceAccount setup guide (leader election + config center).
 - [`docs/cross-service-interop.md`](docs/cross-service-interop.md) — cross-service interop: how non-Beauty services discover and call Beauty gRPC services.

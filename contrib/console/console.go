@@ -47,11 +47,11 @@ var staticFS embed.FS
 
 // Command 表示一个可执行的控制台命令。
 type Command struct {
-	Name     string            // 命令名(小写,无空格)
-	Desc     string            // 简短描述
-	Example  string            // 用法示例
-	Flag     Flag              // 命令标志
-	Handler  func(Context) string // 执行函数,返回输出文本
+	Name    string               // 命令名(小写,无空格)
+	Desc    string               // 简短描述
+	Example string               // 用法示例
+	Flag    Flag                 // 命令标志
+	Handler func(Context) string // 执行函数,返回输出文本
 }
 
 // Flag 命令标志位。
@@ -205,7 +205,7 @@ type wsMessage struct {
 
 // wsResponse 是返回给客户端的响应。
 type wsResponse struct {
-	Op   string `json:"op"`             // "output" | "hint" | "error" | "push" | "auth"
+	Op   string `json:"op"` // "output" | "hint" | "error" | "push" | "auth"
 	Data string `json:"data,omitempty"`
 }
 

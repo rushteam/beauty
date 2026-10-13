@@ -37,6 +37,27 @@ func TestExpandString_StrictMissing(t *testing.T) {
 	}
 }
 
+func TestExpandString_BareVar(t *testing.T) {
+	t.Setenv("BEAUTY_BARE_VAR", "bare-ok")
+	got, err := conf.ExpandString(context.Background(), "v=${BEAUTY_BARE_VAR}", conf.EnvProvider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "v=bare-ok" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestExpandString_BareVarDefault(t *testing.T) {
+	got, err := conf.ExpandString(context.Background(), "${MISSING_BARE_XYZ:-8080}", conf.EnvProvider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "8080" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestExpandString_File(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "token")

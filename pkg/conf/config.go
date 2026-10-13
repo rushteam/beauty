@@ -9,8 +9,45 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
+
+// options 控制 Loader 的行为，通过 Option 函数设置。
+type options struct {
+	strictFields bool
+}
+
+// Option 配置 New / Load 的行为。
+type Option func(*options)
+
+// WithStrictFields 开启严格字段校验：当配置内容中出现目标结构体里不存在的
+// 字段（常见于 key 拼写错误）时，Unmarshal 返回错误而不是静默忽略。
+//
+//	loader, _ := conf.New("config.yaml", conf.WithStrictFields())
+func WithStrictFields() Option {
+	return func(o *options) { o.strictFields = true }
+}
+
+func buildOptions(opts []Option) options {
+	var o options
+	for _, fn := range opts {
+		if fn != nil {
+			fn(&o)
+		}
+	}
+	return o
+}
+
+// decoderOpts 根据是否严格校验返回传给 viper.Unmarshal 的 DecoderConfig 选项。
+func decoderOpts(strict bool) []viper.DecoderConfigOption {
+	if !strict {
+		return nil
+	}
+	return []viper.DecoderConfigOption{
+		func(dc *mapstructure.DecoderConfig) { dc.ErrorUnused = true },
+	}
+}
 
 // initialLoadTimeout 远程配置首次加载的最长等待时间，避免配置中心不可达时
 // New() 永久阻塞导致进程卡在启动阶段（K8s 会在就绪前 evict）。
@@ -27,10 +64,11 @@ type Loader interface {
 // fileLoader 基于本地文件 + fsnotify 的实现。
 type fileLoader struct {
 	*viper.Viper
+	strict bool
 }
 
 func (l *fileLoader) Unmarshal(dst any) error {
-	return l.Viper.Unmarshal(dst)
+	return l.Viper.Unmarshal(dst, decoderOpts(l.strict)...)
 }
 
 func (l *fileLoader) Watch(ctx context.Context, fn func()) {
@@ -60,28 +98,29 @@ func (l *fileLoader) Watch(ctx context.Context, fn func()) {
 //	loader, _ := conf.New("config.yaml")
 //	loader = conf.WithSecrets(loader) // ${env:NAME} / ${file:/path}
 //	loader.Unmarshal(&cfg)
-func New(rawURL string) (Loader, error) {
+func New(rawURL string, opts ...Option) (Loader, error) {
+	o := buildOptions(opts)
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("conf: parse url: %w", err)
 	}
 	if u.Scheme == "" || u.Scheme == "file" {
-		return newFileLoader(u.Path)
+		return newFileLoader(u.Path, o)
 	}
-	return newRemoteLoaderFromURL(u)
+	return newRemoteLoaderFromURL(u, o)
 }
 
-func newFileLoader(path string) (Loader, error) {
+func newFileLoader(path string, o options) (Loader, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
 	v.SetConfigType(strings.TrimPrefix(filepath.Ext(path), "."))
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("conf: read file %s: %w", path, err)
 	}
-	return &fileLoader{v}, nil
+	return &fileLoader{Viper: v, strict: o.strictFields}, nil
 }
 
-func newRemoteLoaderFromURL(u *url.URL) (Loader, error) {
+func newRemoteLoaderFromURL(u *url.URL, o options) (Loader, error) {
 	fn, ok := lookupFactory(u.Scheme)
 	if !ok {
 		return nil, fmt.Errorf("conf: unsupported scheme %q — import the matching infra package to register it", u.Scheme)
@@ -96,7 +135,7 @@ func newRemoteLoaderFromURL(u *url.URL) (Loader, error) {
 	if format == "" {
 		format = inferFormat(key)
 	}
-	rl := newRemoteLoader(cc, key, format)
+	rl := newRemoteLoader(cc, key, format, o.strictFields)
 	ctx, cancel := context.WithTimeout(context.Background(), initialLoadTimeout)
 	defer cancel()
 	if err := rl.load(ctx); err != nil {

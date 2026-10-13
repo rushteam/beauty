@@ -9,10 +9,14 @@ import (
 	"strings"
 )
 
-// placeholderRE matches ${scheme:reference} or ${scheme:reference:-default}.
-// scheme: env | file | secret | custom provider schemes
-// reference may contain path characters for file: (/path/to/secret)
-var placeholderRE = regexp.MustCompile(`\$\{([a-zA-Z][a-zA-Z0-9_]*):([^}]+)\}`)
+// placeholderRE matches any ${...} placeholder; the inner body is parsed by
+// parsePlaceholder to support both forms:
+//
+//	${scheme:reference}            e.g. ${env:NAME} ${file:/path} ${secret:key}
+//	${scheme:reference:-default}   e.g. ${env:NAME:-8080}
+//	${VAR}                         bare var, resolved via the env provider
+//	${VAR:-default}                bare var with shell-style default
+var placeholderRE = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 // Provider resolves a secret reference for one scheme (env, file, vault, …).
 type Provider interface {
@@ -110,11 +114,10 @@ func expandString(ctx context.Context, s string, opts ExpandOptions) (string, er
 			return match
 		}
 		sub := placeholderRE.FindStringSubmatch(match)
-		if len(sub) != 3 {
+		if len(sub) != 2 {
 			return match
 		}
-		scheme, rest := sub[1], sub[2]
-		key, def, hasDef := splitDefault(rest)
+		scheme, key, def, hasDef := parsePlaceholder(sub[1])
 		p, ok := index[scheme]
 		if !ok {
 			if hasDef {
@@ -140,12 +143,28 @@ func expandString(ctx context.Context, s string, opts ExpandOptions) (string, er
 	return out, firstErr
 }
 
-func splitDefault(rest string) (key, def string, hasDef bool) {
-	// ${env:NAME:-default} — use ":-" as delimiter (same as shell parameter expansion).
-	if i := strings.Index(rest, ":-"); i >= 0 {
-		return rest[:i], rest[i+2:], true
+// parsePlaceholder 解析 ${...} 内部内容，返回 provider scheme、key、默认值。
+//
+//   - 先用 ":-" 切出 shell 风格默认值（同 bash 的 ${VAR:-default}）。
+//   - 再用第一个 ":" 切出 scheme；没有 ":" 时视为裸变量，默认走 env provider。
+//
+// 示例：
+//
+//	env:NAME         -> scheme=env  key=NAME
+//	env:NAME:-8080   -> scheme=env  key=NAME  def=8080
+//	file:/a/b        -> scheme=file key=/a/b
+//	PORT             -> scheme=env  key=PORT   （裸变量）
+//	PORT:-8080       -> scheme=env  key=PORT   def=8080
+func parsePlaceholder(inner string) (scheme, key, def string, hasDef bool) {
+	body := inner
+	if i := strings.Index(inner, ":-"); i >= 0 {
+		body, def, hasDef = inner[:i], inner[i+2:], true
 	}
-	return rest, "", false
+	if i := strings.Index(body, ":"); i >= 0 {
+		return body[:i], body[i+1:], def, hasDef
+	}
+	// 裸变量 ${VAR} / ${VAR:-default}：默认按环境变量解析。
+	return "env", body, def, hasDef
 }
 
 func indexProviders(providers []Provider) map[string]Provider {

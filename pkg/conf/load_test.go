@@ -77,6 +77,32 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestLoad_StrictFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	// typo_field 在结构体中不存在
+	if err := os.WriteFile(path, []byte("name: beauty\ntypo_field: oops\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	type cfg struct{ Name string }
+
+	// 默认（非严格）：多余字段被忽略
+	var c1 cfg
+	if err := conf.Load(path, &c1); err != nil {
+		t.Fatalf("non-strict should pass: %v", err)
+	}
+	if c1.Name != "beauty" {
+		t.Fatalf("Name=%q", c1.Name)
+	}
+
+	// 严格：多余字段报错
+	var c2 cfg
+	if err := conf.Load(path, &c2, conf.WithStrictFields()); err == nil {
+		t.Fatal("strict should fail on unknown field")
+	}
+}
+
 func TestLoad_WithSecrets(t *testing.T) {
 	t.Setenv("BEAUTY_LOAD_TOKEN", "s3cret")
 	dir := t.TempDir()

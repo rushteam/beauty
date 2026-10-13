@@ -18,13 +18,14 @@ type remoteLoader struct {
 	cc     ConfigCenter
 	key    string
 	format string // yaml / json / toml …
+	strict bool   // 是否开启严格字段校验
 
 	mu      sync.RWMutex
 	current string // 最新原始内容
 }
 
-func newRemoteLoader(cc ConfigCenter, key, format string) *remoteLoader {
-	return &remoteLoader{cc: cc, key: key, format: format}
+func newRemoteLoader(cc ConfigCenter, key, format string, strict bool) *remoteLoader {
+	return &remoteLoader{cc: cc, key: key, format: format, strict: strict}
 }
 
 func (r *remoteLoader) load(ctx context.Context) error {
@@ -61,7 +62,7 @@ func (r *remoteLoader) Unmarshal(dst any) error {
 	if err := v.ReadConfig(bytes.NewBufferString(raw)); err != nil {
 		return fmt.Errorf("conf: unmarshal: %w", err)
 	}
-	return v.Unmarshal(dst)
+	return v.Unmarshal(dst, decoderOpts(r.strict)...)
 }
 
 func (r *remoteLoader) Watch(ctx context.Context, fn func()) {

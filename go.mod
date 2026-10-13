@@ -8,6 +8,7 @@ require (
 	github.com/bluenviron/gohlslib/v2 v2.4.0
 	github.com/bluenviron/mediacommon/v2 v2.9.1
 	github.com/coder/websocket v1.8.14
+	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/consul/api v1.34.3
 	github.com/joho/godotenv v1.5.1
@@ -88,7 +89,6 @@ require (
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect

@@ -31,14 +31,14 @@ func FileFromEnv(fallback string) string {
 //	if err := conf.Load(conf.FileFromEnv("config/app.yaml"), &cfg); err != nil {
 //	    log.Fatal(err)
 //	}
-func Load(path string, dst any) error {
+func Load(path string, dst any, opts ...Option) error {
 	if path == "" {
 		return nil
 	}
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	loader, err := New(path)
+	loader, err := New(path, opts...)
 	if err != nil {
 		return err
 	}

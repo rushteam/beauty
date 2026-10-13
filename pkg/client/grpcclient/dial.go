@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"slices"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/utils/selector"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -325,7 +326,19 @@ func parseTarget(target string) (serviceName string, registry discover.Discovery
 	return serviceName, registry, params, nil
 }
 
-// buildFilterFromParams 从 URL 查询参数构建标签过滤器
+// buildFilterFromParams 从 URL 查询参数构建标签过滤器。
+//
+// 采用白名单设计:只识别明确的过滤参数,绝不把"其余所有 query 参数"当成标签。
+// 这样标签过滤与注册中心/连接配置键(codec、token、ttl…)彻底隔离,不会相互污染
+// (历史上 ?codec=gozero 曾被误当成 metadata["codec"] 标签,把 metadata 为空的
+// go-zero 实例全部滤掉)。
+//
+// 识别的参数:
+//   - env / environment:环境过滤;
+//   - region / zone / campus:地域过滤(逗号分隔多值);
+//   - version:版本过滤(逗号分隔多值);
+//   - selector(别名 labels / label):Kubernetes 风格的 label selector 表达式,
+//     见 parseSelectorInto。例如 ?selector=tenant=acme,version in (v2,v3),!deprecated。
 func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 	filter := NewLabelFilter()
 	hasFilter := false
@@ -354,11 +367,8 @@ func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 		filter = filter.WithVersionIn(strings.Split(version, ",")...)
 		hasFilter = true
 	}
-	for k, v := range params {
-		if !isReservedParam(k) {
-			filter = filter.WithMatchLabel(k, v)
-			hasFilter = true
-		}
+	if parseSelectorInto(filter, params["selector"], params["labels"], params["label"]) {
+		hasFilter = true
 	}
 
 	if !hasFilter {
@@ -367,8 +377,117 @@ func buildFilterFromParams(params map[string]string) *ServiceLabelFilter {
 	return filter
 }
 
-func isReservedParam(param string) bool {
-	return slices.Contains([]string{"env", "environment", "region", "zone", "campus", "namespace", "group", "version"}, param)
+// setBasedSelectorRe 匹配集合算子:`key in (a,b)` / `key notin (a,b)`。
+var setBasedSelectorRe = regexp.MustCompile(`^(\S+)\s+(in|notin)\s*\((.*)\)$`)
+
+// parseSelectorInto 解析 Kubernetes 风格的 label selector 字符串并追加到 filter。
+// 多个条件以逗号分隔(括号内的逗号不作分隔),支持等值与集合两类算子:
+//
+//	key=value / key==value    等值匹配
+//	key!=value                不等匹配
+//	key in (v1,v2)            值在集合中
+//	key notin (v1,v2)         值不在集合中
+//	key                       标签存在
+//	!key                      标签不存在
+//
+// 例:tenant=acme,version in (v2,v3),!deprecated
+//
+// sources 允许传入多个来源(selector / labels / label 别名),依次合并。
+// 返回是否追加了任意条件。畸形片段(空键等)被静默忽略。
+func parseSelectorInto(filter *ServiceLabelFilter, sources ...string) bool {
+	applied := false
+	for _, s := range sources {
+		for _, term := range splitSelectorTerms(s) {
+			term = strings.TrimSpace(term)
+			if term == "" {
+				continue
+			}
+
+			// 集合算子:key in (...) / key notin (...)
+			if m := setBasedSelectorRe.FindStringSubmatch(term); m != nil {
+				key := strings.TrimSpace(m[1])
+				op := selector.FilterOpIn
+				if strings.EqualFold(m[2], "notin") {
+					op = selector.FilterOpNotIn
+				}
+				vals := splitSelectorValues(m[3])
+				if key != "" && len(vals) > 0 {
+					filter.WithExpression(key, op, vals...)
+					applied = true
+				}
+				continue
+			}
+
+			// 不等:key!=value
+			if k, v, ok := strings.Cut(term, "!="); ok {
+				if k = strings.TrimSpace(k); k != "" {
+					filter.WithExpression(k, selector.FilterOpNotEquals, strings.TrimSpace(v))
+					applied = true
+				}
+				continue
+			}
+
+			// 等值:key=value 或 key==value
+			if idx := strings.IndexByte(term, '='); idx >= 0 {
+				k := strings.TrimSpace(term[:idx])
+				v := term[idx+1:]
+				v = strings.TrimPrefix(v, "=") // 兼容 ==
+				if k != "" {
+					filter.WithExpression(k, selector.FilterOpEquals, strings.TrimSpace(v))
+					applied = true
+				}
+				continue
+			}
+
+			// 存在 / 不存在:key / !key
+			if rest, ok := strings.CutPrefix(term, "!"); ok {
+				if key := strings.TrimSpace(rest); key != "" {
+					filter.WithExpression(key, selector.FilterOpNotExist)
+					applied = true
+				}
+			} else {
+				filter.WithExpression(term, selector.FilterOpExists)
+				applied = true
+			}
+		}
+	}
+	return applied
+}
+
+// splitSelectorTerms 按逗号切分 selector,但忽略括号内的逗号(集合值分隔)。
+func splitSelectorTerms(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var terms []string
+	depth, start := 0, 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				terms = append(terms, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(terms, s[start:])
+}
+
+// splitSelectorValues 解析集合算子括号内的值列表。
+func splitSelectorValues(s string) []string {
+	var vals []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			vals = append(vals, v)
+		}
+	}
+	return vals
 }
 
 func getDefaultRegistry() discover.Discovery {

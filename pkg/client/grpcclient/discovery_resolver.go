@@ -81,12 +81,13 @@ func (f *filteringClientConn) ParseServiceConfig(configJSON string) *serviceconf
 	return f.cc.ParseServiceConfig(configJSON)
 }
 
-// extractMetadata 从 resolver.Address.Attributes 提取 metadata map。
+// extractMetadata 从 resolver.Address.BalancerAttributes 提取 metadata map。
+// 标签过滤在 UpdateState 前消费这些 LB 侧属性；原生 pickfirst 会忽略它们。
 func extractMetadata(a resolver.Address) map[string]string {
-	if a.Attributes == nil {
+	if a.BalancerAttributes == nil {
 		return nil
 	}
-	if m, ok := a.Attributes.Value(metadataAttrKey{}).(metadataAttr); ok {
+	if m, ok := a.BalancerAttributes.Value(metadataAttrKey{}).(metadataAttr); ok {
 		return map[string]string(m)
 	}
 	return nil

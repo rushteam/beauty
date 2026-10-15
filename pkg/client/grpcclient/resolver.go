@@ -3,6 +3,7 @@ package grpcclient
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
@@ -70,15 +71,17 @@ func (r *Resolver) Start() {
 	}
 }
 
-// metadataAttrKey 是 Attributes 中存储完整 metadata 的 key 类型。
+// metadataAttrKey 是 BalancerAttributes 中存储服务发现 metadata 的 key 类型。
 type metadataAttrKey struct{}
 
-// metadataAttr 包装 map[string]string，实现 Equal(any) bool，
-// 避免 gRPC ≥1.60 attributes.Equal 对不可比较类型回落到 != 时 panic。
-// 参见 google.golang.org/grpc/attributes.(*Attributes).Equal。
+// metadataAttr 包装 map[string]string，实现 Equal(any) bool。
+// 服务发现 metadata（weight/region/label 等）属于 LB 侧信息，按 gRPC 约定放在
+// BalancerAttributes（不影响 SubConn 建连；pickfirst 比较地址时会忽略该字段）。
+// Equal 仍保留：自定义 LB / 未来 Endpoint 路径若比较 BalancerAttributes，
+// 裸 map 回落 != 仍会 panic。参见 google.golang.org/grpc/attributes。
 type metadataAttr map[string]string
 
-// Equal 满足 gRPC attributes 的 equaler 接口。
+// Equal 满足 gRPC attributes 的 equaler 接口，按 key/value 深比较。
 func (m metadataAttr) Equal(o any) bool {
 	other, ok := o.(metadataAttr)
 	if !ok {
@@ -98,15 +101,14 @@ func (m metadataAttr) Equal(o any) bool {
 func buildState(services []discover.ServiceInfo) resolver.State {
 	addrs := make([]resolver.Address, 0, len(services))
 	for _, s := range services {
-		var attr *grpcattr.Attributes
+		var balAttr *grpcattr.Attributes
 		if len(s.Metadata) > 0 {
-			// 必须包装为 metadataAttr：裸 map 不可比较，
-			// pickfirst 在地址更新时调用 Attributes.Equal 会 panic。
-			attr = attr.WithValue(metadataAttrKey{}, metadataAttr(s.Metadata))
+			// Clone：Attributes 值写入后不可再改；共享上游 map 会被悄然污染。
+			balAttr = balAttr.WithValue(metadataAttrKey{}, metadataAttr(maps.Clone(s.Metadata)))
 		}
 		addrs = append(addrs, resolver.Address{
-			Addr:       s.Addr,
-			Attributes: attr,
+			Addr:               s.Addr,
+			BalancerAttributes: balAttr,
 		})
 	}
 	return resolver.State{Addresses: addrs}

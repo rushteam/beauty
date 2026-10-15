@@ -32,25 +32,45 @@ func TestMetadataAttr_Equal(t *testing.T) {
 	}
 }
 
-func TestBuildState_AttributesEqualNoPanic(t *testing.T) {
-	// 回归：gRPC attributes.Equal 对不可比较类型回落 != 会 panic。
-	// 用相同 / 不同 metadata 各比一次，确保包装类型可安全比较。
-	s1 := buildState([]discover.ServiceInfo{
-		{Addr: "10.0.0.1:8080", Metadata: map[string]string{"env": "prod", "kind": "grpc"}},
+func TestBuildState_UsesBalancerAttributes(t *testing.T) {
+	meta := map[string]string{"env": "prod", "kind": "grpc", "weight": "100"}
+	state := buildState([]discover.ServiceInfo{
+		{Addr: "10.0.0.1:8080", Metadata: meta},
 	})
-	s2 := buildState([]discover.ServiceInfo{
-		{Addr: "10.0.0.1:8080", Metadata: map[string]string{"env": "prod", "kind": "grpc"}},
-	})
-	s3 := buildState([]discover.ServiceInfo{
-		{Addr: "10.0.0.1:8080", Metadata: map[string]string{"env": "staging", "kind": "grpc"}},
-	})
+	a := state.Addresses[0]
 
-	a1, a2, a3 := s1.Addresses[0], s2.Addresses[0], s3.Addresses[0]
-	if !a1.Attributes.Equal(a2.Attributes) {
-		t.Fatal("same metadata should Equal")
+	// 服务发现 metadata 属于 LB 信息，不应进 Attributes（避免 pickfirst 当成 SubConn 身份）。
+	if a.Attributes != nil {
+		t.Fatal("Attributes should be nil for discovery metadata")
 	}
-	if a1.Attributes.Equal(a3.Attributes) {
-		t.Fatal("different metadata should not Equal")
+	if a.BalancerAttributes == nil {
+		t.Fatal("BalancerAttributes should hold discovery metadata")
+	}
+	if !a.BalancerAttributes.Equal(a.BalancerAttributes) {
+		t.Fatal("BalancerAttributes.Equal self should succeed")
+	}
+
+	// metadata 变更不应影响 Attributes 相等（两者都为 nil）。
+	other := buildState([]discover.ServiceInfo{
+		{Addr: "10.0.0.1:8080", Metadata: map[string]string{"env": "staging"}},
+	}).Addresses[0]
+	if !a.Attributes.Equal(other.Attributes) {
+		t.Fatal("nil Attributes should remain equal across metadata-only changes")
+	}
+	if a.BalancerAttributes.Equal(other.BalancerAttributes) {
+		t.Fatal("different BalancerAttributes metadata should not Equal")
+	}
+}
+
+func TestBuildState_MetadataCloned(t *testing.T) {
+	meta := map[string]string{"env": "prod"}
+	state := buildState([]discover.ServiceInfo{
+		{Addr: "10.0.0.1:8080", Metadata: meta},
+	})
+	meta["env"] = "mutated"
+	got := extractMetadata(state.Addresses[0])
+	if got["env"] != "prod" {
+		t.Fatalf("BalancerAttributes should own a clone, got %q", got["env"])
 	}
 }
 

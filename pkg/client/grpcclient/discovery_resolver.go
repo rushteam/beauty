@@ -86,8 +86,8 @@ func extractMetadata(a resolver.Address) map[string]string {
 	if a.Attributes == nil {
 		return nil
 	}
-	if m, ok := a.Attributes.Value(metadataAttrKey{}).(map[string]string); ok {
-		return m
+	if m, ok := a.Attributes.Value(metadataAttrKey{}).(metadataAttr); ok {
+		return map[string]string(m)
 	}
 	return nil
 }

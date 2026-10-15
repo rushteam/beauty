@@ -70,15 +70,39 @@ func (r *Resolver) Start() {
 	}
 }
 
-// metadataAttrKey 是 Attributes 中存储完整 metadata map 的 key 类型。
+// metadataAttrKey 是 Attributes 中存储完整 metadata 的 key 类型。
 type metadataAttrKey struct{}
+
+// metadataAttr 包装 map[string]string，实现 Equal(any) bool，
+// 避免 gRPC ≥1.60 attributes.Equal 对不可比较类型回落到 != 时 panic。
+// 参见 google.golang.org/grpc/attributes.(*Attributes).Equal。
+type metadataAttr map[string]string
+
+// Equal 满足 gRPC attributes 的 equaler 接口。
+func (m metadataAttr) Equal(o any) bool {
+	other, ok := o.(metadataAttr)
+	if !ok {
+		return false
+	}
+	if len(m) != len(other) {
+		return false
+	}
+	for k, v := range m {
+		if ov, ok := other[k]; !ok || ov != v {
+			return false
+		}
+	}
+	return true
+}
 
 func buildState(services []discover.ServiceInfo) resolver.State {
 	addrs := make([]resolver.Address, 0, len(services))
 	for _, s := range services {
 		var attr *grpcattr.Attributes
 		if len(s.Metadata) > 0 {
-			attr = attr.WithValue(metadataAttrKey{}, s.Metadata)
+			// 必须包装为 metadataAttr：裸 map 不可比较，
+			// pickfirst 在地址更新时调用 Attributes.Equal 会 panic。
+			attr = attr.WithValue(metadataAttrKey{}, metadataAttr(s.Metadata))
 		}
 		addrs = append(addrs, resolver.Address{
 			Addr:       s.Addr,

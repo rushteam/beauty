@@ -38,6 +38,27 @@ rateLimitMiddleware := ratelimit.NewRateLimitMiddleware(ratelimit.Config{
 })
 ```
 
+### 📦 HTTP 缓存策略 (`httpcache/`)
+按路径写入 `Cache-Control`（含 `stale-while-revalidate`），方便 Service Worker 决策；下游已设头则不覆盖。
+
+```go
+import "github.com/rushteam/beauty/pkg/middleware/httpcache"
+
+h := httpcache.Middleware(httpcache.NoStore,
+    httpcache.Rule{Prefix: "/static/", Policy: httpcache.HashedAsset},
+    httpcache.Rule{Prefix: "/api/public/", Policy: httpcache.PublicShort},
+)(mux)
+```
+
+### 🔁 Idempotency-Key (`idempotencykey/`)
+写操作幂等：客户端带 `Idempotency-Key`，重试/离线回放复用首次响应（`X-Idempotency-Replayed: true`）。配套批量回放见 `pkg/api/offlinesync`。
+
+```go
+import "github.com/rushteam/beauty/pkg/middleware/idempotencykey"
+
+mux.Handle("POST /orders", idempotencykey.Middleware()(orderHandler))
+```
+
 ### ⏱️ 超时控制中间件 (`timeout/`)
 请求超时保护和慢请求监控：
 - **灵活超时配置**：可配置超时时间和慢请求阈值

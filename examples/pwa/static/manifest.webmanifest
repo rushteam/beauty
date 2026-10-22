@@ -1,0 +1,17 @@
+{
+  "name": "Beauty PWA Demo",
+  "short_name": "BeautyPWA",
+  "description": "Service Worker + Cache-Control + offline sync + Web Push demo",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1419",
+  "theme_color": "#1a2332",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

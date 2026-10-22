@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1a2332" />
+  <link rel="manifest" href="/static/manifest.webmanifest" />
+  <title>Beauty PWA</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --ink: #e8d5b7;
+      --muted: #8a9bb0;
+      --accent: #c4a574;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+      background:
+        radial-gradient(ellipse at 20% 0%, #243044 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 100%, #1a2a22 0%, transparent 45%),
+        var(--bg);
+      color: var(--ink);
+      padding: 2rem 1.25rem 3rem;
+    }
+    h1 {
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      font-size: clamp(1.8rem, 5vw, 2.6rem);
+      margin: 0 0 0.35rem;
+    }
+    p.lead {
+      color: var(--muted);
+      margin: 0 0 1.75rem;
+      max-width: 36rem;
+      line-height: 1.5;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-bottom: 1.25rem;
+    }
+    button {
+      font: inherit;
+      border: 1px solid #3a4a5c;
+      background: var(--panel);
+      color: var(--ink);
+      padding: 0.55rem 0.9rem;
+      cursor: pointer;
+      border-radius: 2px;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    #log {
+      white-space: pre-wrap;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid #2a3545;
+      padding: 1rem;
+      min-height: 12rem;
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <h1>Beauty</h1>
+  <p class="lead">PWA 演示：Cache-Control / Idempotency-Key 离线回放 / Web Push。需 HTTPS 或 localhost。</p>
+  <div class="actions">
+    <button type="button" id="btn-feed">读公开 API</button>
+    <button type="button" id="btn-order">下单（幂等）</button>
+    <button type="button" id="btn-push">订阅 Push</button>
+    <button type="button" id="btn-send">发送 Push</button>
+    <button type="button" id="btn-sync">触发 Sync</button>
+  </div>
+  <pre id="log"></pre>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -55,6 +55,7 @@
 | 分组限流 | [keyed-ratelimit](keyed-ratelimit.md) | [keyed-ratelimit-en](keyed-ratelimit-en.md) | `pkg/resilience/ratelimit` | [resilience](../examples/resilience) |
 | DB 弹性(熔断 + 舱壁) | [db-resilience](db-resilience.md) | [db-resilience-en](db-resilience-en.md) | `contrib/sqldb` · `contrib/bun` · `contrib/gorm` | [dberr](../examples/dberr) |
 | 幂等 | [idempotency](idempotency.md) | [idempotency-en](idempotency-en.md) | `pkg/store/idempotency` | [idempotency](../examples/idempotency) |
+| PWA / Service Worker 配套 | [pwa](pwa.md) | — | `httpcache` · `idempotencykey` · `offlinesync` · `contrib/webpush` | [pwa](../examples/pwa) |
 
 ## 消息与任务编排
 

@@ -7,6 +7,15 @@
 框架已发布语义化版本（当前 v0.10.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
 
+## [1.2.1] - 2026-10-30
+
+### Fixed
+- **`pkg/service/discover/nacos`**:修复 Nacos 服务发现的回调与 goroutine 泄漏。`Watch` 原先在
+  `Subscribe` 注册回调后立即返回 `nil`,而上层 gRPC resolver（`pkg/client/grpcclient` `Resolver.Start`)
+  将 `Watch` 视为长阻塞调用,误判为「异常断连」并按退避(稳态约 12.8s)不断重订阅,每次多挂一个 Nacos
+  回调和一个 goroutine,直到连接关闭才释放;同时导致单次变更被重复触发多次回调。现改为订阅成功后阻塞到
+  `ctx` 取消再 `Unsubscribe` 并返回 `ctx.Err()`,语义与 consul/etcd 的 `Watch` 对齐。
+
 ## [0.10.0] - 2026-09-26
 
 ### Changed

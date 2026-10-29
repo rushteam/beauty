@@ -177,23 +177,27 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 		update(r.filterInstances(services))
 	}
 
-	go func() {
-		<-ctx.Done()
-		if err := registryClient.Unsubscribe(&vo.SubscribeParam{
-			ServiceName:       serviceName,
-			Clusters:          []string{r.c.Cluster},
-			GroupName:         r.c.Group,
-			SubscribeCallback: subscribeCallback,
-		}); err != nil {
-			logger.Warn("nacos Unsubscribe failed", slog.String("service", serviceName), slog.Any("err", err))
-		}
-	}()
-	return registryClient.Subscribe(&vo.SubscribeParam{
+	// Nacos 是事件/回调模型：Subscribe 注册回调后立即返回。
+	// 但上层 resolver 把 Watch 当成长阻塞调用（见 pkg/client/grpcclient/resolver.go
+	// Resolver.Start），只在 ctx 取消或后端断连时才应返回；若 Watch 订阅完立即返回
+	// nil，resolver 会误判为“异常断连”并不断重订阅，每次都多挂一个 Nacos 回调和一个
+	// goroutine，直到连接关闭才释放。因此这里订阅成功后必须阻塞到 ctx 取消再
+	// Unsubscribe，返回 ctx.Err() 让 resolver 识别为正常退出。
+	// Subscribe/Unsubscribe 使用同一个 param（同一回调闭包），保证取消订阅精确匹配。
+	param := &vo.SubscribeParam{
 		ServiceName:       serviceName,
 		Clusters:          []string{r.c.Cluster},
 		GroupName:         r.c.Group,
 		SubscribeCallback: subscribeCallback,
-	})
+	}
+	if err := registryClient.Subscribe(param); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	if err := registryClient.Unsubscribe(param); err != nil {
+		logger.Warn("nacos Unsubscribe failed", slog.String("service", serviceName), slog.Any("err", err))
+	}
+	return ctx.Err()
 }
 
 func (r *Registry) filterInstances(services []model.Instance) []discover.ServiceInfo {

@@ -9,6 +9,7 @@
 //	backoff         — 指数退避 / 自定义退避策略
 //	circuitbreaker  — 熔断器
 //	ratelimit       — 令牌桶 / 滑动窗口限流
+//	bulkhead        — 隔离舱(并发配额隔离,防资源耗尽型雪崩)
 //	hedge           — 对冲请求(backup request)
 //	timeout         — 超时控制
 //	throttle        — 节流(与 ratelimit 互补,侧重调用频率平滑)

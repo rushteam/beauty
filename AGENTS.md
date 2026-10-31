@@ -55,8 +55,9 @@ The whole framework is `beauty.go` + a small set of interfaces. Read `beauty.go`
 
 ## Layout map
 
-- `pkg/foundation/` — zero-dep primitives & data structures (`ctxkey`, `safe`, `generic`, `fsm`, `bitmap`, `ringbuffer`, `chanx`, `priority`, `dag`, `syncx`, `xgo`, `semaphore`, …).
-- `pkg/resilience/` — fault tolerance & flow control (`backoff`, `circuitbreaker`, `ratelimit`, `hedge`, `timeout`, `throttle`, `cooldown`, `counter`).
+- `pkg/foundation/` — zero-dep primitives & data structures (`ctxkey`, `safe`, `generic`, `fsm`, `bitmap`, `roaring`, `skiplist`, `intervaltree`, `sketch`, `filter`, `simhash`, `crdt`, `diff`, `actrie`, `ringbuffer`, `chanx`, `priority`, `dag`, `syncx`, `xgo`, `semaphore`, …). `roaring` ships the official cross-language RoaringFormatSpec; `crdt` supports delta-state sync; `actrie` double-array AC supports normalization (anti-evasion); `diff` has Myers + JSON Patch (RFC6902) + 3-way merge.
+- `pkg/idgen/` — distributed unique IDs: `Generator` (Snowflake, 64-bit, clock-based) + `SegmentID` (leaf-segment, double-buffered; DB backend in `contrib/gorm`).
+- `pkg/resilience/` — fault tolerance & flow control (`backoff`, `circuitbreaker`, `ratelimit`, `hedge`, `timeout`, `throttle`, `cooldown`, `counter`, `bulkhead`).
 - `pkg/store/` — storage & shared state (`kvstore`, `cache`, `dlock`, `ephemeral`, `idempotency`, `tally`, `shard`, `loadbalance`).
 - `pkg/messaging/` — messaging & events (`mq`, `eventbus`, `stream`, `webhook`).
 - `pkg/transport/` — realtime transport (`ws`, `sse`, `quic`, `p2p`, `presence`, `router`, `resume`).
@@ -65,7 +66,7 @@ The whole framework is `beauty.go` + a small set of interfaces. Read `beauty.go`
 - `pkg/game/` — game engine: core (`gameloop`, `match`, `gameroom`, `spatial`, `replicate`, `versus`, `matchmaker`, `pathfind`, …) + meta (`loot`, `leveling`, `questlog`, `leaderboard`, `reddot`, `momentum`).
 - `pkg/media/` — media streaming (`rtmp`, `hls`, `hlsmux`, `webrtc`, hub/supervisor).
 - `pkg/service/*` — runnable services + discovery/logger/telemetry.
-- `pkg/middleware/*` — composable HTTP middleware (accesslog, auth, ratelimit, circuitbreaker, timeout, cache, cors, recovery, requestid…).
+- `pkg/middleware/*` — composable HTTP middleware (accesslog, auth, ratelimit, circuitbreaker, bulkhead, timeout, cache, cors, recovery, requestid, sensitive…).
 - `examples/` — many runnable single-purpose demos; the fastest way to see an API in use.
 - `docs/` — per-topic design notes (discovery, middleware, media, wasm-roadmap, k8s-rbac…).
 - `contrib/README.md` — table of every contrib module and its purpose.

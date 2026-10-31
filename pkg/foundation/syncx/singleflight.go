@@ -15,5 +15,25 @@ func (g *Group[V]) Do(key string, fn func() (V, error)) (V, error, bool) {
 	return res, err, shared
 }
 
+// Result 是 DoChan 的异步结果。Shared 表示该结果是否被多个调用共享。
+type Result[V any] struct {
+	Val    V
+	Err    error
+	Shared bool
+}
+
+// DoChan 与 Do 类似但异步:返回一个 channel,结果就绪时发送一次。便于配合 select 做超时控制
+// (注意:放弃等待不会取消底层 fn,fn 仍会跑完)。
+func (g *Group[V]) DoChan(key string, fn func() (V, error)) <-chan Result[V] {
+	out := make(chan Result[V], 1)
+	ch := g.sf.DoChan(key, func() (any, error) { return fn() })
+	go func() {
+		r := <-ch
+		res, _ := r.Val.(V)
+		out <- Result[V]{Val: res, Err: r.Err, Shared: r.Shared}
+	}()
+	return out
+}
+
 // Forget 让 key 的下一次 Do 重新执行(不再复用在途结果)。
 func (g *Group[V]) Forget(key string) { g.sf.Forget(key) }

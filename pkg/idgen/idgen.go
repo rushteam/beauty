@@ -1,8 +1,17 @@
-// Package idgen 提供分布式唯一 ID 生成器(Snowflake 算法),纯标准库实现。
+// Package idgen 提供分布式唯一 ID 生成,纯标准库实现。两种机制按场景选:
+//
+//   - **Snowflake**(本文件 Generator):64 位整数 ID,毫秒时间戳 + 节点 ID + 序列号,
+//     无需外部存储、趋势递增、单节点峰值约 409.6 万/秒。详见下方布局说明。
+//   - **号段 / Leaf-segment**(segment.go 的 SegmentID):每次从存储批量领一段 ID 到
+//     内存分发,双缓冲预取几乎不阻塞。不依赖时钟、ID 更短、近似递增(对 B+ 树索引更友好);
+//     需要一个 SegmentStore 后端(内存实现 MemorySegmentStore 供测试,生产用
+//     contrib/gorm 的 SegmentStore 以一条原子 UPDATE 领段)。
 //
 // 与 pkg/utils/uuid 的区别:uuid 生成 128 位字符串(UUIDv7),适合做外部可见的
 // 资源标识;本包生成 64 位整数 ID,趋势递增、可排序、占用小,适合做数据库主键 /
 // 对局 ID / 订单号 / 消息序号——凡是"要全局唯一 + 趋势递增 + 存储紧凑"的场景。
+//
+// 以下说明 Snowflake 机制。
 //
 // 64 位布局(经典 Snowflake):
 //

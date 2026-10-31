@@ -17,11 +17,15 @@
 //	ringbuffer  — 环形缓冲区
 //	chanx       — channel 扩展(如无界 chan)
 //	fixedpoint  — 定点数运算
-//	sketch      — 概率数据结构(HyperLogLog、Count-Min 等)
+//	sketch      — 概率数据结构(HyperLogLog、Count-Min、TDigest 分位数、蓄水池采样)
 //	filter      — 近似集合过滤器(Bloom、Cuckoo,纯内存)
+//	roaring     — Roaring 压缩位图(海量稀疏整数集,array/bitmap 自适应容器)
 //	skiplist    — 泛型有序跳表映射(点查/范围/名次)
-//	actrie      — Aho-Corasick 多模匹配(敏感词/词典)
-//	diff        — LCS 差异计算与补丁应用
+//	intervaltree— 区间树(treap + maxHigh 增广,区间相交/点覆盖查询)
+//	actrie      — Aho-Corasick 多模匹配 + 双数组 Trie(敏感词/词典/分词)
+//	simhash     — SimHash / MinHash 近似相似去重
+//	diff        — LCS 差异 + 补丁、JSON Patch(RFC6902)、三路合并
+//	crdt        — 无冲突复制数据类型(GCounter/PNCounter/GSet/ORSet/LWW)
 //	pagination  — 分页工具
 //	priority    — 优先队列
 //	pipeline    — 管道(stage→stage)

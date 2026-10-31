@@ -97,6 +97,15 @@
 | 主题 | 中文 | English | 相关包 | 示例 |
 |---|---|---|---|---|
 | 过滤器 / 跳表 / 差异 | [data-structures](data-structures.md) | [data-structures-en](data-structures-en.md) | `pkg/foundation/filter` · `pkg/foundation/skiplist` · `pkg/foundation/diff` | [filter](../examples/filter) · [skiplist](../examples/skiplist) · [diff](../examples/diff) |
+| 压缩位图(含官方跨语言格式) | [data-structures](data-structures.md#4-压缩位图-roaring) | [data-structures-en](data-structures-en.md#4-compressed-bitmap-roaring) | `pkg/foundation/roaring` | [roaring](../examples/roaring) |
+| 区间树 / 线段(区间相交·点覆盖) | [data-structures](data-structures.md#5-区间树-intervaltree) | [data-structures-en](data-structures-en.md#5-interval-tree-intervaltree) | `pkg/foundation/intervaltree` | [intervaltree](../examples/intervaltree) |
+| 概率估计(HLL / CountMin / TDigest 分位数) | [data-structures](data-structures.md#6-概率估计-sketch) | [data-structures-en](data-structures-en.md#6-probabilistic-sketches-sketch) | `pkg/foundation/sketch` | [tdigest](../examples/tdigest) |
+| 近似相似去重(SimHash / MinHash) | [data-structures](data-structures.md#7-近似相似-simhash) | [data-structures-en](data-structures-en.md#7-near-similarity-simhash) | `pkg/foundation/simhash` | [simhash](../examples/simhash) |
+| CRDT 无冲突复制(含 delta-state 增量同步) | [data-structures](data-structures.md#8-无冲突复制-crdt) | [data-structures-en](data-structures-en.md#8-conflict-free-replication-crdt) | `pkg/foundation/crdt` | [crdt](../examples/crdt) |
+| JSON Patch / Myers / 三路合并 | [data-structures](data-structures.md#3-差异--补丁-diff) | [data-structures-en](data-structures-en.md#3-diff--patch-diff) | `pkg/foundation/diff` | [jsonpatch](../examples/jsonpatch) · [diff](../examples/diff) |
+| 双数组 Trie / AC 归一化反绕过 | [data-structures](data-structures.md) · [sensitive-words](sensitive-words.md) | [data-structures-en](data-structures-en.md) · [sensitive-words-en](sensitive-words-en.md) | `pkg/foundation/actrie` | [dat](../examples/dat) · [actrie](../examples/actrie) |
+| 分布式 ID 号段(双缓冲预取) | [data-structures](data-structures.md#9-分布式-id-号段-idgen) | [data-structures-en](data-structures-en.md#9-distributed-id-segments-idgen) | `pkg/idgen` · `contrib/gorm` | [idgen](../examples/idgen) · [segment](../examples/segment) |
+| 隔离舱(并发配额隔离) | — | — | `pkg/resilience/bulkhead` · `pkg/middleware/bulkhead` | [bulkhead](../examples/bulkhead) |
 
 ## 其他
 

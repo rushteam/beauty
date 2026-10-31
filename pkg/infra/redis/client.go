@@ -1,6 +1,7 @@
 // Package redis 提供基于 Redis 的基建适配:分布式锁/选主(实现 pkg/dlock)与
 // 带 TTL 的原子 KV 存储(实现 pkg/kvstore.Store,给 counter/cooldown/idempotency
-// 等原语一个真实的跨实例后端)。薄封装 github.com/redis/go-redis,不重新发明算法。
+// 等原语一个真实的跨实例后端)、以及 Pub/Sub 广播(实现 pkg/messaging/mq 的 Publisher /
+// Subscriber,见 PubSub,Valkey 同样适用)。薄封装 github.com/redis/go-redis,不重新发明算法。
 //
 // 锁语义是"单节点 Redis"级别:SET NX PX 抢占 + Lua CAS 释放/续期。这在单个 Redis
 // (或主从,主挂了 failover 期间有极小的双持窗口)上正确、够用,但不是跨多个独立

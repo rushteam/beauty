@@ -4,8 +4,8 @@
 //
 // 分层:
 //   - Publisher / Subscriber:传输无关接口,由具体 broker 实现。本包自带零依赖的进程内实现
-//     (NewInProc),用于单体/开发/测试;真 broker 作为 opt-in 子包实现同一接口(如未来的
-//     pkg/infra/nats),不强引依赖。
+//     (NewInProc),用于单体/开发/测试;真 broker 作为 opt-in 子包实现同一接口(如
+//     pkg/infra/redis.PubSub(Redis/Valkey Pub/Sub)、contrib/nats、contrib/kafka),不强引依赖。
 //   - Consumer:把一组 (topic, handler) 订阅包成 beauty.Service(Start/String/Ready),
 //     随 app 优雅停机。
 //   - HandlerMiddleware:Recover(吞 panic)、Retry(瞬时错误重试)等,Chain 组合。

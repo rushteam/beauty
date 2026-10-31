@@ -18,21 +18,23 @@ Polaris）适配到框架定义的**后端无关接口**上。核心接口都在
 
 ## 能力矩阵
 
-| 后端 | 配置中心 `conf` | 分布式锁/选主 `dlock` | TTL-KV `kvstore` | 服务发现 `discover` |
-|---|---|---|---|---|
-| **etcd** | ✅ `etcd` / `etcdv3` | ✅ Locker + Elector | ✅ | ✅ `etcdv3` |
-| **consul** | ✅ `consul` | ✅ Locker + Elector | — | ✅ |
-| **k8s** | ✅ `configmap` / `secret` | ✅ 仅 Elector¹ | — | ✅ |
-| **redis** | — | ✅ Locker + Elector² | ✅ | — |
-| **mysql** | — | ✅ Locker + Elector³ | — | — |
-| **nacos** | ✅ `nacos` | — | — | ✅ |
-| **polaris** | ✅ `polaris` | — | — | ✅ |
+| 后端 | 配置中心 `conf` | 分布式锁/选主 `dlock` | TTL-KV `kvstore` | 服务发现 `discover` | 广播 Pub/Sub `mq` |
+|---|---|---|---|---|---|
+| **etcd** | ✅ `etcd` / `etcdv3` | ✅ Locker + Elector | ✅ | ✅ `etcdv3` | — |
+| **consul** | ✅ `consul` | ✅ Locker + Elector | — | ✅ | — |
+| **k8s** | ✅ `configmap` / `secret` | ✅ 仅 Elector¹ | — | ✅ | — |
+| **redis** | — | ✅ Locker + Elector² | ✅ | — | ✅ Publisher + Subscriber⁴ |
+| **mysql** | — | ✅ Locker + Elector³ | — | — | — |
+| **nacos** | ✅ `nacos` | — | — | ✅ | — |
+| **polaris** | ✅ `polaris` | — | — | ✅ | — |
 
 > ¹ k8s 基于 Lease 的 leaderelection 是「选主」语义,没有互斥锁原语,故只实现 `Elector`。
 > ² Redis 锁是**单节点语义**(SET NX PX + Lua CAS),不是跨多 master 的 Redlock。
 > 需要更强保证时用 etcd / consul 后端。
 > ³ MySQL 锁基于 `GET_LOCK`/`RELEASE_LOCK`（advisory lock），session-level,
 > 连接断开自动释放。要求 MySQL 5.7.5+（支持同连接多锁）。
+> ⁴ Redis / Valkey **Pub/Sub**:扇出、at-most-once,不支持消费组(`mq.WithGroup` 返回
+> `ErrGroupNotSupported`)。要持久化 / 重投 / 消费组用 `contrib/redisstream`(Redis Streams)。
 
 ## 配置中心 `conf`
 
@@ -115,6 +117,23 @@ n, _ := store.Incr(ctx, "quota:user:42", 1, time.Minute)
 - **etcd**:基于 lease,TTL 粒度是**秒**(不足 1s 抬到 1s),`Incr` 走事务 CAS。
   `TTL()` 可精确查询剩余时间;适合已有 etcd、不想再引 Redis 的场景。
 
+## 广播 Pub/Sub `mq`
+
+`redis.PubSub` 用 Redis / Valkey 的 `PUBLISH` / `SUBSCRIBE` 实现 `mq.Publisher` + `mq.Subscriber`,
+典型用途是给 `stream.Bridge` 做跨节点广播 backplane(SSE / WebSocket 多房间):
+
+```go
+ps, _ := beautyredis.NewPubSubFromConfig(&beautyredis.Config{Addr: "127.0.0.1:6379"})
+defer ps.Close()
+rooms := stream.NewBridge(ps, ps, stream.TopicPrefix[string]("sse.room."), stream.JSON[sse.Event]())
+```
+
+- 所有订阅复用**一条**专用连接,同一 topic 多次 `Subscribe` 只发一次 `SUBSCRIBE`,最后一个退订时
+  `UNSUBSCRIBE`;断线由 go-redis 自动重连并重新订阅(断线期间的消息丢失)。
+- `Subscribe` 等到服务端确认后才返回:返回之后发布的消息保证可达。
+- 每个订阅独立缓冲,满了丢弃该订阅的新消息(`Dropped()` 计数),不拖累同连接上的其它 topic。
+- `Key` / `Headers` 用紧凑信封传递;两者都为空时负载就是 `Body` 原文,可与 `redis-cli PUBLISH` 互通。
+
 ## 目录一览
 
 | 子包 | 内容 |
@@ -122,7 +141,7 @@ n, _ := store.Incr(ctx, "quota:user:42", 1, time.Minute)
 | `etcd/` | `client.go`(连接)、`config_client.go`、`dlock.go`、`kvstore.go`、`factory.go` |
 | `consul/` | `config_client.go`(含连接)、`dlock.go`、`factory.go` |
 | `k8s/` | `client.go`、`config_center.go`、`dlock.go`(Elector)、`factory.go` |
-| `redis/` | `client.go`、`dlock.go`、`kvstore.go`、`factory.go` |
+| `redis/` | `client.go`、`dlock.go`、`kvstore.go`、`pubsub.go` + `envelope.go`、`factory.go` |
 | `mysql/` | `dlock.go`（advisory lock）、`factory.go` |
 | `nacos/` | `config.go`、`config_client.go`、`nacos.go`、`factory.go` |
 | `polaris/` | `config_client.go`、`factory.go` |

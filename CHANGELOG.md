@@ -7,6 +7,19 @@
 框架已发布语义化版本（当前 v0.10.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
 
+## [1.4.0] - 2026-11-01
+
+### Added
+
+- `pkg/messaging/stream`：`Hub[K, T]`——按 key 分组的 Broadcaster 注册表，首订阅懒建、末位自动回收。
+- `pkg/messaging/stream`：`Bridge[K, T]`——本地扇出 + mq backplane 的分布式广播。`Publish` 只进 mq，
+  mq 回调喂本地 Broadcaster；某 key 首个本地订阅者向 mq 订阅、末位退订；可插拔 `Codec`（内置 `JSON` / `Raw`），
+  `TopicPrefix` 生成 topic。
+- `pkg/infra/redis`：`PubSub`——Redis / Valkey Pub/Sub 实现 `mq.Publisher` + `mq.Subscriber`（扇出、at-most-once）。
+  单连接多路复用、同 topic 引用计数订阅、`Subscribe` 等服务端确认后返回、每订阅独立缓冲（满则丢弃并计数）、
+  Key / Headers 信封（均为空时负载即原文，可与非 beauty 客户端互通）。
+- `pkg/transport/sse`：`Stream`——从任意 `(<-chan Event, cancel, error)` 事件源推送 SSE，配合 Hub / Bridge 做多房间。
+
 ## [1.2.2] - 2026-11-01
 
 ### Fixed

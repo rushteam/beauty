@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
@@ -182,13 +183,20 @@ func TestEndToEnd_InProc(t *testing.T) {
 		t.Fatalf("consumer trace = %s, want %s", got, parentID)
 	}
 
+	// process span 在 handler 返回后才 End，done 先于它到达，需等待其落入 exporter
 	var pubSpan, procSpan bool
-	for _, s := range exp.GetSpans() {
-		switch s.Name {
-		case "jobs publish":
-			pubSpan = true
-		case "jobs process":
-			procSpan = true
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		pubSpan, procSpan = false, false
+		for _, s := range exp.GetSpans() {
+			switch s.Name {
+			case "jobs publish":
+				pubSpan = true
+			case "jobs process":
+				procSpan = true
+			}
+		}
+		if pubSpan && procSpan {
+			break
 		}
 	}
 	if !pubSpan || !procSpan {

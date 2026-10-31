@@ -33,6 +33,7 @@ beauty 在 `pkg/transport/ws`（WebSocket 薄封装）和 `pkg/transport/sse`（
 | `pkg/transport/ws/session` | WebSocket 有状态会话高阶封装 | 长连接业务 / IM 单聊 | 8282 |
 | `pkg/transport/presence` | 在线状态双索引 + 事件总线 | 频道成员 / 在线广播 / 候选池 | 8283 |
 | `pkg/transport/router` | 多语义消息路由 + 攒批 | 群发 / 定点投递 / 批量下发 | 8284 |
+| `pkg/messaging/stream` | 本地扇出 → 按 key 分组(Hub)→ 跨节点(Bridge + mq backplane) | SSE 多房间 / 多频道广播 | — |
 | `pkg/game/leaderboard` | 排行榜内存排名缓存(堆排序) | "我的名次" / TopN 高频读 | 8285 |
 | `pkg/orchestration/scheduler` | 工作池 + 运行时 Pause/Resume | 发奖 / 批量通知 / 过期清理 | 8286 |
 | `pkg/game/matchmaker` | 基于属性匹配的组队 | PVP 组队 / 匹配大厅 | 8287 |
@@ -252,6 +253,37 @@ rtr.SendToAll(msg)
 ```
 
 `FlushDeferred` 按 session 批量下发,减少 Lookup。详见 `examples/router`。
+
+## 速查:pkg/messaging/stream（Broadcaster / Hub / Bridge 三层扇出）
+
+SSE / WebSocket 的每条连接都必须从**本地 channel** 读,所以跨节点广播不是把 `Broadcaster`
+换成 mq,而是二者组合。`stream` 包按扇出范围给出三层,语义一一对应:
+
+| 原语 | 扇出范围 | 说明 |
+|------|----------|------|
+| `Broadcaster[T]` | 单进程、单事件源 | 每订阅者独立缓冲,慢订阅者按策略丢弃 |
+| `Hub[K, T]` | 单进程、按 key 分组 | `map[K]*Broadcaster` + 首订阅懒建 / 末位自动回收 |
+| `Bridge[K, T]` | 跨进程、按 key 分组 | Hub 语义 + `mq` 做 backplane + 可插拔 `Codec` |
+
+```go
+// 单机多房间
+rooms := stream.NewHub[string, sse.Event](stream.WithBufferSize(64))
+rooms.Publish("lobby", ev)               // 无订阅者返回 0,不建条目
+
+// 多节点多房间:Redis / Valkey Pub/Sub 做 backplane(也可换成 NATS 等任一 mq 实现)
+ps := beautyredis.NewPubSub(redisClient)
+rooms := stream.NewBridge(ps, ps, stream.TopicPrefix[string]("sse.room."), stream.JSON[sse.Event]())
+mux.Handle("GET /rooms/{room}/events", sse.Stream(func(r *http.Request) (<-chan sse.Event, func(), error) {
+    return rooms.Subscribe(r.Context(), r.PathValue("room"))
+}))
+rooms.Publish(ctx, "lobby", ev)          // 只进 mq;本节点订阅者同样经 mq 回调收到
+```
+
+`Bridge` 的机制:某 key 的**首个**本地订阅者到来时向 mq `Subscribe(prefix+key)`,同 key 后续订阅者
+复用这一份(并发首订阅者等同一次激活);**最后一个**离开时取消 mq 订阅。mq 回调解码后喂本地
+`Broadcaster`。投递保证由 mq 决定(Redis Pub/Sub 为 at-most-once,断线期间消息丢失),
+需要补发历史用 `domain/chat` 游标或 `sse` 的 `Last-Event-ID`。`Codec` 内置 `JSON[T]()` 与 `Raw()`,
+自定义实现 `Marshal`/`Unmarshal` 即可(如 protobuf)。
 
 ## 速查:pkg/game/leaderboard（排行榜排名缓存）
 

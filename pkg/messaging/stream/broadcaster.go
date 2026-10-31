@@ -1,5 +1,10 @@
 // Package stream 提供流式扇出（广播）原语：把一个事件源 fan-out 给多个订阅者，
-// 适合 SSE / WebSocket 等"一份数据推给 N 个连接"的场景。
+// 适合 SSE / WebSocket 等"一份数据推给 N 个连接"的场景。按扇出范围分三层：
+//
+//   - Broadcaster：单进程、单事件源。
+//   - Hub：单进程、按 key 分组（多房间 / 多频道），首订阅懒建、末位自动回收。
+//   - Bridge：跨进程、按 key 分组。Hub 语义 + mq 做 backplane：Publish 只进 mq，
+//     mq 回调再喂本地 Broadcaster；某 key 首个本地订阅者向 mq 订阅，末位退订。
 package stream
 
 import (

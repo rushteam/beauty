@@ -44,16 +44,19 @@ func (c *directClient) Close() error {
 }
 
 // standardDialOpts 返回所有拨号模式共用的基础 gRPC 选项
-// （OTel 统计、keepalive、空闲超时、默认重试策略）。
+// （OTel 统计、keepalive、默认重试策略）。
+//
+// 空闲超时沿用 gRPC 默认（30 分钟）：进出 idle 会重建 resolver 与全部 SubConn，
+// 过短会让每次空闲后的首个 RPC 都重新拉注册中心并握手。
+// keepalive 不在无活跃流时发 ping（gRPC 默认）：默认配置的服务端（MinTime 5 分钟、
+// 不允许无流 ping）会以 too_many_pings 断开空闲时仍在 ping 的连接。
 func standardDialOpts() []grpc.DialOption {
 	return []grpc.DialOption{
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                time.Second * 20,
-			Timeout:             time.Second * 10,
-			PermitWithoutStream: true,
+			Time:    time.Second * 20,
+			Timeout: time.Second * 10,
 		}),
-		grpc.WithIdleTimeout(time.Second * 10),
 		grpc.WithDefaultServiceConfig(DefaultRetryPolicy().serviceConfig()),
 	}
 }

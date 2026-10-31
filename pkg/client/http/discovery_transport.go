@@ -105,20 +105,29 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 	origPath := req.URL.Path
 	origMethod := req.Method
 
-	// 提取可重放 body:优先 GetBody,否则读取并缓存(支持无 GetBody 的调用方)
+	attempts := t.maxRetries + 1
+
+	// 提取可重放 body:优先 GetBody;不重试时直接透传原 body(不整读进内存);
+	// 需要重试且无 GetBody 时才读取并缓存。contentLength 保持真实长度,避免被迫走 chunked。
 	var getBody func() (io.ReadCloser, error)
-	if req.GetBody != nil {
+	contentLength := req.ContentLength
+	switch {
+	case req.GetBody != nil:
 		getBody = req.GetBody
-	} else if req.Body != nil {
+	case req.Body == nil || req.Body == http.NoBody:
+	case attempts == 1:
+		body := req.Body
+		getBody = func() (io.ReadCloser, error) { return body, nil }
+	default:
 		bodyBytes, rerr := io.ReadAll(req.Body)
 		req.Body.Close()
 		if rerr != nil {
 			return nil, fmt.Errorf("read request body: %w", rerr)
 		}
+		contentLength = int64(len(bodyBytes))
 		getBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(bodyBytes)), nil }
 	}
 
-	attempts := t.maxRetries + 1
 	var lastErr error
 	var lastResp *http.Response
 	var firstReq *http.Request // 同节点重试时沿用
@@ -129,7 +138,7 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 			}
 			return nil, err
 		}
-		curReq, err := t.buildReq(ctx, req, origMethod, origPath, getBody, firstReq)
+		curReq, err := t.buildReq(ctx, req, origMethod, origPath, getBody, contentLength, firstReq)
 		if err != nil {
 			lastErr = err
 			if i == 0 {
@@ -170,7 +179,9 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 			return nil, lastErr
 		}
 		if resp != nil && i < attempts-1 {
+			// 已关闭的响应不能再作为结果返回:若后续尝试只拿到网络错误,应返回 error
 			resp.Body.Close()
+			lastResp = nil
 		}
 		if i < attempts-1 {
 			base := t.retryDelay * (1 << i)
@@ -199,7 +210,7 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 //   - i==0:选实例 + Clone orig,改写 URL,记为 firstReq
 //   - i>0 且 retryOnDiffNode:重新选实例 + Clone orig
 //   - i>0 且 !retryOnDiffNode:沿用 firstReq,只重放 body
-func (t *discoveryTransport) buildReq(ctx context.Context, orig *http.Request, method, path string, getBody func() (io.ReadCloser, error), firstReq *http.Request) (*http.Request, error) {
+func (t *discoveryTransport) buildReq(ctx context.Context, orig *http.Request, method, path string, getBody func() (io.ReadCloser, error), contentLength int64, firstReq *http.Request) (*http.Request, error) {
 	// 同节点重试:沿用 firstReq,重放 body
 	if firstReq != nil && !t.retryOnDiffNode {
 		if getBody != nil {
@@ -228,7 +239,7 @@ func (t *discoveryTransport) buildReq(ctx context.Context, orig *http.Request, m
 			return nil, err
 		}
 		curReq.Body = body
-		curReq.ContentLength = -1
+		curReq.ContentLength = contentLength
 	}
 	return curReq, nil
 }
@@ -265,14 +276,16 @@ func (t *discoveryTransport) selectService(ctx context.Context, services []disco
 			return n, true
 		}, candidates)
 	case HTTPRandom:
-		nodes := toHTTPServiceNodes(candidates)
-		if len(nodes) == 0 {
-			return nil
+		// 先试一个随机节点(常见情况零分配),不可用时再按随机排列兜底,保持均匀;
+		// 只转换选中的节点,不再每次请求转换全量。
+		if s := candidates[rand.IntN(len(candidates))]; t.breaker.Available(&s) {
+			n := toHTTPServiceNode(s)
+			return &n
 		}
-		// 从候选里挑 Available 的
-		for _, idx := range rand.Perm(len(nodes)) {
-			n := nodes[idx]
-			if t.breaker.Available(&n.service) {
+		for _, idx := range rand.Perm(len(candidates)) {
+			s := candidates[idx]
+			if t.breaker.Available(&s) {
+				n := toHTTPServiceNode(s)
 				return &n
 			}
 		}
@@ -292,18 +305,24 @@ func (t *discoveryTransport) selectService(ctx context.Context, services []disco
 }
 
 // pickHTTPWithBreaker 从负载均衡器选节点,跳过熔断/被ban的节点。最多 maxAttempts 次防死循环。
+// 候选集即全量(未被 router/ban 过滤)时无需校验,省去每次请求建 map。
 func pickHTTPWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker, maxAttempts int, next func() (httpServiceNode, bool), candidates []discover.ServiceInfo) *httpServiceNode {
-	candidateSet := make(map[string]bool, len(candidates))
-	for _, s := range candidates {
-		candidateSet[s.Addr] = true
+	var candidateSet map[string]struct{}
+	if len(candidates) < maxAttempts {
+		candidateSet = make(map[string]struct{}, len(candidates))
+		for _, s := range candidates {
+			candidateSet[s.Addr] = struct{}{}
+		}
 	}
 	for range maxAttempts {
 		n, ok := next()
 		if !ok {
 			return nil
 		}
-		if !candidateSet[n.service.Addr] {
-			continue
+		if candidateSet != nil {
+			if _, in := candidateSet[n.service.Addr]; !in {
+				continue
+			}
 		}
 		if breaker.Available(&n.service) {
 			return &n
@@ -312,9 +331,12 @@ func pickHTTPWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker,
 	return nil
 }
 
-// filterHTTPBanned 过滤掉本次请求已禁用的节点。未注入 bannednodes 时原样返回。
+// filterHTTPBanned 过滤掉本次请求已禁用的节点。无禁用节点时原样返回(不分配)。
 func filterHTTPBanned(ctx context.Context, services []discover.ServiceInfo) []discover.ServiceInfo {
-	out := services[:0:0]
+	if bannednodes.Len(ctx) == 0 {
+		return services
+	}
+	out := make([]discover.ServiceInfo, 0, len(services))
 	for _, s := range services {
 		if !bannednodes.IsBanned(ctx, s.Addr) {
 			out = append(out, s)
@@ -368,7 +390,8 @@ func (t *discoveryTransport) filterServices(services []discover.ServiceInfo) []d
 	return filtered
 }
 
-// WatchServices 监听服务变化,自动更新缓存。回调在独立 goroutine 执行。
+// WatchServices 监听服务变化,自动更新缓存。阻塞直到 ctx 取消,
+// 底层 Watch 提前返回(断连等)时自动重新订阅。回调在独立 goroutine 执行。
 func (t *discoveryTransport) WatchServices(ctx context.Context) error {
 	notifyCh := make(chan []discover.ServiceInfo, 1)
 	t.bgWg.Add(1)
@@ -386,7 +409,7 @@ func (t *discoveryTransport) WatchServices(ctx context.Context) error {
 			}
 		}
 	}()
-	return t.discovery.Watch(ctx, t.serviceName, func(services []discover.ServiceInfo) {
+	discover.WatchLoop(ctx, t.discovery, t.serviceName, func(services []discover.ServiceInfo) {
 		select {
 		case notifyCh <- services:
 		default:
@@ -397,6 +420,7 @@ func (t *discoveryTransport) WatchServices(ctx context.Context) error {
 			notifyCh <- services
 		}
 	})
+	return ctx.Err()
 }
 
 func (t *discoveryTransport) applyServiceUpdate(services []discover.ServiceInfo) {

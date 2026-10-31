@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/schema"
+	"github.com/rushteam/beauty/pkg/service/discover"
 )
 
 type Config struct {
@@ -18,6 +19,27 @@ type Config struct {
 	Priority  int      `mapstructure:"priority" schema:"priority"`
 	Version   string   `mapstructure:"version" schema:"version"`
 	Protocol  string   `mapstructure:"protocol" schema:"protocol"`
+
+	// Codec 自定义过滤策略，用于兼容其他框架的服务实例或做 HTTP 服务发现。
+	// 为 nil 时使用 beauty 原生格式（仅接受 kind="grpc"）。
+	Codec discover.Codec `mapstructure:"-" schema:"-"`
+
+	// CodecName 通过名称引用已注册的 Codec（discover.RegisterCodec）。
+	// URL 方式使用：polaris://host/ns?codec=accept_all
+	// 优先级：Codec > CodecName > 默认 beauty。
+	CodecName string `mapstructure:"codec_name" schema:"codec"`
+}
+
+func (c *Config) effectiveCodec() discover.Codec {
+	if c != nil && c.Codec != nil {
+		return c.Codec
+	}
+	if c != nil && c.CodecName != "" {
+		if codec, ok := discover.GetCodec(c.CodecName); ok {
+			return codec
+		}
+	}
+	return discover.NewBeautyCodec()
 }
 
 func NewFromURL(u url.URL) (*Registry, error) {
@@ -68,6 +90,9 @@ func (c *Config) String() string {
 	}
 	if c.Protocol != "grpc" {
 		query.Set("protocol", c.Protocol)
+	}
+	if c.CodecName != "" {
+		query.Set("codec", c.CodecName)
 	}
 
 	u := url.URL{

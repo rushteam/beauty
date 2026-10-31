@@ -61,6 +61,18 @@ func IsBanned(ctx context.Context, addr string) bool {
 	return banned
 }
 
+// Len 返回本次请求已禁用的节点数。未注入列表时返回 0。
+// 选节点热路径可据此在无禁用节点时跳过过滤。
+func Len(ctx context.Context) int {
+	bl := ctxkey.MustGet(ctx, key)
+	if bl == nil {
+		return 0
+	}
+	bl.mu.Lock()
+	defer bl.mu.Unlock()
+	return len(bl.addrs)
+}
+
 // BannedAddrs 返回本次请求已禁用的地址快照(调试/日志用)。未注入列表时返回 nil。
 func BannedAddrs(ctx context.Context) []string {
 	bl := ctxkey.MustGet(ctx, key)

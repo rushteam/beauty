@@ -40,19 +40,24 @@ func (n httpServiceNode) Scheme() string { return n.scheme }
 func toHTTPServiceNodes(services []discover.ServiceInfo) []httpServiceNode {
 	nodes := make([]httpServiceNode, 0, len(services))
 	for _, s := range services {
-		w := 100
-		if v, ok := s.Metadata["weight"]; ok {
-			if p, err := strconv.Atoi(v); err == nil && p > 0 {
-				w = p
-			}
-		}
-		scheme := "http"
-		if v, ok := s.Metadata["scheme"]; ok && v != "" {
-			scheme = v
-		}
-		nodes = append(nodes, httpServiceNode{service: s, weight: w, scheme: scheme})
+		nodes = append(nodes, toHTTPServiceNode(s))
 	}
 	return nodes
+}
+
+// toHTTPServiceNode 从 Metadata 解析权重(默认 100)与 scheme(默认 http)。
+func toHTTPServiceNode(s discover.ServiceInfo) httpServiceNode {
+	w := 100
+	if v, ok := s.Metadata["weight"]; ok {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			w = p
+		}
+	}
+	scheme := "http"
+	if v, ok := s.Metadata["scheme"]; ok && v != "" {
+		scheme = v
+	}
+	return httpServiceNode{service: s, weight: w, scheme: scheme}
 }
 
 // HTTPDiscoveryOption 服务发现配置选项。同时作用于 transport 与 client 包装层

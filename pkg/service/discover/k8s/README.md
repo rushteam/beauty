@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- **自动服务发现**: 自动发现 Kubernetes Service 和 Endpoints
+- **自动服务发现**: 自动发现 Kubernetes Service 和 EndpointSlice
 - **服务变更监听**: 实时监听服务实例的变化
 - **多端口支持**: 支持多端口服务的端口过滤
 - **标签选择器**: 支持通过标签选择器过滤服务
@@ -109,7 +109,10 @@ metadata:
   name: service-discovery-role
 rules:
 - apiGroups: [""]
-  resources: ["services", "endpoints"]
+  resources: ["services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
   verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -139,7 +142,7 @@ config := &k8s.Config{
 
 ## 注意事项
 
-1. **权限要求**: 应用需要有读取 Services 和 Endpoints 资源的权限
+1. **权限要求**: 应用需要有读取 Services 和 EndpointSlices（`discovery.k8s.io` 组）资源的权限
 2. **网络连通性**: 确保应用能够访问发现的服务实例地址
 3. **监听重连**: 当网络中断时，监听会自动重连
 4. **资源清理**: 使用完毕后调用 `registry.Close()` 清理资源

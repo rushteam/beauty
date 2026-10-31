@@ -73,6 +73,7 @@ type ServiceDiscoveryClient struct {
 	// 故障重试
 	maxRetries int
 	retryDelay time.Duration
+	failover   *backoff.Policy // 由 retryDelay 构建,只读,可并发复用
 
 	// 连接排空
 	drainTimeout time.Duration
@@ -85,6 +86,7 @@ type ServiceDiscoveryClient struct {
 	startOnce sync.Once
 	stopOnce  sync.Once
 	stopFn    context.CancelFunc
+	stopping  chan struct{} // Stop 时关闭，用于提前结束排空等待
 	bgWg      sync.WaitGroup
 }
 
@@ -125,12 +127,11 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		clients:     make(map[string]*grpc.ClientConn),
 		dialOpts: []grpc.DialOption{
 			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+			// 空闲超时与无流 ping 均沿用 gRPC 默认,原因见 standardDialOpts。
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:                time.Second * 20,
-				Timeout:             time.Second * 10,
-				PermitWithoutStream: true,
+				Time:    time.Second * 20,
+				Timeout: time.Second * 10,
 			}),
-			grpc.WithIdleTimeout(time.Second * 10),
 		},
 		healthCheck:   true,
 		checkInterval: time.Second * 30,
@@ -139,12 +140,22 @@ func NewServiceDiscoveryClient(discovery discover.Discovery, serviceName string,
 		drainTimeout:  5 * time.Second,
 		breaker:       governancecb.NoopBreaker{},
 		router:        governancerouter.NoopRouter{},
+		stopping:      make(chan struct{}),
 	}
 	c.rr = loadbalance.NewRoundRobin[serviceNode](nil)
 	c.wrr = loadbalance.NewWeightedRoundRobin[serviceNode](nil)
 	for _, opt := range opts {
 		opt(c)
 	}
+	// 失败换节点的退避:base=retryDelay、factor=2、±25% 比例抖动(复用 pkg/backoff,
+	// 与历史 base*2^i ± base/4 行为一致)。
+	c.failover = backoff.New(
+		backoff.WithBase(c.retryDelay),
+		backoff.WithFactor(2),
+		backoff.WithJitter(backoff.JitterProportional),
+		backoff.WithJitterRatio(0.25),
+		backoff.WithMax(0),
+	)
 	return c
 }
 
@@ -319,6 +330,7 @@ func (c *ServiceDiscoveryClient) Stop() {
 		if c.stopFn != nil {
 			c.stopFn()
 		}
+		close(c.stopping)
 		c.bgWg.Wait()
 	})
 }
@@ -365,15 +377,6 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 		ctx = bannednodes.WithBannedNodes(ctx)
 	}
 	attempts := c.maxRetries + 1
-	// 失败换节点的退避:base=retryDelay、factor=2、±25% 比例抖动(复用 pkg/backoff,
-	// 与历史 base*2^i ± base/4 行为一致)。
-	failover := backoff.New(
-		backoff.WithBase(c.retryDelay),
-		backoff.WithFactor(2),
-		backoff.WithJitter(backoff.JitterProportional),
-		backoff.WithJitterRatio(0.25),
-		backoff.WithMax(0),
-	)
 	var lastErr error
 	for i := 0; i < attempts; i++ {
 		if err := ctx.Err(); err != nil {
@@ -405,7 +408,7 @@ func (c *ServiceDiscoveryClient) Call(ctx context.Context, method string, req, r
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(failover.Duration(i)):
+			case <-time.After(c.failover.Duration(i)):
 			}
 		}
 	}
@@ -502,6 +505,10 @@ func (c *ServiceDiscoveryClient) selectService(ctx context.Context, services []d
 		c.mu.RUnlock()
 		return result
 	case Random:
+		// 先试一个随机节点(常见情况零分配),不可用时再按随机排列兜底,保持均匀
+		if s := candidates[rand.IntN(len(candidates))]; c.breaker.Available(&s) {
+			return &s
+		}
 		for _, idx := range rand.Perm(len(candidates)) {
 			s := candidates[idx]
 			if c.breaker.Available(&s) {
@@ -528,11 +535,15 @@ func (c *ServiceDiscoveryClient) selectService(ctx context.Context, services []d
 }
 
 // pickWithBreaker 从负载均衡器选节点,跳过熔断/被ban的节点。
-// 最多尝试 maxAttempts 次(=候选数),防死循环。候选集用于校验选出的节点是否仍可用。
+// 最多尝试 maxAttempts 次(=全量节点数),防死循环。候选集用于校验选出的节点是否仍可用;
+// 候选集即全量(未被 router/ban 过滤)时无需校验,省去每次请求建 map。
 func pickWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker, maxAttempts int, next func() (discover.ServiceInfo, bool), candidates []discover.ServiceInfo) *discover.ServiceInfo {
-	candidateSet := make(map[string]bool, len(candidates))
-	for _, s := range candidates {
-		candidateSet[s.Addr] = true
+	var candidateSet map[string]struct{}
+	if len(candidates) < maxAttempts {
+		candidateSet = make(map[string]struct{}, len(candidates))
+		for _, s := range candidates {
+			candidateSet[s.Addr] = struct{}{}
+		}
 	}
 	for range maxAttempts {
 		s, ok := next()
@@ -540,8 +551,10 @@ func pickWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker, max
 			return nil
 		}
 		// 选出的节点必须在候选集内(未被 ban)且熔断器放行
-		if !candidateSet[s.Addr] {
-			continue
+		if candidateSet != nil {
+			if _, in := candidateSet[s.Addr]; !in {
+				continue
+			}
 		}
 		if breaker.Available(&s) {
 			return &s
@@ -550,9 +563,12 @@ func pickWithBreaker(_ context.Context, breaker governancecb.CircuitBreaker, max
 	return nil
 }
 
-// filterBanned 过滤掉本次请求(ctx)已禁用的节点。未注入 bannednodes 时原样返回。
+// filterBanned 过滤掉本次请求(ctx)已禁用的节点。无禁用节点时原样返回(不分配)。
 func filterBanned(ctx context.Context, services []discover.ServiceInfo) []discover.ServiceInfo {
-	out := services[:0:0] // 新切片,避免改原切片
+	if bannednodes.Len(ctx) == 0 {
+		return services
+	}
+	out := make([]discover.ServiceInfo, 0, len(services)) // 新切片,避免改原切片
 	for _, s := range services {
 		if !bannednodes.IsBanned(ctx, s.Addr) {
 			out = append(out, s)
@@ -658,7 +674,8 @@ func (c *ServiceDiscoveryClient) filterServices(services []discover.ServiceInfo)
 	return c.labelFilter.Filter(services)
 }
 
-// WatchServices 监听服务变化，自动更新缓存并关闭失效连接。
+// WatchServices 监听服务变化，自动更新缓存并关闭失效连接。阻塞直到 ctx 取消，
+// 底层 Watch 提前返回（断连等）时自动重新订阅。
 // 回调处理在独立 goroutine 中执行，避免阻塞底层 watcher 事件循环。
 func (c *ServiceDiscoveryClient) WatchServices(ctx context.Context) error {
 	notifyCh := make(chan []discover.ServiceInfo, 1)
@@ -679,7 +696,7 @@ func (c *ServiceDiscoveryClient) WatchServices(ctx context.Context) error {
 		}
 	}()
 
-	return c.discovery.Watch(ctx, c.serviceName, func(services []discover.ServiceInfo) {
+	discover.WatchLoop(ctx, c.discovery, c.serviceName, func(services []discover.ServiceInfo) {
 		select {
 		case notifyCh <- services:
 		default:
@@ -690,6 +707,7 @@ func (c *ServiceDiscoveryClient) WatchServices(ctx context.Context) error {
 			notifyCh <- services
 		}
 	})
+	return ctx.Err()
 }
 
 func (c *ServiceDiscoveryClient) applyServiceUpdate(services []discover.ServiceInfo) {
@@ -725,7 +743,13 @@ func (c *ServiceDiscoveryClient) applyServiceUpdate(services []discover.ServiceI
 			c.bgWg.Add(1)
 			go func() {
 				defer c.bgWg.Done()
-				time.Sleep(c.drainTimeout)
+				t := time.NewTimer(c.drainTimeout)
+				defer t.Stop()
+				// 客户端关闭时不再等排空，直接关连接，避免 Stop/Close 被拖住 drainTimeout
+				select {
+				case <-t.C:
+				case <-c.stopping:
+				}
 				conn.Close()
 			}()
 		}

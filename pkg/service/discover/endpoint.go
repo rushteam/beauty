@@ -3,6 +3,7 @@ package discover
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 )
 
 type Service interface {
@@ -26,6 +27,13 @@ func (s *ServiceInfo) Unmarshal(b []byte) error {
 	decoder := json.NewDecoder(buf)
 	decoder.UseNumber()
 	return decoder.Decode(s)
+}
+
+// Equal 报告两个实例的全部字段（含 Metadata）是否相同，
+// 可配合 slices.EqualFunc(a, b, ServiceInfo.Equal) 判断推送是否真的有变化。
+func (s ServiceInfo) Equal(o ServiceInfo) bool {
+	return s.ID == o.ID && s.Kind == o.Kind && s.Name == o.Name && s.Addr == o.Addr &&
+		maps.Equal(s.Metadata, o.Metadata)
 }
 
 func (s *ServiceInfo) Marshal() (string, error) {

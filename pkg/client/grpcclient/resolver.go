@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"maps"
-	"time"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
 	grpcattr "google.golang.org/grpc/attributes"
@@ -45,30 +44,7 @@ func (r *Resolver) Start() {
 			slog.Error("discovery updateState failed", slog.Any("err", err))
 		}
 	}
-	backoff := 200 * time.Millisecond
-	for {
-		if r.ctx.Err() != nil {
-			return
-		}
-		if err := r.discovery.Watch(r.ctx, r.serviceName, updateState); err != nil {
-			slog.Error("discovery watch failed", slog.Any("err", err))
-		}
-		// Watch 返回 nil 表示 ctx 已取消（正常退出）或 backend 断连
-		if r.ctx.Err() != nil {
-			return
-		}
-		slog.Warn("resolver watch exited unexpectedly, reconnecting",
-			slog.String("service", r.serviceName),
-			slog.Duration("backoff", backoff))
-		select {
-		case <-r.ctx.Done():
-			return
-		case <-time.After(backoff):
-			if backoff < 8*time.Second {
-				backoff *= 2
-			}
-		}
-	}
+	discover.WatchLoop(r.ctx, r.discovery, r.serviceName, updateState)
 }
 
 // metadataAttrKey 是 BalancerAttributes 中存储服务发现 metadata 的 key 类型。

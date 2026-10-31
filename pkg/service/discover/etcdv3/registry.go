@@ -115,10 +115,10 @@ func (r *Registry) registerWithRetry(ctx context.Context, key, val string) (clie
 		cancel()
 		if err != nil {
 			logger.Error("etcdRegistry.Register Grant error", slog.Any("err", err))
-			time.Sleep(backoff)
-			if backoff < time.Second*3 {
-				backoff *= 2
+			if !sleepCtx(ctx, backoff) {
+				return 0, ctx.Err()
 			}
+			backoff = min(backoff*2, 3*time.Second)
 			continue
 		}
 		leaseid = lease.ID
@@ -133,13 +133,25 @@ func (r *Registry) registerWithRetry(ctx context.Context, key, val string) (clie
 			if _, revokeErr := r.client.Revoke(context.Background(), leaseid); revokeErr != nil {
 				logger.Error("etcdRegistry.Register Revoke error", slog.Any("err", revokeErr))
 			}
-			time.Sleep(backoff)
-			if backoff < time.Second*3 {
-				backoff *= 2
+			if !sleepCtx(ctx, backoff) {
+				return 0, ctx.Err()
 			}
+			backoff = min(backoff*2, 3*time.Second)
 			continue
 		}
 		return leaseid, nil
+	}
+}
+
+// sleepCtx 等待 d 或 ctx 取消，返回 false 表示 ctx 已取消。
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
@@ -208,26 +220,66 @@ func buildSortedServices(endpoints map[string]discover.ServiceInfo) []discover.S
 	return services
 }
 
-func (r *Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, path string, key string, val []byte) []discover.ServiceInfo {
-	codec := r.effectiveCodec()
-	v, err := codec.UnmarshalValue(val, path)
-	if err != nil {
-		logger.Error("etcdRegistry.applyPutEvent unmarshal error", slog.String("key", key), slog.Any("err", err))
-		return buildSortedServices(endpoints)
-	}
-	v.ID = getInstanceFromKey(key, path)
-	if codec.Accept(v) {
-		endpoints[v.ID] = v
-	} else {
-		delete(endpoints, v.ID)
-	}
+func (r *Registry) applyPutEvent(endpoints map[string]discover.ServiceInfo, name, path string, key string, val []byte) []discover.ServiceInfo {
+	r.putEndpoint(endpoints, name, path, key, val)
 	return buildSortedServices(endpoints)
 }
 
 func (r *Registry) applyDeleteEvent(endpoints map[string]discover.ServiceInfo, path string, key string) []discover.ServiceInfo {
-	id := getInstanceFromKey(key, path)
-	delete(endpoints, id)
+	deleteEndpoint(endpoints, path, key)
 	return buildSortedServices(endpoints)
+}
+
+// putEndpoint 原地应用一次 Put，返回 endpoints 是否发生变化。
+// name 是服务名（传给 codec），path 是 watch 前缀（用于从 key 中截出实例 ID）。
+func (r *Registry) putEndpoint(endpoints map[string]discover.ServiceInfo, name, path string, key string, val []byte) bool {
+	codec := r.effectiveCodec()
+	v, err := codec.UnmarshalValue(val, name)
+	if err != nil {
+		logger.Error("etcdRegistry.applyPutEvent unmarshal error", slog.String("key", key), slog.Any("err", err))
+		return false
+	}
+	v.ID = getInstanceFromKey(key, path)
+	if !codec.Accept(v) {
+		_, existed := endpoints[v.ID]
+		delete(endpoints, v.ID)
+		return existed
+	}
+	if old, ok := endpoints[v.ID]; ok && old.Equal(v) {
+		return false
+	}
+	endpoints[v.ID] = v
+	return true
+}
+
+// deleteEndpoint 原地应用一次 Delete，返回 endpoints 是否发生变化。
+func deleteEndpoint(endpoints map[string]discover.ServiceInfo, path string, key string) bool {
+	id := getInstanceFromKey(key, path)
+	if _, ok := endpoints[id]; !ok {
+		return false
+	}
+	delete(endpoints, id)
+	return true
+}
+
+// applyEvents 原地应用一个 WatchResponse 内的全部事件，返回 endpoints 是否发生变化。
+// 同一响应内的多个事件（如同一事务里的批量上下线）只需合并通知一次。
+func (r *Registry) applyEvents(endpoints map[string]discover.ServiceInfo, name, path string, events []*clientv3.Event) bool {
+	changed := false
+	for _, ev := range events {
+		key := string(ev.Kv.Key)
+		switch ev.Type {
+		case clientv3.EventTypePut:
+			if r.putEndpoint(endpoints, name, path, key, ev.Kv.Value) {
+				changed = true
+			}
+		case clientv3.EventTypeDelete:
+			if deleteEndpoint(endpoints, path, key) {
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 func (r *Registry) Find(ctx context.Context, name string) ([]discover.ServiceInfo, error) {
@@ -291,7 +343,7 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 		if ctx.Err() != nil {
 			return nil
 		}
-		endpoints, rev, err := r.watchSnapshot(ctx, path, notify)
+		endpoints, rev, err := r.watchSnapshot(ctx, serviceName, path, notify)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -301,15 +353,13 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 			case <-ctx.Done():
 				return nil
 			case <-time.After(backoff):
-				if backoff < 8*time.Second {
-					backoff *= 2
-				}
 			}
+			backoff = min(backoff*2, 8*time.Second)
 			continue
 		}
 		backoff = 200 * time.Millisecond // 快照成功，重置退避
 
-		disconnected := r.watchLoop(ctx, path, rev, endpoints, notify)
+		disconnected := r.watchLoop(ctx, serviceName, path, rev, endpoints, notify)
 		if !disconnected {
 			// ctx 已取消，正常退出
 			return nil
@@ -320,15 +370,13 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 		case <-ctx.Done():
 			return nil
 		case <-time.After(backoff):
-			if backoff < 8*time.Second {
-				backoff *= 2
-			}
 		}
+		backoff = min(backoff*2, 8*time.Second)
 	}
 }
 
 // watchSnapshot 拉取初始快照并通知，返回当前 endpoints 和 revision。
-func (r *Registry) watchSnapshot(ctx context.Context, path string, update discover.Notify) (map[string]discover.ServiceInfo, int64, error) {
+func (r *Registry) watchSnapshot(ctx context.Context, name, path string, update discover.Notify) (map[string]discover.ServiceInfo, int64, error) {
 	codec := r.effectiveCodec()
 	resp, err := r.client.Get(ctx, path, clientv3.WithPrefix())
 	if err != nil {
@@ -336,7 +384,7 @@ func (r *Registry) watchSnapshot(ctx context.Context, path string, update discov
 	}
 	endpoints := make(map[string]discover.ServiceInfo)
 	for _, kv := range resp.Kvs {
-		v, err := codec.UnmarshalValue(kv.Value, path)
+		v, err := codec.UnmarshalValue(kv.Value, name)
 		if err != nil {
 			logger.Error("etcdRegistry.Watch unmarshal error", slog.String("key", string(kv.Key)), slog.Any("err", err))
 			continue
@@ -352,7 +400,7 @@ func (r *Registry) watchSnapshot(ctx context.Context, path string, update discov
 }
 
 // watchLoop 持续监听事件，直到 ctx 取消（返回 false）或 watcher 断连（返回 true）。
-func (r *Registry) watchLoop(ctx context.Context, path string, rev int64, endpoints map[string]discover.ServiceInfo, update discover.Notify) (disconnected bool) {
+func (r *Registry) watchLoop(ctx context.Context, name, path string, rev int64, endpoints map[string]discover.ServiceInfo, update discover.Notify) (disconnected bool) {
 	w := clientv3.NewWatcher(r.client)
 	defer w.Close()
 	ch := w.Watch(ctx, path,
@@ -375,14 +423,8 @@ func (r *Registry) watchLoop(ctx context.Context, path string, rev int64, endpoi
 				logger.Warn("etcdRegistry.Watch event canceled, will reconnect", slog.Any("err", event.Err()))
 				return true
 			}
-			for _, ev := range event.Events {
-				key := string(ev.Kv.Key)
-				switch ev.Type {
-				case clientv3.EventTypePut:
-					update(r.applyPutEvent(endpoints, path, key, ev.Kv.Value))
-				case clientv3.EventTypeDelete:
-					update(r.applyDeleteEvent(endpoints, path, key))
-				}
+			if r.applyEvents(endpoints, name, path, event.Events) {
+				update(buildSortedServices(endpoints))
 			}
 		}
 	}

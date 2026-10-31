@@ -8,7 +8,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
-	"sync"
+	"strings"
 
 	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
 	"github.com/nacos-group/nacos-sdk-go/v2/model"
@@ -16,37 +16,39 @@ import (
 
 	"github.com/rushteam/beauty/pkg/infra/nacos"
 	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/service/discover/internal/clientpool"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/addr"
 )
 
 var _ discover.RegistryDiscovery = (*Registry)(nil)
 
-// var instance = make(map[string]*Registry)
-// var mu sync.Mutex
+var (
+	newNamingClient = nacos.NewNamingClient
 
+	// discoveryClients 按连接配置共享 Find/Watch 使用的 naming client，
+	// 最后一个使用方释放并闲置超时后 CloseClient。
+	discoveryClients = clientpool.New(clientpool.DefaultIdleTimeout, func(c naming_client.INamingClient) {
+		c.CloseClient()
+	})
+)
+
+// NewRegistry 创建 Registry。Registry 本身不持有连接：发现侧客户端在 Find/Watch
+// 期间从共享池借用，注册侧客户端由 Register 创建、在注销时关闭，因此无需 Close。
 func NewRegistry(c *Config) *Registry {
 	return &Registry{
-		c:       c,
-		codec:   c.effectiveCodec(),
-		clients: make(map[string]naming_client.INamingClient),
+		c:     c,
+		codec: c.effectiveCodec(),
 	}
 }
 
 type Registry struct {
-	c       *Config
-	codec   discover.Codec
-	mu      sync.Mutex
-	clients map[string]naming_client.INamingClient
+	c     *Config
+	codec discover.Codec
 }
 
-func (r *Registry) client(key string) (naming_client.INamingClient, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if c, ok := r.clients[key]; ok {
-		return c, nil
-	}
-	client, err := nacos.NewNamingClient(&nacos.Config{
+func (r *Registry) newClient() (naming_client.INamingClient, error) {
+	client, err := newNamingClient(&nacos.Config{
 		Addr:      r.c.Addr,
 		Namespace: r.c.Namespace,
 		Weight:    r.c.Weight,
@@ -57,17 +59,25 @@ func (r *Registry) client(key string) (naming_client.INamingClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nacos naming client error: %w", err)
 	}
-	r.clients[key] = client
 	return client, nil
 }
 
+// acquireDiscoveryClient 借用共享的发现侧 naming client，用完必须调用 release。
+func (r *Registry) acquireDiscoveryClient() (naming_client.INamingClient, func(), error) {
+	key := strings.Join([]string{
+		strings.Join(r.c.Addr, ","), r.c.Namespace, r.c.Username, r.c.Password, r.c.AppName,
+	}, "\x00")
+	return discoveryClients.Acquire(key, r.newClient)
+}
+
+// Register 为每个实例使用独立的 naming client，返回的注销函数会在注销后关闭该 client。
 func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
 	host, port := addr.ParseHostAndPort(info.Addr())
 	portUint, err := strconv.ParseUint(port, 10, 64)
 	if err != nil {
 		return func() {}, fmt.Errorf("nacos register: invalid port %q for service %s: %w", port, info.Name(), err)
 	}
-	registerClient, err := r.client(info.ID())
+	registerClient, err := r.newClient()
 	if err != nil {
 		return func() {}, err
 	}
@@ -97,6 +107,7 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		GroupName:   r.c.Group,
 		Ephemeral:   true,
 	}); err != nil {
+		registerClient.CloseClient()
 		return func() {}, fmt.Errorf("nacos RegisterInstance failed for service %s: %w", info.Name(), err)
 	}
 	logger.Info("nacos RegisterInstance success",
@@ -106,6 +117,7 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		slog.Any("svc.meta", meta),
 	)
 	return func() {
+		defer registerClient.CloseClient()
 		_, err := registerClient.DeregisterInstance(vo.DeregisterInstanceParam{
 			Ip:          host,
 			Port:        portUint,
@@ -134,10 +146,11 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 }
 
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
-	findClient, err := r.client("find")
+	findClient, release, err := r.acquireDiscoveryClient()
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	instances, err := findClient.SelectInstances(vo.SelectInstancesParam{
 		ServiceName: serviceName,
 		Clusters:    []string{r.c.Cluster},
@@ -151,10 +164,11 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 }
 
 func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
-	registryClient, err := r.client("watch")
+	registryClient, release, err := r.acquireDiscoveryClient()
 	if err != nil {
 		return err
 	}
+	defer release()
 	// 拉取初始列表；失败只记日志，不阻止 Watch 继续
 	if services, err := registryClient.SelectInstances(vo.SelectInstancesParam{
 		ServiceName: serviceName,
@@ -173,8 +187,12 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 			logger.Warn("nacos service update error", slog.Any("err", err))
 			return
 		}
-		logger.Info("nacos service update", slog.Any("services", services))
-		update(r.filterInstances(services))
+		filtered := r.filterInstances(services)
+		logger.Info("nacos service update",
+			slog.String("service", serviceName),
+			slog.Int("total", len(services)),
+			slog.Int("available", len(filtered)))
+		update(filtered)
 	}
 
 	// Nacos 是事件/回调模型：Subscribe 注册回调后立即返回。
@@ -204,15 +222,15 @@ func (r *Registry) filterInstances(services []model.Instance) []discover.Service
 	var ss []discover.ServiceInfo
 	for _, v := range services {
 		if !v.Healthy {
-			logger.Warn("service not healthy", slog.Any("v", v))
+			logger.Debug("nacos instance skipped: not healthy", slog.String("id", v.InstanceId))
 			continue
 		}
 		if !v.Enable {
-			logger.Warn("service not enable", slog.Any("v", v))
+			logger.Debug("nacos instance skipped: not enabled", slog.String("id", v.InstanceId))
 			continue
 		}
 		if v.Weight <= 0 {
-			logger.Warn("service weight<=0", slog.Any("v", v))
+			logger.Debug("nacos instance skipped: weight<=0", slog.String("id", v.InstanceId))
 			continue
 		}
 		if v.Metadata == nil {
@@ -225,7 +243,7 @@ func (r *Registry) filterInstances(services []model.Instance) []discover.Service
 			Metadata: v.Metadata,
 		}
 		if !r.codec.Accept(info) {
-			logger.Warn("service not accepted by codec", slog.Any("v", v))
+			logger.Debug("nacos instance skipped: not accepted by codec", slog.String("id", v.InstanceId))
 			continue
 		}
 		ss = append(ss, info)

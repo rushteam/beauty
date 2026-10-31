@@ -24,7 +24,10 @@ func echo() http.Handler {
 }
 
 func post(srv *httptest.Server, body string) (int, string) {
-	resp, _ := http.Post(srv.URL, "application/json", strings.NewReader(body))
+	resp, err := http.Post(srv.URL, "application/json", strings.NewReader(body))
+	if err != nil {
+		return 0, err.Error()
+	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)

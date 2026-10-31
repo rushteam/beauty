@@ -1,9 +1,13 @@
 package k8s
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -13,9 +17,13 @@ import (
 	"github.com/rushteam/beauty/pkg/service/logger"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 var instance = make(map[string]*Registry)
@@ -25,10 +33,13 @@ var _ discover.RegistryDiscovery = (*Registry)(nil)
 
 // Registry k8s 服务注册和发现实现
 type Registry struct {
-	config    *Config
-	client    kubernetes.Interface
-	watchers  map[string]context.CancelFunc
-	watcherMu sync.RWMutex
+	config *Config
+	client kubernetes.Interface
+	// watchers 按每次 Watch 调用分配的 id 记录 cancel，仅供 Close 统一取消。
+	// Registry 按配置单例复用，同一服务可能被多个调用方并发 Watch，不能按服务名去重。
+	watchers   map[uint64]context.CancelFunc
+	watcherSeq uint64
+	watcherMu  sync.RWMutex
 }
 
 // NewRegistry 创建新的 k8s registry
@@ -52,7 +63,7 @@ func NewRegistry(c *Config) *Registry {
 	r := &Registry{
 		config:   c,
 		client:   client,
-		watchers: make(map[string]context.CancelFunc),
+		watchers: make(map[uint64]context.CancelFunc),
 	}
 
 	instance[key] = r
@@ -81,7 +92,7 @@ func normalizeServiceName(name string) string {
 	return name
 }
 
-// Find 查找服务实例
+// Find 查找服务实例。固定两次 List：Service 一次、EndpointSlice 一次（按 Service 分组）。
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
 	serviceName = normalizeServiceName(serviceName)
 
@@ -89,199 +100,210 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 	if err != nil {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
-
-	var serviceInfos []discover.ServiceInfo
-
-	for _, svc := range services.Items {
-		slices, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "kubernetes.io/service-name=" + svc.Name,
-		})
-		if err != nil {
-			logger.Error("failed to get endpoint slices",
-				slog.String("service", svc.Name),
-				slog.Any("err", err))
-			continue
-		}
-
-		for i := range slices.Items {
-			infos := r.endpointSliceToServiceInfos(&svc, &slices.Items[i])
-			serviceInfos = append(serviceInfos, infos...)
-		}
+	if len(services.Items) == 0 {
+		return nil, nil
+	}
+	sliceList, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: endpointSliceSelector(serviceName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list endpoint slices: %w", err)
 	}
 
-	return serviceInfos, nil
+	svcs := make([]*corev1.Service, len(services.Items))
+	for i := range services.Items {
+		svcs[i] = &services.Items[i]
+	}
+	epss := make([]*discoveryv1.EndpointSlice, len(sliceList.Items))
+	for i := range sliceList.Items {
+		epss[i] = &sliceList.Items[i]
+	}
+	return r.buildServiceInfos(svcs, epss), nil
 }
 
 // Watch 监听服务变化。阻塞直到 ctx 取消或 Close() 被调用，
 // 与 etcd/consul 等后端保持相同的阻塞契约。
+//
+// 基于 informer：断线/超时后从上次 ResourceVersion 续订（410 时自动重新 List），
+// 不会像裸 Watch 那样每次重连都重放全部对象；事件只用于触发刷新，
+// 刷新从本地缓存计算、不访问 API server，多个事件合并为一次，结果未变化时不通知。
 func (r *Registry) Watch(ctx context.Context, serviceName string, notify discover.Notify) error {
 	serviceName = normalizeServiceName(serviceName)
 
-	// 初始拉取当前端点，确保 resolver 启动后立即有可用地址
-	if services, err := r.Find(ctx, serviceName); err != nil {
-		logger.Warn("k8s watch: initial find failed",
-			slog.String("service", serviceName), slog.Any("err", err))
-	} else {
-		notify(services)
-	}
-
 	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	r.watcherMu.Lock()
-	if oldCancel, exists := r.watchers[serviceName]; exists {
-		oldCancel()
-	}
-	r.watchers[serviceName] = cancel
+	r.watcherSeq++
+	id := r.watcherSeq
+	r.watchers[id] = cancel
 	r.watcherMu.Unlock()
+	defer func() {
+		r.watcherMu.Lock()
+		delete(r.watchers, id)
+		r.watcherMu.Unlock()
+	}()
+
+	kick := make(chan struct{}, 1)
+	trigger := func() {
+		select {
+		case kick <- struct{}{}:
+		default:
+		}
+	}
+	handler := cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(any) { trigger() },
+		UpdateFunc: func(any, any) { trigger() },
+		DeleteFunc: func(any) { trigger() },
+	}
+
+	svcInf := cache.NewSharedIndexInformerWithOptions(
+		r.listWatch(serviceName, r.listServices, r.watchServices), &corev1.Service{}, cache.SharedIndexInformerOptions{})
+	sliceInf := cache.NewSharedIndexInformerWithOptions(
+		r.listWatch(serviceName, r.listEndpointSlices, r.watchEndpointSlices), &discoveryv1.EndpointSlice{}, cache.SharedIndexInformerOptions{})
+	for _, inf := range []cache.SharedIndexInformer{svcInf, sliceInf} {
+		_ = inf.SetWatchErrorHandlerWithContext(watchErrorHandler(serviceName))
+		_, _ = inf.AddEventHandler(handler)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		r.watchServices(watchCtx, serviceName, notify)
+		svcInf.RunWithContext(watchCtx)
 	}()
 	go func() {
 		defer wg.Done()
-		r.watchEndpointSlices(watchCtx, serviceName, notify)
+		sliceInf.RunWithContext(watchCtx)
+	}()
+	defer func() {
+		cancel()
+		wg.Wait()
 	}()
 
-	<-watchCtx.Done()
-	wg.Wait()
-
-	r.watcherMu.Lock()
-	delete(r.watchers, serviceName)
-	r.watcherMu.Unlock()
-
-	return nil
-}
-
-// watchServices 监听 Service 资源变化。
-// watcher channel 因 k8s 周期性超时（默认 30s）或异常断开时，在外层循环重建，
-// 而不是递归自调——递归会让 goroutine 栈帧随重连次数无限累积。
-func (r *Registry) watchServices(ctx context.Context, serviceName string, notify discover.Notify) {
-	timeout := int64(r.config.WatchTimeout)
-	if timeout <= 0 {
-		timeout = 30
+	// cache.WaitForCacheSync 固定 100ms 轮询，会拖慢 resolver 首次出地址。
+	if err := wait.PollUntilContextCancel(watchCtx, 10*time.Millisecond, true, func(context.Context) (bool, error) {
+		return svcInf.HasSynced() && sliceInf.HasSynced(), nil
+	}); err != nil {
+		return nil
 	}
 
-	for {
-		if ctx.Err() != nil {
-			return
+	var last []discover.ServiceInfo
+	for first := true; ; first = false {
+		cur := r.buildServiceInfos(storeList[*corev1.Service](svcInf.GetStore()),
+			storeList[*discoveryv1.EndpointSlice](sliceInf.GetStore()))
+		if first || !slices.EqualFunc(last, cur, discover.ServiceInfo.Equal) {
+			notify(cur)
+			last = cur
 		}
-		opts := r.serviceListOptions(serviceName)
-		opts.TimeoutSeconds = &timeout
-		watcher, err := r.client.CoreV1().Services(r.config.Namespace).Watch(ctx, opts)
-		if err != nil {
-			logger.Error("failed to watch services", slog.Any("err", err))
-			if !sleepOrDone(ctx, time.Second*5) {
-				return
-			}
-			continue
-		}
-
-		r.consumeEvents(ctx, watcher, func(ctx context.Context, event watch.Event, notify discover.Notify) {
-			r.handleServiceEvent(ctx, event, serviceName, notify)
-		}, notify)
-
-		if ctx.Err() != nil {
-			return
-		}
-		logger.Info("service watch channel closed, restarting...")
-		if !sleepOrDone(ctx, time.Second*5) {
-			return
-		}
-	}
-}
-
-// watchEndpointSlices 监听 EndpointSlice 资源变化（重连策略同 watchServices）。
-func (r *Registry) watchEndpointSlices(ctx context.Context, serviceName string, notify discover.Notify) {
-	timeout := int64(r.config.WatchTimeout)
-	if timeout <= 0 {
-		timeout = 30
-	}
-
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		watcher, err := r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).Watch(ctx, metav1.ListOptions{
-			LabelSelector:  r.endpointSliceSelector(serviceName),
-			TimeoutSeconds: &timeout,
-		})
-		if err != nil {
-			logger.Error("failed to watch endpoint slices", slog.Any("err", err))
-			if !sleepOrDone(ctx, time.Second*5) {
-				return
-			}
-			continue
-		}
-
-		r.consumeEvents(ctx, watcher, func(ctx context.Context, event watch.Event, notify discover.Notify) {
-			r.handleEndpointSlicesEvent(ctx, event, serviceName, notify)
-		}, notify)
-
-		if ctx.Err() != nil {
-			return
-		}
-		logger.Info("endpoint slices watch channel closed, restarting...")
-		if !sleepOrDone(ctx, time.Second*5) {
-			return
-		}
-	}
-}
-
-// consumeEvents 消费一个 watcher 的事件，channel 关闭或 ctx 取消时返回，
-// 并确保 watcher 被释放。
-func (r *Registry) consumeEvents(ctx context.Context, watcher watch.Interface,
-	handle func(context.Context, watch.Event, discover.Notify), notify discover.Notify) {
-	defer watcher.Stop()
-	for {
 		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				return
+		case <-watchCtx.Done():
+			return nil
+		case <-kick:
+		}
+	}
+}
+
+type listFunc func(ctx context.Context, serviceName string, opts metav1.ListOptions) (runtime.Object, error)
+type watchFunc func(ctx context.Context, serviceName string, opts metav1.ListOptions) (watch.Interface, error)
+
+// listWatch 包装 informer 用的 ListerWatcher；配置了 WatchTimeout 时覆盖 reflector 默认的
+// 5~10 分钟超时（续订基于 ResourceVersion，超时重连只是一次轻量 Watch）。
+func (r *Registry) listWatch(serviceName string, list listFunc, w watchFunc) *cache.ListWatch {
+	return &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+			return list(ctx, serviceName, opts)
+		},
+		WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			if r.config.WatchTimeout > 0 {
+				timeout := int64(r.config.WatchTimeout)
+				opts.TimeoutSeconds = &timeout
 			}
-			handle(ctx, event, notify)
-		}
+			return w(ctx, serviceName, opts)
+		},
 	}
 }
 
-// sleepOrDone 等待 d 或 ctx 取消，返回 true 表示正常等待结束、可继续。
-func sleepOrDone(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
+func (r *Registry) listServices(ctx context.Context, serviceName string, opts metav1.ListOptions) (runtime.Object, error) {
+	sel := r.serviceListOptions(serviceName)
+	opts.LabelSelector, opts.FieldSelector = sel.LabelSelector, sel.FieldSelector
+	return r.client.CoreV1().Services(r.config.Namespace).List(ctx, opts)
 }
 
-// handleServiceEvent 处理 Service 事件
-func (r *Registry) handleServiceEvent(ctx context.Context, event watch.Event, serviceName string, notify discover.Notify) {
-	switch event.Type {
-	case watch.Added, watch.Modified, watch.Deleted:
-		services, err := r.Find(ctx, serviceName)
-		if err != nil {
-			logger.Error("failed to find services after event", slog.Any("err", err))
+func (r *Registry) watchServices(ctx context.Context, serviceName string, opts metav1.ListOptions) (watch.Interface, error) {
+	sel := r.serviceListOptions(serviceName)
+	opts.LabelSelector, opts.FieldSelector = sel.LabelSelector, sel.FieldSelector
+	return r.client.CoreV1().Services(r.config.Namespace).Watch(ctx, opts)
+}
+
+func (r *Registry) listEndpointSlices(ctx context.Context, serviceName string, opts metav1.ListOptions) (runtime.Object, error) {
+	opts.LabelSelector = endpointSliceSelector(serviceName)
+	return r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).List(ctx, opts)
+}
+
+func (r *Registry) watchEndpointSlices(ctx context.Context, serviceName string, opts metav1.ListOptions) (watch.Interface, error) {
+	opts.LabelSelector = endpointSliceSelector(serviceName)
+	return r.client.DiscoveryV1().EndpointSlices(r.config.Namespace).Watch(ctx, opts)
+}
+
+// watchErrorHandler 把 reflector 的 List/Watch 错误转到 slog。
+// 正常的超时关闭（EOF）与 410 过期由 reflector 自行续订/重新 List，只记 Debug。
+func watchErrorHandler(serviceName string) cache.WatchErrorHandlerWithContext {
+	return func(ctx context.Context, _ *cache.Reflector, err error) {
+		if ctx.Err() != nil {
 			return
 		}
-		notify(services)
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+			apierrors.IsResourceExpired(err) || apierrors.IsGone(err) {
+			logger.Debug("k8s watch restarting", slog.String("service", serviceName), slog.Any("err", err))
+			return
+		}
+		logger.Warn("k8s watch error", slog.String("service", serviceName), slog.Any("err", err))
 	}
 }
 
-// handleEndpointSlicesEvent 处理 EndpointSlice 事件
-func (r *Registry) handleEndpointSlicesEvent(ctx context.Context, event watch.Event, serviceName string, notify discover.Notify) {
-	switch event.Type {
-	case watch.Added, watch.Modified, watch.Deleted:
-		services, err := r.Find(ctx, serviceName)
-		if err != nil {
-			logger.Error("failed to find services after endpoint slices event", slog.Any("err", err))
-			return
+func storeList[T any](s cache.Store) []T {
+	objs := s.List()
+	out := make([]T, 0, len(objs))
+	for _, o := range objs {
+		if v, ok := o.(T); ok {
+			out = append(out, v)
 		}
-		notify(services)
 	}
+	return out
+}
+
+// buildServiceInfos 按 namespace/name 把 EndpointSlice 归到所属 Service 下展开为实例，
+// Service、EndpointSlice 均按名称排序，保证输出稳定、可比较。
+// 不属于 svcs 的 EndpointSlice 被忽略，Service 的 label/type 过滤因此同样作用于端点。
+func (r *Registry) buildServiceInfos(svcs []*corev1.Service, epss []*discoveryv1.EndpointSlice) []discover.ServiceInfo {
+	if len(svcs) == 0 {
+		return nil
+	}
+	bySvc := make(map[string][]*discoveryv1.EndpointSlice, len(svcs))
+	for _, eps := range epss {
+		name, ok := eps.Labels[discoveryv1.LabelServiceName]
+		if !ok {
+			continue
+		}
+		key := eps.Namespace + "/" + name
+		bySvc[key] = append(bySvc[key], eps)
+	}
+	slices.SortFunc(svcs, func(a, b *corev1.Service) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+
+	var serviceInfos []discover.ServiceInfo
+	for _, svc := range svcs {
+		group := bySvc[svc.Namespace+"/"+svc.Name]
+		slices.SortFunc(group, func(a, b *discoveryv1.EndpointSlice) int {
+			return cmp.Compare(a.Name, b.Name)
+		})
+		for _, eps := range group {
+			serviceInfos = append(serviceInfos, r.endpointSliceToServiceInfos(svc, eps)...)
+		}
+	}
+	return serviceInfos
 }
 
 // endpointSliceToServiceInfos 将 k8s Service 和 EndpointSlice 转换为 ServiceInfo
@@ -360,16 +382,14 @@ func (r *Registry) serviceListOptions(serviceName string) metav1.ListOptions {
 }
 
 // endpointSliceSelector 构建 EndpointSlice 的 label selector。
-// K8s 自动为 EndpointSlice 打 kubernetes.io/service-name 标签，直接用它匹配。
-func (r *Registry) endpointSliceSelector(serviceName string) string {
-	selector := r.config.LabelSelector
+// K8s 自动为 EndpointSlice 打 kubernetes.io/service-name 标签，直接用它匹配；
+// 不叠加 Config.LabelSelector：非内置控制器管理的 EndpointSlice 未必复制 Service 的 label，
+// label 过滤由 Service 侧完成，再按归属关联端点（见 buildServiceInfos）。
+func endpointSliceSelector(serviceName string) string {
 	if serviceName != "" {
-		if selector != "" {
-			selector += ","
-		}
-		selector += "kubernetes.io/service-name=" + serviceName
+		return discoveryv1.LabelServiceName + "=" + serviceName
 	}
-	return selector
+	return discoveryv1.LabelServiceName
 }
 
 // Close 关闭所有监听器
@@ -377,9 +397,9 @@ func (r *Registry) Close() error {
 	r.watcherMu.Lock()
 	defer r.watcherMu.Unlock()
 
-	for serviceName, cancel := range r.watchers {
+	for id, cancel := range r.watchers {
 		cancel()
-		delete(r.watchers, serviceName)
+		delete(r.watchers, id)
 	}
 
 	return nil

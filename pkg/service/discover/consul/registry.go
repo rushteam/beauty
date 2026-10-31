@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -72,7 +73,7 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		},
 	}
 
-	if err := r.client.Agent().ServiceRegisterOpts(reg, (&api.ServiceRegisterOpts{}).WithContext(ctx)); err != nil {
+	if err := r.register(ctx, reg); err != nil {
 		return func() {}, fmt.Errorf("consul register: %w", err)
 	}
 
@@ -82,43 +83,77 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 		slog.String("svc.addr", info.Addr()),
 	)
 
-	// 定期更新 TTL 心跳
-	stopCh := make(chan struct{})
+	hbCtx, stopHeartbeat := context.WithCancel(ctx)
+	hbDone := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		checkID := "service:" + info.ID()
-		for {
-			select {
-			case <-stopCh:
-				return
-			case <-ticker.C:
-				if err := r.client.Agent().PassTTL(checkID, ""); err != nil {
-					logger.Warn("consul ttl pass failed",
-						slog.String("svc.id", info.ID()),
-						slog.Any("err", err),
-					)
-				}
-			}
-		}
+		defer close(hbDone)
+		r.heartbeat(hbCtx, reg)
 	}()
 
 	var stopOnce sync.Once
 	return func() {
-		stopOnce.Do(func() { close(stopCh) })
-		if err := r.client.Agent().ServiceDeregister(info.ID()); err != nil {
-			logger.Error("consul deregister failed",
-				slog.Any("err", err),
+		stopOnce.Do(func() {
+			// 先等心跳 goroutine 退出，避免它在注销之后又把实例重新注册回去
+			stopHeartbeat()
+			<-hbDone
+			dctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := r.client.Agent().ServiceDeregisterOpts(info.ID(), (&api.QueryOptions{}).WithContext(dctx)); err != nil {
+				logger.Error("consul deregister failed",
+					slog.Any("err", err),
+					slog.String("svc.id", info.ID()),
+					slog.String("svc.name", info.Name()),
+				)
+				return
+			}
+			logger.Info("consul deregister success",
 				slog.String("svc.id", info.ID()),
 				slog.String("svc.name", info.Name()),
 			)
-			return
-		}
-		logger.Info("consul deregister success",
-			slog.String("svc.id", info.ID()),
-			slog.String("svc.name", info.Name()),
-		)
+		})
 	}, nil
+}
+
+// ttlInterval 心跳间隔，须明显小于检查的 TTL（30s）。
+var ttlInterval = 10 * time.Second
+
+// register 注册服务并立即上报一次 passing：TTL 检查初始为 critical，
+// 不上报的话实例要等到第一次心跳才对调用方可见。
+func (r *Registry) register(ctx context.Context, reg *api.AgentServiceRegistration) error {
+	if err := r.client.Agent().ServiceRegisterOpts(reg, (&api.ServiceRegisterOpts{}).WithContext(ctx)); err != nil {
+		return err
+	}
+	return r.client.Agent().UpdateTTLOpts("service:"+reg.ID, "", api.HealthPassing, (&api.QueryOptions{}).WithContext(ctx))
+}
+
+// heartbeat 定期上报 TTL。上报失败时重新注册：agent 重启丢失本地状态，或心跳中断超过
+// DeregisterCriticalServiceAfter 后实例已被摘除，此时只续 TTL 永远不会恢复。
+// Consul 的注册是幂等的，agent 不可达时重注册同样失败，下个周期再试。
+func (r *Registry) heartbeat(ctx context.Context, reg *api.AgentServiceRegistration) {
+	ticker := time.NewTicker(ttlInterval)
+	defer ticker.Stop()
+	checkID := "service:" + reg.ID
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		err := r.client.Agent().UpdateTTLOpts(checkID, "", api.HealthPassing, (&api.QueryOptions{}).WithContext(ctx))
+		if err == nil || ctx.Err() != nil {
+			continue
+		}
+		logger.Warn("consul ttl pass failed, re-registering",
+			slog.String("svc.id", reg.ID), slog.Any("err", err))
+		if err := r.register(ctx, reg); err != nil {
+			if ctx.Err() == nil {
+				logger.Error("consul re-register failed",
+					slog.String("svc.id", reg.ID), slog.Any("err", err))
+			}
+			continue
+		}
+		logger.Info("consul re-register success", slog.String("svc.id", reg.ID))
+	}
 }
 
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
@@ -132,16 +167,20 @@ func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.Ser
 	return r.filterEntries(entries), nil
 }
 
-func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
-	// 先推送初始列表
-	if services, err := r.Find(ctx, serviceName); err != nil {
-		logger.Warn("consul watch: initial find failed",
-			slog.String("service", serviceName), slog.Any("err", err))
-	} else {
-		update(services)
-	}
+var (
+	watchRetryBase = time.Second
+	watchRetryMax  = 8 * time.Second
+)
 
-	var lastIndex uint64
+// Watch 基于阻塞查询监听实例变化，阻塞直到 ctx 取消。
+// 首次查询 WaitIndex=0 立即返回，即初始列表；之后按内容比较，有变化才通知。
+func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
+	var (
+		lastIndex uint64
+		last      []discover.ServiceInfo
+		notified  bool
+		backoff   = watchRetryBase
+	)
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -159,14 +198,36 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 			}
 			logger.Warn("consul watch error",
 				slog.String("service", serviceName), slog.Any("err", err))
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = min(backoff*2, watchRetryMax)
 			continue
 		}
-		if meta.LastIndex > lastIndex {
-			lastIndex = meta.LastIndex
-			update(r.filterEntries(entries))
+		backoff = watchRetryBase
+		lastIndex = nextWaitIndex(lastIndex, meta.LastIndex)
+
+		services := r.filterEntries(entries)
+		if !notified || !slices.EqualFunc(last, services, discover.ServiceInfo.Equal) {
+			update(services)
+			last, notified = services, true
 		}
 	}
+}
+
+// nextWaitIndex 按 Consul 阻塞查询规范计算下一次的 WaitIndex：
+// index 回退（集群重建、快照恢复、切换到落后的 server）时重置为 0 重新拉全量，
+// 否则后续变化的 index 都小于旧值，会被永远忽略；index < 1 时用 1，避免阻塞查询立即返回形成忙循环。
+func nextWaitIndex(prev, cur uint64) uint64 {
+	if cur < prev {
+		return 0
+	}
+	if cur < 1 {
+		return 1
+	}
+	return cur
 }
 
 func (r *Registry) filterEntries(entries []*api.ServiceEntry) []discover.ServiceInfo {

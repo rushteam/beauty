@@ -39,19 +39,19 @@ func TestApplyPutEvent_FilterGrpc(t *testing.T) {
 	}
 
 	vGrpc := discover.ServiceInfo{ID: "1", Name: "svc", Kind: "grpc"}
-	services := reg.applyPutEvent(endpoints, path, path+"/1", mustMarshal(t, vGrpc))
+	services := reg.applyPutEvent(endpoints, "svc", path, path+"/1", mustMarshal(t, vGrpc))
 	if len(services) != 1 || services[0].ID != "1" {
 		t.Fatalf("grpc add failed: %v", services)
 	}
 
 	vNon := discover.ServiceInfo{ID: "2", Name: "svc", Kind: "http"}
-	services = reg.applyPutEvent(endpoints, path, path+"/2", mustMarshal(t, vNon))
+	services = reg.applyPutEvent(endpoints, "svc", path, path+"/2", mustMarshal(t, vNon))
 	if len(services) != 1 || services[0].ID != "1" {
 		t.Fatalf("non-grpc should be filtered, got: %v", services)
 	}
 
 	vGrpc.Kind = "http"
-	services = reg.applyPutEvent(endpoints, path, path+"/1", mustMarshal(t, vGrpc))
+	services = reg.applyPutEvent(endpoints, "svc", path, path+"/1", mustMarshal(t, vGrpc))
 	if len(services) != 0 {
 		t.Fatalf("change to non-grpc should remove, got: %v", services)
 	}
@@ -157,7 +157,7 @@ func TestApplyPutEvent_UnmarshalError(t *testing.T) {
 	reg := &Registry{codec: discover.NewBeautyKVCodec("beauty")}
 	endpoints := map[string]discover.ServiceInfo{}
 
-	services := reg.applyPutEvent(endpoints, path, path+"/1", []byte("not-json"))
+	services := reg.applyPutEvent(endpoints, "svc", path, path+"/1", []byte("not-json"))
 	if len(services) != 0 {
 		t.Fatalf("expected empty services on unmarshal error, got: %v", services)
 	}

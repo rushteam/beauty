@@ -7,6 +7,42 @@
 框架已发布语义化版本（当前 v0.10.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
 
+## [1.2.2] - 2026-11-01
+
+### Fixed
+- **客户端 Watch 重订阅**:新增 `discover.WatchLoop`,gRPC resolver、`ServiceDiscoveryClient`、HTTP
+  发现客户端统一使用:后端 `Watch` 提前返回时按指数退避(上限 8s)重订阅,此前 `ServiceDiscoveryClient`
+  与 HTTP 客户端断连后不再更新实例列表。
+- **空推送保护**:曾拿到过实例后,注册中心推送的空列表不再下发(保留上次地址并告警),避免注册中心抖动
+  时客户端关闭全部连接;从未有实例时空列表照常下发以便快速失败。
+- **SDK 客户端释放**:nacos / polaris 发现侧客户端改为按配置引用计数共享,最后一个使用方释放并闲置 90s
+  后关闭(对齐 `http.Transport` 的 IdleConnTimeout 语义),修复 `grpc.NewClient("nacos://...")`
+  等路径下 SDK 客户端及其 goroutine 永不释放的问题。
+- **k8s**:同一 Registry 上多个调用方 Watch 同一服务时不再互相取消;通配 `Find` 不再把不同 namespace
+  的同名 Service 端点混在一起;README 的 RBAC 示例改为实际需要的 `discovery.k8s.io/endpointslices`。
+- **consul**:心跳上报失败时自动重新注册(agent 重启丢状态、心跳中断超过
+  `DeregisterCriticalServiceAfter` 后实例此前会永久消失);注册后立即上报 passing,不再有最长 10s
+  的不可见期;注销前等待心跳 goroutine 退出。`Watch` 在 index 回退时按规范重置,变更不再被静默丢弃。
+- **HTTP 客户端**:先 5xx、后网络错误时不再返回 body 已关闭的响应;请求保留真实 `Content-Length`,
+  不再被强制改为 chunked。
+- **polaris**:支持 `Codec` / `CodecName`(`?codec=accept_all`)配置过滤策略,此前写死只接受
+  `kind=grpc`,无法用于 HTTP 服务发现。
+- **etcd**:`Watch` 传给 codec 的改为服务名(与 `Find` 一致),而非前缀路径;重试等待响应 `ctx`。
+- **gRPC 发现客户端**:`Stop` / `Close` 不再被连接排空(默认 5s)拖住。
+
+### Changed
+- **gRPC 客户端**:去掉 10s 空闲超时,沿用 gRPC 默认 30 分钟,避免空闲后首个请求重新拉注册中心并握手;
+  keepalive 不再在无活跃流时发 ping(gRPC 默认),兼容默认配置的第三方服务端。
+- **k8s**:`Watch` 改为基于 informer:从上次 ResourceVersion 续订,不再每 30s 重放全部对象;事件只触发
+  本地缓存刷新(不访问 API server),多个事件合并,结果未变化时不通知;`Find` 固定两次 List。
+- **etcd**:同一 WatchResponse 内的事件合并为一次通知,无实际变化的事件不通知。
+- **负载均衡选节点**:gRPC / HTTP 选节点热路径在无禁用节点、无熔断时免分配(约 700–900ns/7–9 次分配
+  降至 35–95ns/1–2 次分配);HTTP 不重试时请求 body 直接透传,不再整读进内存。
+- **nacos**:推送日志只记录数量,单实例过滤日志降为 Debug。
+
+### Added
+- `discover.ServiceInfo.Equal`、`bannednodes.Len`。
+
 ## [1.2.1] - 2026-10-30
 
 ### Fixed

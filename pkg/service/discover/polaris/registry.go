@@ -15,42 +15,84 @@ import (
 	"github.com/polarismesh/polaris-go/pkg/model"
 
 	"github.com/rushteam/beauty/pkg/service/discover"
+	"github.com/rushteam/beauty/pkg/service/discover/internal/clientpool"
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/utils/addr"
 	"maps"
+	"strings"
 )
 
 var _ discover.RegistryDiscovery = (*Registry)(nil)
 
+type consumerClient struct {
+	api     api.ConsumerAPI
+	destroy func()
+}
+
+var (
+	newConsumerClient = func(c *Config) (*consumerClient, error) {
+		sdkContext, err := newSDKContext(c)
+		if err != nil {
+			return nil, err
+		}
+		return &consumerClient{api: api.NewConsumerAPIByContext(sdkContext), destroy: sdkContext.Destroy}, nil
+	}
+
+	// consumers 按连接配置共享 Find/Watch 使用的 SDK 上下文，
+	// 最后一个使用方释放并闲置超时后 Destroy。
+	consumers = clientpool.New(clientpool.DefaultIdleTimeout, func(c *consumerClient) {
+		c.destroy()
+	})
+)
+
+func newSDKContext(c *Config) (api.SDKContext, error) {
+	configuration := config.NewDefaultConfiguration(c.Addresses)
+	if c.Token != "" {
+		configuration.Global.ServerConnector.Token = c.Token
+	}
+	sdkContext, err := api.InitContextByConfig(configuration)
+	if err != nil {
+		return nil, fmt.Errorf("polaris init context failed: %w", err)
+	}
+	return sdkContext, nil
+}
+
+// NewRegistry 创建 Registry。发现侧 SDK 上下文在 Find/Watch 期间从共享池借用，
+// Registry 本身不持有它；注册侧上下文仅在调用 Register 时创建。
 func NewRegistry(c *Config) *Registry {
-	return &Registry{c: c}
+	return &Registry{c: c, codec: c.effectiveCodec()}
 }
 
 type Registry struct {
 	c           *Config
+	codec       discover.Codec
 	initOnce    sync.Once
 	initErr     error
 	providerAPI api.ProviderAPI
-	consumerAPI api.ConsumerAPI
 }
 
 func (r *Registry) initClient() error {
 	r.initOnce.Do(func() {
-		configuration := config.NewDefaultConfiguration(r.c.Addresses)
-
-		if r.c.Token != "" {
-			configuration.Global.ServerConnector.Token = r.c.Token
-		}
-
-		sdkContext, err := api.InitContextByConfig(configuration)
+		sdkContext, err := newSDKContext(r.c)
 		if err != nil {
-			r.initErr = fmt.Errorf("polaris init context failed: %w", err)
+			r.initErr = err
 			return
 		}
 		r.providerAPI = api.NewProviderAPIByContext(sdkContext)
-		r.consumerAPI = api.NewConsumerAPIByContext(sdkContext)
 	})
 	return r.initErr
+}
+
+// acquireConsumer 借用共享的发现侧 ConsumerAPI，用完必须调用 release。
+func (r *Registry) acquireConsumer() (api.ConsumerAPI, func(), error) {
+	key := strings.Join(r.c.Addresses, ",") + "\x00" + r.c.Token
+	c, release, err := consumers.Acquire(key, func() (*consumerClient, error) {
+		return newConsumerClient(r.c)
+	})
+	if err != nil {
+		return nil, release, err
+	}
+	return c.api, release, nil
 }
 
 func (r *Registry) Register(ctx context.Context, info discover.Service) (context.CancelFunc, error) {
@@ -143,27 +185,38 @@ func (r *Registry) Register(ctx context.Context, info discover.Service) (context
 }
 
 func (r *Registry) Find(ctx context.Context, serviceName string) ([]discover.ServiceInfo, error) {
-	if err := r.initClient(); err != nil {
+	consumer, release, err := r.acquireConsumer()
+	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	req := &api.GetInstancesRequest{}
 	req.Service = serviceName
 	req.Namespace = r.c.Namespace
 
-	resp, err := r.consumerAPI.GetInstances(req)
+	resp, err := consumer.GetInstances(req)
 	if err != nil {
 		return nil, fmt.Errorf("polaris GetInstances failed for service %s: %w", serviceName, err)
 	}
-	return buildServiceInfos(resp.Instances), nil
+	return buildServiceInfos(resp.Instances, r.effectiveCodec()), nil
+}
+
+func (r *Registry) effectiveCodec() discover.Codec {
+	if r.codec != nil {
+		return r.codec
+	}
+	return r.c.effectiveCodec()
 }
 
 // Watch 使用 WatchAllInstances (v1.7.0 推荐 API) 监听实例变化，带重连退避。
 // Watch 是阻塞的，直到 ctx 取消才返回，与 etcd/nacos 保持一致。
 func (r *Registry) Watch(ctx context.Context, serviceName string, update discover.Notify) error {
-	if err := r.initClient(); err != nil {
+	consumer, release, err := r.acquireConsumer()
+	if err != nil {
 		return err
 	}
+	defer release()
 
 	// 先推送一次初始快照，失败只记日志不阻塞
 	if instances, err := r.Find(ctx, serviceName); err != nil {
@@ -178,14 +231,14 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 			return nil
 		}
 
-		watchResp, err := r.consumerAPI.WatchAllInstances(&api.WatchAllInstancesRequest{
+		watchResp, err := consumer.WatchAllInstances(&api.WatchAllInstancesRequest{
 			WatchAllInstancesRequest: model.WatchAllInstancesRequest{
 				ServiceKey: model.ServiceKey{
 					Namespace: r.c.Namespace,
 					Service:   serviceName,
 				},
 				WatchMode:         model.WatchModeNotify,
-				InstancesListener: &instancesListener{update: update, serviceName: serviceName},
+				InstancesListener: &instancesListener{update: update, serviceName: serviceName, codec: r.effectiveCodec()},
 			},
 		})
 		if err != nil {
@@ -195,10 +248,8 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 			case <-ctx.Done():
 				return nil
 			case <-time.After(backoff):
-				if backoff < 8*time.Second {
-					backoff *= 2
-				}
 			}
+			backoff = min(backoff*2, 8*time.Second)
 			continue
 		}
 
@@ -214,13 +265,14 @@ func (r *Registry) Watch(ctx context.Context, serviceName string, update discove
 type instancesListener struct {
 	update      discover.Notify
 	serviceName string
+	codec       discover.Codec
 }
 
 func (l *instancesListener) OnInstancesUpdate(resp *model.InstancesResponse) {
 	if resp == nil {
 		return
 	}
-	services := buildServiceInfos(resp.GetInstances())
+	services := buildServiceInfos(resp.GetInstances(), l.codec)
 	logger.Info("polaris instances updated",
 		slog.String("service", l.serviceName),
 		slog.Int("count", len(services)),
@@ -231,20 +283,23 @@ func (l *instancesListener) OnInstancesUpdate(resp *model.InstancesResponse) {
 // UpdateCallResult 上报一次 gRPC 调用结果，触发 Polaris 熔断/统计逻辑。
 // instance 通过 Find 获得；delay 为本次调用耗时；retCode 为 gRPC 状态码（0=OK）。
 func (r *Registry) UpdateCallResult(instance model.Instance, retStatus model.RetStatus, delay time.Duration, retCode int32) {
-	if r.consumerAPI == nil {
+	consumer, release, err := r.acquireConsumer()
+	if err != nil {
+		logger.Warn("polaris UpdateServiceCallResult skipped", slog.Any("err", err))
 		return
 	}
+	defer release()
 	result := &api.ServiceCallResult{}
 	result.SetCalledInstance(instance)
 	result.SetRetStatus(retStatus)
 	result.SetDelay(delay)
 	result.SetRetCode(retCode)
-	if err := r.consumerAPI.UpdateServiceCallResult(result); err != nil {
+	if err := consumer.UpdateServiceCallResult(result); err != nil {
 		logger.Warn("polaris UpdateServiceCallResult failed", slog.Any("err", err))
 	}
 }
 
-func buildServiceInfos(instances []model.Instance) []discover.ServiceInfo {
+func buildServiceInfos(instances []model.Instance, codec discover.Codec) []discover.ServiceInfo {
 	var ss []discover.ServiceInfo
 	for _, instance := range instances {
 		if !instance.IsHealthy() {
@@ -261,16 +316,16 @@ func buildServiceInfos(instances []model.Instance) []discover.ServiceInfo {
 		if metadata == nil {
 			metadata = make(map[string]string)
 		}
-		if metadata["kind"] != "grpc" {
-			continue
-		}
-
-		ss = append(ss, discover.ServiceInfo{
+		info := discover.ServiceInfo{
 			ID:       instance.GetId(),
 			Name:     instance.GetService(),
 			Addr:     net.JoinHostPort(instance.GetHost(), fmt.Sprintf("%d", instance.GetPort())),
 			Metadata: metadata,
-		})
+		}
+		if !codec.Accept(info) {
+			continue
+		}
+		ss = append(ss, info)
 	}
 
 	sort.Slice(ss, func(i, j int) bool {

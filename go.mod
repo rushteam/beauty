@@ -21,6 +21,7 @@ require (
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/spf13/viper v1.20.1
 	github.com/yutopp/go-rtmp v0.0.7
+	go.etcd.io/etcd/api/v3 v3.6.2
 	go.etcd.io/etcd/client/v3 v3.6.2
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.69.0
@@ -146,7 +147,6 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yutopp/go-amf0 v0.1.0 // indirect
-	go.etcd.io/etcd/api/v3 v3.6.2 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect

@@ -9,3 +9,6 @@ go.work.sum
 # claude code 本地配置(机器本地,不入库)
 .claude/settings.local.json
 
+# 误提交的构建产物(根锚定,避免误伤 contrib/console、examples/console 目录)
+/console
+

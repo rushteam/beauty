@@ -46,13 +46,24 @@ q.Submit(&jobqueue.Job{
 
 ## Core features
 
-### 1. Priority
+### 1. Priority and ratio
 
-Heap ordering based on `pkg/foundation/priority`. When multiple jobs are waiting, the one with the smallest value is consumed first:
+By default each priority has its own lane: a smaller value runs its whole lane before the next one. Inside a lane, jobs run in arrival order.
 
 ```go
-q.Submit(&jobqueue.Job{ID: "urgent", Priority: 0, ...})  // runs first
-q.Submit(&jobqueue.Job{ID: "normal", Priority: 10, ...}) // runs later
+q.Submit(&jobqueue.Job{ID: "a", Priority: 5, ...})
+q.Submit(&jobqueue.Job{ID: "b", Priority: 5, ...})
+q.Submit(&jobqueue.Job{ID: "vip", Priority: 0, ...})
+// order: vip, a, b
+```
+
+`WithRatio` interleaves lanes instead of letting the higher priority drain first. The example releases one VIP after every five normal jobs. An empty lane is skipped. Share order is the order inside one cycle. Priorities not listed get one release per cycle, after the listed shares, smaller values first.
+
+```go
+q := jobqueue.New(jobqueue.WithRatio(
+    jobqueue.Share{Priority: 10, Count: 5}, // normal
+    jobqueue.Share{Priority: 0, Count: 1},  // VIP
+))
 ```
 
 ### 2. Progress reporting

@@ -44,13 +44,24 @@ q.Submit(&jobqueue.Job{
 
 ## 核心特性
 
-### 1. 优先级
+### 1. 优先级与比例
 
-基于 `pkg/foundation/priority` 堆排序。多个任务等待时,数值最小的先消费:
+默认按优先级分车道:数值最小的一档全部走完,才轮到下一档。同一档按到达顺序,先来后到。
 
 ```go
-q.Submit(&jobqueue.Job{ID: "urgent", Priority: 0, ...})  // 先执行
-q.Submit(&jobqueue.Job{ID: "normal", Priority: 10, ...}) // 后执行
+q.Submit(&jobqueue.Job{ID: "a", Priority: 5, ...})
+q.Submit(&jobqueue.Job{ID: "b", Priority: 5, ...})
+q.Submit(&jobqueue.Job{ID: "vip", Priority: 0, ...})
+// 执行顺序: vip、a、b
+```
+
+付费用户不要一直插到最前时,用 `WithRatio` 按份额轮转。下面是每 5 个普通任务放行 1 个 VIP;某一档暂时没有任务就跳过。声明顺序就是一个周期内的放行顺序。没写进份额的优先级,每个周期在这些档位之后再放行 1 个。
+
+```go
+q := jobqueue.New(jobqueue.WithRatio(
+    jobqueue.Share{Priority: 10, Count: 5}, // 普通
+    jobqueue.Share{Priority: 0, Count: 1},  // VIP
+))
 ```
 
 ### 2. 进度上报

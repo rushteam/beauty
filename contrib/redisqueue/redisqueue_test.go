@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -288,4 +289,224 @@ func TestClean(t *testing.T) {
 	if removed < 1 {
 		t.Error("expected some jobs to be cleaned")
 	}
+}
+
+func TestWaitingScoreBands(t *testing.T) {
+	if waitingScore(0, 2) <= waitingScore(-1, 1) {
+		t.Fatal("higher priority should sort first")
+	}
+	if waitingScore(10, 1) >= waitingScore(10, 2) {
+		t.Fatal("same priority should follow arrival")
+	}
+	if waitingScore(0, priorityBand-1) >= waitingScore(1, 1) {
+		t.Fatal("sequence must stay inside its priority band")
+	}
+}
+
+func TestSamePriorityKeepsArrivalOrder(t *testing.T) {
+	q, _ := setup(t)
+	ctx := context.Background()
+	for _, job := range []*Job{
+		{ID: "a", Priority: 5},
+		{ID: "b", Priority: 5},
+		{ID: "c", Priority: 1},
+		{ID: "d", Priority: 5},
+	} {
+		if err := q.Submit(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := drain(t, q)
+	want := []string{"c", "a", "b", "d"}
+	if !sameIDs(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestRatioInsertsVIPAmongNormal(t *testing.T) {
+	base, _ := setup(t)
+	q := New(base.rdb, "ratio", WithRatio(
+		Share{Priority: 10, Count: 5},
+		Share{Priority: 0, Count: 1},
+	))
+	ctx := context.Background()
+	for _, id := range []string{"v1", "v2", "v3"} {
+		if err := q.Submit(ctx, &Job{ID: id, Priority: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 1; i <= 8; i++ {
+		if err := q.Submit(ctx, &Job{ID: fmt.Sprintf("n%d", i), Priority: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := drain(t, q)
+	want := []string{"n1", "n2", "n3", "n4", "n5", "v1", "n6", "n7", "n8", "v2", "v3"}
+	if !sameIDs(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestRatioSkipsEmptyClass(t *testing.T) {
+	base, _ := setup(t)
+	q := New(base.rdb, "ratio-vip", WithRatio(
+		Share{Priority: 10, Count: 5},
+		Share{Priority: 0, Count: 1},
+	))
+	ctx := context.Background()
+	for _, id := range []string{"v1", "v2", "v3"} {
+		if err := q.Submit(ctx, &Job{ID: id, Priority: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := drain(t, q)
+	want := []string{"v1", "v2", "v3"}
+	if !sameIDs(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestRatioServesUnlistedPriority(t *testing.T) {
+	base, _ := setup(t)
+	q := New(base.rdb, "ratio-extra", WithRatio(
+		Share{Priority: 10, Count: 2},
+		Share{Priority: 0, Count: 1},
+	))
+	ctx := context.Background()
+	for _, job := range []*Job{
+		{ID: "n1", Priority: 10},
+		{ID: "n2", Priority: 10},
+		{ID: "v1", Priority: 0},
+		{ID: "u1", Priority: 3},
+	} {
+		if err := q.Submit(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := drain(t, q)
+	want := []string{"n1", "n2", "v1", "u1"}
+	if !sameIDs(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestRequeueKeepsOrDropsPlace(t *testing.T) {
+	q, _ := setup(t)
+	ctx := context.Background()
+	if err := q.Submit(ctx, &Job{ID: "a", Priority: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Submit(ctx, &Job{ID: "b", Priority: 5}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := q.dequeue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "a" {
+		t.Fatalf("first = %s", id)
+	}
+
+	kept, err := q.GetJob(ctx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.rdb.SRem(ctx, q.key("active"), "a").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.pushWaiting(ctx, kept, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := drain(t, q); !sameIDs(got, []string{"a", "b"}) {
+		t.Fatalf("stall requeue order = %v", got)
+	}
+
+	if err := q.Submit(ctx, &Job{ID: "c", Priority: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Submit(ctx, &Job{ID: "d", Priority: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.dequeue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := q.GetJob(ctx, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.rdb.SRem(ctx, q.key("active"), "c").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.pushWaiting(ctx, retried, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := drain(t, q); !sameIDs(got, []string{"d", "c"}) {
+		t.Fatalf("retry order = %v", got)
+	}
+}
+
+func TestDelayedJobJoinsTailOfSamePriority(t *testing.T) {
+	q, _ := setup(t)
+	ctx := context.Background()
+	if err := q.Submit(ctx, &Job{ID: "early", Priority: 5, Delay: 20 * time.Millisecond}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if err := q.Submit(ctx, &Job{ID: "late", Priority: 5}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(chan string, 2)
+	workerCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	go q.StartWorker(workerCtx, func(ctx context.Context, job *Job) error {
+		got <- job.ID
+		return nil
+	})
+
+	order := make([]string, 0, 2)
+	timeout := time.NewTimer(800 * time.Millisecond)
+	defer timeout.Stop()
+	for len(order) < 2 {
+		select {
+		case id := <-got:
+			order = append(order, id)
+		case <-timeout.C:
+			t.Fatalf("order = %v", order)
+		}
+	}
+	if order[0] != "late" || order[1] != "early" {
+		t.Fatalf("order = %v", order)
+	}
+}
+
+func drain(t *testing.T, q *Queue) []string {
+	t.Helper()
+	ctx := context.Background()
+	got := []string{}
+	for {
+		id, err := q.dequeue(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "" {
+			return got
+		}
+		got = append(got, id)
+		if len(got) > 32 {
+			t.Fatalf("dequeue did not stop: %v", got)
+		}
+	}
+}
+
+func sameIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

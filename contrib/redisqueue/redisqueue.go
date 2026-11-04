@@ -7,14 +7,17 @@
 //   - at-least-once:任务执行中 worker 崩溃,由可见性超时机制自动重新投递。
 //
 // 数据结构(参考 BullMQ 的 Redis 布局):
-//   - {prefix}:{queue}:waiting   — Sorted Set(score=priority,延迟任务 score=timestamp)
-//   - {prefix}:{queue}:active    — Set(正在处理的 job ID)
-//   - {prefix}:{queue}:completed — Set(已完成)
-//   - {prefix}:{queue}:failed    — Set(失败)
-//   - {prefix}:{queue}:job:{id}  — Hash(任务详情: name, payload, priority, state, attempts…)
-//   - {prefix}:{queue}:delayed   — Sorted Set(score=到期 unix ms,到期转 waiting)
+//   - {prefix}:{queue}:waiting     — Sorted Set(score = priority*1e10 + 到达序号)
+//   - {prefix}:{queue}:seq         — 到达序号(INCR)
+//   - {prefix}:{queue}:priorities  — 出现过的优先级
+//   - {prefix}:{queue}:ratio:cursor / ratio:left — 比例调度游标(仅 WithRatio)
+//   - {prefix}:{queue}:active      — Set(正在处理的 job ID)
+//   - {prefix}:{queue}:completed   — Set(已完成)
+//   - {prefix}:{queue}:failed      — Set(失败)
+//   - {prefix}:{queue}:job:{id}    — String(任务 JSON)
+//   - {prefix}:{queue}:delayed     — Sorted Set(score=到期 unix ms,到期转 waiting)
 //
-// 原子性:关键操作(入队、出队、状态转移)使用 Lua 脚本保证原子。
+// 比例出队用 Lua 一次完成选档和取出,多个 worker 共享同一游标。
 //
 // 用法:
 //
@@ -50,10 +53,14 @@ const (
 
 // Job 一个任务。
 type Job struct {
-	ID         string        `json:"id"`
-	Name       string        `json:"name"`
-	Payload    []byte        `json:"payload"`
-	Priority   int           `json:"priority"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Payload []byte `json:"payload"`
+	// Priority 数值越小越优先。同一优先级内按到达顺序。
+	// WithRatio 开启后,各优先级按份额轮转,不再是高优先级独占。
+	Priority int `json:"priority"`
+	// Seq 同一优先级内的到达序号,由队列分配。
+	Seq        int64         `json:"seq,omitempty"`
 	Delay      time.Duration `json:"delay"`
 	MaxRetries int           `json:"max_retries"`
 	RetryDelay time.Duration `json:"retry_delay"`
@@ -101,6 +108,7 @@ type Config struct {
 	DelayResolution time.Duration // 延迟任务检查间隔,默认 500ms
 	Hook            EventHook     // 事件钩子
 	OnPanic         func(job *Job, r any, stack []byte)
+	Shares          []Share // 非空时按比例轮转;由 WithRatio 写入
 }
 
 // Option 配置函数。
@@ -151,30 +159,46 @@ func (q *Queue) Submit(ctx context.Context, job *Job) error {
 	}
 	now := time.Now()
 	job.CreatedAt = now.UnixMilli()
-	job.State = StateWaiting
 
-	data, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("redisqueue: marshal job: %w", err)
-	}
-
-	pipe := q.rdb.Pipeline()
-	pipe.Set(ctx, q.jobKey(job.ID), data, 0)
-
+	var err error
 	if job.Delay > 0 {
 		job.State = StateDelayed
-		score := float64(now.Add(job.Delay).UnixMilli())
-		pipe.ZAdd(ctx, q.key("delayed"), redis.Z{Score: score, Member: job.ID})
+		q.saveJob(ctx, job)
+		err = q.rdb.ZAdd(ctx, q.key("delayed"), redis.Z{
+			Score:  float64(now.Add(job.Delay).UnixMilli()),
+			Member: job.ID,
+		}).Err()
 	} else {
-		score := float64(job.Priority)
-		pipe.ZAdd(ctx, q.key("waiting"), redis.Z{Score: score, Member: job.ID})
+		err = q.pushWaiting(ctx, job, true)
 	}
-	_, err = pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("redisqueue: submit: %w", err)
 	}
 	q.emit(Event{Type: EventSubmit, Job: job})
 	return nil
+}
+
+// pushWaiting 把任务放进等待队列。freshSeq 为 true,或任务还没有序号时,分配新的到达序号,
+// 因此延迟到期和失败重试都会排到同优先级的队尾。worker 崩溃后重新入队应传 false,保留原序号。
+func (q *Queue) pushWaiting(ctx context.Context, job *Job, freshSeq bool) error {
+	if freshSeq || job.Seq <= 0 {
+		seq, err := q.rdb.Incr(ctx, q.key("seq")).Result()
+		if err != nil {
+			return err
+		}
+		job.Seq = seq
+	}
+	job.State = StateWaiting
+	q.saveJob(ctx, job)
+	_, err := q.rdb.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.ZAdd(ctx, q.key("waiting"), redis.Z{
+			Score:  waitingScore(job.Priority, job.Seq),
+			Member: job.ID,
+		})
+		pipe.SAdd(ctx, q.key("priorities"), strconv.Itoa(job.Priority))
+		return nil
+	})
+	return err
 }
 
 // Pending 返回等待中的任务数。
@@ -238,9 +262,32 @@ func (q *Queue) StartWorker(ctx context.Context, handler Handler) error {
 	}
 }
 
-// dequeue 原子地从 waiting 取出优先级最高的任务,移入 active。
+// dequeue 从 waiting 取出下一个任务,移入 active。
+// 默认按优先级、同级按到达顺序;配置了 WithRatio 时按份额轮转。
 func (q *Queue) dequeue(ctx context.Context) (string, error) {
-	// ZPOPMIN 取优先级最低分数(=最高优先级)
+	var (
+		jobID string
+		err   error
+	)
+	if len(q.cfg.Shares) > 0 {
+		jobID, err = q.dequeueRatio(ctx)
+	} else {
+		jobID, err = q.dequeueStrict(ctx)
+	}
+	if err != nil || jobID == "" {
+		return "", err
+	}
+	if err := q.rdb.SAdd(ctx, q.key("active"), jobID).Err(); err != nil {
+		return "", err
+	}
+	if err := q.rdb.Set(ctx, q.key("lock:"+jobID), "1", q.cfg.VisibilityTime).Err(); err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
+
+// dequeueStrict 用 ZPOPMIN 取出分数最小的任务:优先级数值小的在前,同级序号小的在前。
+func (q *Queue) dequeueStrict(ctx context.Context) (string, error) {
 	results, err := q.rdb.ZPopMin(ctx, q.key("waiting"), 1).Result()
 	if err != nil {
 		return "", err
@@ -248,11 +295,10 @@ func (q *Queue) dequeue(ctx context.Context) (string, error) {
 	if len(results) == 0 {
 		return "", nil
 	}
-	jobID := results[0].Member.(string)
-	// 加入 active 集合
-	q.rdb.SAdd(ctx, q.key("active"), jobID)
-	// 设置可见性超时 key(用于 stalled 检测)
-	q.rdb.Set(ctx, q.key("lock:"+jobID), "1", q.cfg.VisibilityTime)
+	jobID, ok := results[0].Member.(string)
+	if !ok {
+		return "", fmt.Errorf("redisqueue: waiting member has type %T", results[0].Member)
+	}
 	return jobID, nil
 }
 
@@ -359,7 +405,6 @@ func (q *Queue) delayScheduler(ctx context.Context) {
 			}
 			for _, id := range ids {
 				q.rdb.ZRem(ctx, q.key("delayed"), id)
-				// 读取 job 获取 priority
 				data, err := q.rdb.Get(ctx, q.jobKey(id)).Bytes()
 				if err != nil {
 					continue
@@ -368,9 +413,9 @@ func (q *Queue) delayScheduler(ctx context.Context) {
 				if json.Unmarshal(data, &job) != nil {
 					continue
 				}
-				job.State = StateWaiting
-				q.saveJob(ctx, &job)
-				q.rdb.ZAdd(ctx, q.key("waiting"), redis.Z{Score: float64(job.Priority), Member: id})
+				if err := q.pushWaiting(ctx, &job, true); err != nil {
+					continue
+				}
 			}
 		}
 	}
@@ -403,9 +448,9 @@ func (q *Queue) stalledChecker(ctx context.Context) {
 						continue
 					}
 					q.rdb.SRem(ctx, q.key("active"), id)
-					job.State = StateWaiting
-					q.saveJob(ctx, &job)
-					q.rdb.ZAdd(ctx, q.key("waiting"), redis.Z{Score: float64(job.Priority), Member: id})
+					if err := q.pushWaiting(ctx, &job, false); err != nil {
+						continue
+					}
 					q.emit(Event{Type: EventStalled, Job: &job})
 					slog.Debug("redisqueue: stalled job re-queued", "queue", q.name, "id", id)
 				}

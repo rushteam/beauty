@@ -56,8 +56,12 @@ q.StartWorker(ctx, func(ctx context.Context, job *redisqueue.Job) error {
 ## Redis 数据结构
 
 ```
-{prefix}:{queue}:waiting   — Sorted Set (score = priority)
-{prefix}:{queue}:delayed   — Sorted Set (score = 到期 unix ms)
+{prefix}:{queue}:waiting      — Sorted Set (score = priority*1e10 + 到达序号)
+{prefix}:{queue}:seq          — 到达序号
+{prefix}:{queue}:priorities   — 出现过的优先级
+{prefix}:{queue}:ratio:cursor — 比例调度当前档(仅 WithRatio)
+{prefix}:{queue}:ratio:left   — 当前档剩余份额(仅 WithRatio)
+{prefix}:{queue}:delayed      — Sorted Set (score = 到期 unix ms)
 {prefix}:{queue}:active    — Set (正在处理的 job ID)
 {prefix}:{queue}:completed — Set
 {prefix}:{queue}:failed    — Set
@@ -67,13 +71,24 @@ q.StartWorker(ctx, func(ctx context.Context, job *redisqueue.Job) error {
 
 ## 核心机制
 
-### 优先级
+### 优先级与比例
 
-Sorted Set 的 score 即 priority,`ZPOPMIN` 取出最小分数(最高优先级):
+`waiting` 的分数是 `priority * 1e10 + 到达序号`。`ZPOPMIN` 先取优先级数值最小的一档,同一档按到达顺序。延迟任务到期、失败重试会拿到新序号,排到同档队尾;worker 崩溃后按原序号回到原来的位置。
 
 ```go
-q.Submit(ctx, &redisqueue.Job{ID: "urgent", Priority: 0})  // 先消费
-q.Submit(ctx, &redisqueue.Job{ID: "normal", Priority: 10}) // 后消费
+q.Submit(ctx, &redisqueue.Job{ID: "a", Priority: 5})
+q.Submit(ctx, &redisqueue.Job{ID: "b", Priority: 5})
+q.Submit(ctx, &redisqueue.Job{ID: "vip", Priority: 0})
+// 消费顺序: vip、a、b
+```
+
+`WithRatio` 改为按份额轮转。消费端配置必须一致,只负责投递的进程不用配。下面是每 5 个普通任务放行 1 个 VIP:
+
+```go
+q := redisqueue.New(rdb, "images", redisqueue.WithRatio(
+    redisqueue.Share{Priority: 10, Count: 5},
+    redisqueue.Share{Priority: 0, Count: 1},
+))
 ```
 
 ### 延迟任务

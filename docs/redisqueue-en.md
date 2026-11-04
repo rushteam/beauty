@@ -58,8 +58,12 @@ q.StartWorker(ctx, func(ctx context.Context, job *redisqueue.Job) error {
 ## Redis Data Structures
 
 ```
-{prefix}:{queue}:waiting   — Sorted Set (score = priority)
-{prefix}:{queue}:delayed   — Sorted Set (score = due time in unix ms)
+{prefix}:{queue}:waiting      — Sorted Set (score = priority*1e10 + arrival sequence)
+{prefix}:{queue}:seq          — arrival sequence
+{prefix}:{queue}:priorities   — priorities that have been submitted
+{prefix}:{queue}:ratio:cursor — current ratio lane (only with WithRatio)
+{prefix}:{queue}:ratio:left   — remaining releases in the current lane (only with WithRatio)
+{prefix}:{queue}:delayed      — Sorted Set (score = due time in unix ms)
 {prefix}:{queue}:active    — Set (IDs of jobs being processed)
 {prefix}:{queue}:completed — Set
 {prefix}:{queue}:failed    — Set
@@ -69,13 +73,24 @@ q.StartWorker(ctx, func(ctx context.Context, job *redisqueue.Job) error {
 
 ## Core Mechanisms
 
-### Priority
+### Priority and ratio
 
-The Sorted Set score is the priority; `ZPOPMIN` pops the lowest score (highest priority):
+The waiting-set score is `priority * 1e10 + arrival sequence`. `ZPOPMIN` takes the smallest priority first, and arrival order inside that priority. A delayed job, once due, and a failed job being retried both receive a new sequence and join the tail of their lane. A job requeued after a worker crash keeps its original sequence.
 
 ```go
-q.Submit(ctx, &redisqueue.Job{ID: "urgent", Priority: 0})  // consumed first
-q.Submit(ctx, &redisqueue.Job{ID: "normal", Priority: 10}) // consumed later
+q.Submit(ctx, &redisqueue.Job{ID: "a", Priority: 5})
+q.Submit(ctx, &redisqueue.Job{ID: "b", Priority: 5})
+q.Submit(ctx, &redisqueue.Job{ID: "vip", Priority: 0})
+// order: vip, a, b
+```
+
+`WithRatio` interleaves lanes. Every consumer of the queue must use the same shares; a process that only submits jobs does not. One VIP after every five normal jobs:
+
+```go
+q := redisqueue.New(rdb, "images", redisqueue.WithRatio(
+    redisqueue.Share{Priority: 10, Count: 5},
+    redisqueue.Share{Priority: 0, Count: 1},
+))
 ```
 
 ### Delayed Jobs

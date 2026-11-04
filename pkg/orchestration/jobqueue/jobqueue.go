@@ -8,7 +8,7 @@
 //
 // 与 pkg/orchestration/scheduler 的区别:
 //   - scheduler 是 FIFO channel + 工作池,不支持优先级/进度/事件;
-//   - jobqueue 用 priority 堆做排序,每个 Job 有状态机 + 进度回调。
+//   - jobqueue 按优先级分车道,车道内先来后到;也可改成按比例轮转。每个 Job 有状态机 + 进度回调。
 //
 // 与 pkg/orchestration/delayqueue 的区别:
 //   - delayqueue 仅"到点触发回调",不关心执行状态与并发控制;
@@ -25,8 +25,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/rushteam/beauty/pkg/foundation/priority"
 )
 
 // JobState 任务状态。
@@ -64,6 +62,7 @@ type Job struct {
 	// Name 任务名称(用于日志/metrics 分组)。
 	Name string
 	// Priority 优先级:数值越小越优先(0 最高)。默认 0。
+	// 同一优先级内按入队顺序执行。WithRatio 开启时,各优先级按份额轮转,不再是高优先级独占。
 	Priority int
 	// Payload 任务数据(业务自定义)。
 	Payload any
@@ -96,6 +95,7 @@ type Job struct {
 	CompletedAt time.Time
 
 	readyAt time.Time // 就绪时刻(对延迟任务,readyAt = CreatedAt + Delay)
+	seq     uint64    // 进入就绪队列时的到达序号,同优先级内越小越先
 }
 
 // EventType 事件类型。
@@ -184,6 +184,7 @@ type Config struct {
 	QueueSize int       // 内部就绪信号缓冲,默认 1024
 	Hook      EventHook // 事件钩子(nil=不回调)
 	OnPanic   func(job *Job, r any, stack []byte)
+	shares    []Share // 非空时按比例轮转;由 WithRatio 写入
 }
 
 // Option 配置函数。
@@ -211,10 +212,11 @@ type Queue struct {
 	cfg Config
 
 	mu      sync.Mutex
-	pq      *priority.Queue[*Job] // 就绪任务的优先级堆
-	delayed []*Job                // 延迟任务列表(由 ticker 驱动转就绪)
-	byID    map[string]*Job       // ID → Job(用于查询/取消)
-	signal  chan struct{}         // 通知 worker 有新任务就绪
+	seq     uint64          // 就绪序号,在 mu 下递增
+	ready   *readyQueue     // 按优先级分车道的就绪队列
+	delayed []*Job          // 延迟任务列表(由 ticker 驱动转就绪)
+	byID    map[string]*Job // ID → Job(用于查询/取消)
+	signal  chan struct{}   // 通知 worker 有新任务就绪
 
 	paused    atomic.Bool
 	pauseMu   sync.Mutex
@@ -241,7 +243,7 @@ func New(opts ...Option) *Queue {
 	}
 	q := &Queue{
 		cfg:    cfg,
-		pq:     priority.New[*Job](func(a, b *Job) bool { return a.Priority < b.Priority }),
+		ready:  newReady(cfg.shares),
 		byID:   make(map[string]*Job),
 		signal: make(chan struct{}, cfg.QueueSize),
 		stopCh: make(chan struct{}),
@@ -337,7 +339,7 @@ func (q *Queue) Paused() bool { return q.paused.Load() }
 func (q *Queue) Pending() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.pq.Len()
+	return q.ready.len()
 }
 
 // Stop 停止队列。
@@ -356,12 +358,24 @@ func (q *Queue) Stop() {
 
 func (q *Queue) enqueue(job *Job) {
 	q.mu.Lock()
+	q.enqueueLocked(job)
+	q.mu.Unlock()
+	q.notify()
+}
+
+// enqueueLocked 把任务放入就绪队列。调用方须持有 mu。
+// 每次进入就绪队列都重新取序号,因此延迟任务到期、失败重试都会排到同优先级的队尾。
+func (q *Queue) enqueueLocked(job *Job) {
+	q.seq++
+	job.seq = q.seq
 	job.State = StateWaiting
-	q.pq.Push(job)
+	q.ready.push(job)
 	if job.ID != "" {
 		q.byID[job.ID] = job
 	}
-	q.mu.Unlock()
+}
+
+func (q *Queue) notify() {
 	select {
 	case q.signal <- struct{}{}:
 	default:
@@ -371,15 +385,12 @@ func (q *Queue) enqueue(job *Job) {
 func (q *Queue) dequeue() (*Job, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for q.pq.Len() > 0 {
-		job := q.pq.Pop()
-		if job.State != StateWaiting {
-			continue // 已取消
-		}
-		job.State = StateActive
-		return job, true
+	job, ok := q.ready.pop()
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	job.State = StateActive
+	return job, true
 }
 
 func (q *Queue) worker() {
@@ -485,24 +496,24 @@ func (q *Queue) delayScheduler() {
 		select {
 		case now := <-ticker.C:
 			q.mu.Lock()
-			var remaining []*Job
+			remaining := []*Job{}
+			nReady := 0
 			for _, job := range q.delayed {
 				if job.State == StateFailed || job.State == StateCompleted {
 					continue // 已取消
 				}
 				if now.After(job.readyAt) || now.Equal(job.readyAt) {
-					job.State = StateWaiting
-					q.pq.Push(job)
-					select {
-					case q.signal <- struct{}{}:
-					default:
-					}
+					q.enqueueLocked(job)
+					nReady++
 				} else {
 					remaining = append(remaining, job)
 				}
 			}
 			q.delayed = remaining
 			q.mu.Unlock()
+			for range nReady {
+				q.notify()
+			}
 		case <-q.stopCh:
 			return
 		}

@@ -61,7 +61,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/llmsession`](llmsession) | `llm/agent/session.Store` 的 SQLite / Redis 实现 | modernc.org/sqlite、go-redis |
 | [`contrib/llmcheckpoint`](llmcheckpoint) | `llm/agent` RunStore / CheckpointStore 的 SQLite / Redis 持久化 | llm + modernc.org/sqlite、go-redis |
 | [`contrib/llmservice`](llmservice) | 胶水:把 llm/agent 包装为 beauty.Service;worker 池 + SSE HTTP + MQ 消费 + 分布式锁/亲和路由 | llm + beauty core |
-| [`contrib/agones`](agones) | Agones GameServer 生命周期 × `pkg/game/gameroom`(Ready/Drain/Shutdown + WatchContext) | agones.dev/agones |
+| [`contrib/agones`](agones) | Agones GameServer 生命周期 × `pkg/game/gameroom`(Ready/Drain/Shutdown + WatchContext);`Roster` 按名字登记多 Fleet,分配时带上 namespace | agones.dev/agones |
 | [`contrib/vector`](vector) | 向量存储 / RAG 语义检索:Store 接口 + 内存实现,配 llm 搭 RAG | 无(纯 stdlib) |
 | [`contrib/memoryvector`](memoryvector) | 胶水:Embedder + vector → `llm/agent/memory.Store`(语义长期记忆) | llm + vector |
 | [`contrib/mcp`](mcp) | Model Context Protocol:把服务暴露成 AI 工具(server)+ 消费(client),struct→schema 自动反射 | modelcontextprotocol/go-sdk |

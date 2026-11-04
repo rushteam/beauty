@@ -119,6 +119,8 @@ generics + functional Options, usable independently or combined with the table a
 | `pkg/domain/chat` | Channel persistent messages + cursor pagination | IM channel history / paging | 8300 |
 | `pkg/domain/inbox` | P2P offline message inbox (read/unread + ACK) | Offline DM / offline gifts / match result push | 8304 |
 | `pkg/domain/group` | Group entity (roles/invite approval/announcements/banlist) | Guilds / group chat / clans | 8304 |
+| `pkg/domain/billing` | Payment-channel registry (purchase / plan / callback) | Grant after verification, refund notices | — |
+| `pkg/domain/identity` | External login channel bound to a local account | Device or third-party sign-in, bind and release | — |
 
 > Also `examples/clan` (port 8301) demonstrates guild semantics composed from relationship + tournament + wallet, without adding a new package.
 
@@ -306,6 +308,44 @@ m.Remove(ticketID); m.Count()
 ```
 
 Timeout relaxes bucket constraints (`maxWaitSec`) to avoid long waits. See `examples/matchmaker`.
+
+## Quick Reference: pkg/domain/billing (payment channel registry)
+
+Register a channel by name. The registry does not parse store receipts: the caller supplies the check, and grants still go through `wallet`.
+Names are case-insensitive. `Hook` is the callback path key; empty means the channel name.
+
+```go
+reg := billing.New()
+reg.Add("wechat", billing.Channel{
+    Verify: func(ctx context.Context, claim billing.Claim) (billing.Order, error) {
+        return billing.Order{Ref: "o1", UserID: claim.UserID, Product: claim.Product}, nil
+    },
+    ParseNotice: func(ctx context.Context, notice billing.Notice) ([]billing.Change, error) {
+        return []billing.Change{{Kind: billing.KindRefunded, Ref: "o1"}}, nil
+    },
+})
+order, _ := reg.Verify(ctx, "WeChat", billing.Claim{UserID: "u1", Product: "gem"})
+changes, _ := reg.ParseHook(ctx, "wechat", billing.Notice{Body: body})
+```
+
+A channel that only sets `Verify` returns `ErrNoPlan` / `ErrNoNotice` from `VerifyPlan` / `ParseNotice`.
+
+## Quick Reference: pkg/domain/identity (external identity binding)
+
+A channel turns a credential into an external id. The directory only stores the binding. `SignIn` returns `*UnboundError` when nothing is bound yet; the caller creates the account, then `Bind`. One account has one binding per channel.
+
+```go
+dir := identity.New()
+dir.Add("device", identity.ResolverFunc(func(ctx context.Context, cred identity.Credential) (identity.Principal, error) {
+    return identity.Principal{ExternalID: cred.Token}, nil
+}))
+b, err := dir.SignIn(ctx, "device", identity.Credential{Token: "dev-1"})
+var unbound *identity.UnboundError
+if errors.As(err, &unbound) {
+    dir.Bind("acc-1", "device", unbound.Principal)
+}
+dir.Release("acc-1", "device")
+```
 
 ## Quick Reference: pkg/domain/wallet (Immutable Ledger + Derived Balance)
 

@@ -46,6 +46,19 @@ result, _ := alloc.Allocate(ctx, agones.AllocationRequest{})
 // result.Address → 客户端 WS 直连
 ```
 
+一块匹配服要向多个命名空间领房间时,用名册按名字登记。名字比较忽略大小写。
+请求里没写 Namespace 时,用登记时的那个。
+
+```go
+roster := agones.NewRoster()
+_ = roster.Add(agones.Fleet{Name: "eu", Namespace: "prod-eu", Alloc: euAlloc})
+_ = roster.Add(agones.Fleet{Name: "us", Namespace: "prod-us", Alloc: usAlloc})
+result, _ = roster.Allocate(ctx, "EU", agones.AllocationRequest{})
+
+// 房间进程记下自己所在的命名空间
+ctrl, _ = handle.Attach(sdk, agones.WithNamespace("prod-eu"))
+```
+
 [`examples/matchmaker-room`](../../examples/matchmaker-room) 默认 PoolAllocator;设 `BEAUTY_AGONES_ALLOCATOR=host:443` + `BEAUTY_AGONES_ALLOCATOR_INSECURE=1`(联调) 切换 gRPC。
 
 ## Demo

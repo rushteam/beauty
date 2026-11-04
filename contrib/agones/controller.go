@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,10 @@ type Controller struct {
 	// ShutdownGrace 收到 Shutdown 后等待对局结束的最长时间(默认 30s)。
 	ShutdownGrace time.Duration
 
+	// Namespace 是本进程 GameServer 所在的命名空间(默认 default)。
+	// 匹配服按这个名字向 Roster 领房间;这里只记录身份,不参与分配。
+	Namespace string
+
 	mu      sync.Mutex
 	running bool
 }
@@ -49,6 +54,16 @@ func WithShutdownGrace(d time.Duration) Option {
 	}
 }
 
+// WithNamespace 记录本 GameServer 的命名空间。空字符串保持默认 default。
+func WithNamespace(ns string) Option {
+	return func(c *Controller) {
+		ns = strings.TrimSpace(ns)
+		if ns != "" {
+			c.Namespace = ns
+		}
+	}
+}
+
 // NewController 创建 Controller。RoomID 为 gameroom 中分配的房间 id。
 func NewController(sdk Lifecycle, mgr *gameroom.Manager, roomID string, opts ...Option) (*Controller, error) {
 	if sdk == nil || mgr == nil {
@@ -57,7 +72,7 @@ func NewController(sdk Lifecycle, mgr *gameroom.Manager, roomID string, opts ...
 	if roomID == "" {
 		return nil, fmt.Errorf("agones: empty room id")
 	}
-	c := &Controller{SDK: sdk, Manager: mgr, RoomID: roomID, ShutdownGrace: 30 * time.Second}
+	c := &Controller{SDK: sdk, Manager: mgr, RoomID: roomID, ShutdownGrace: 30 * time.Second, Namespace: "default"}
 	for _, o := range opts {
 		o(c)
 	}
@@ -76,7 +91,7 @@ func (c *Controller) Run(ctx context.Context) error {
 	if err := c.SDK.Ready(); err != nil {
 		return fmt.Errorf("agones: ready: %w", err)
 	}
-	slog.Info("agones: gameserver ready", "room", c.RoomID)
+	slog.Info("agones: gameserver ready", "room", c.RoomID, "namespace", c.Namespace)
 
 	c.mu.Lock()
 	c.running = true

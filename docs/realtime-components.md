@@ -118,6 +118,8 @@ beauty 在 `pkg/transport/ws`（WebSocket 薄封装）和 `pkg/transport/sse`（
 | `pkg/domain/chat` | 频道持久消息 + 游标分页 | IM 频道历史 / 翻页 | 8300 |
 | `pkg/domain/inbox` | 点对点离线消息收件箱(已读/未读 + ACK) | 离线私聊 / 离线赠礼 / 战绩推送 | 8304 |
 | `pkg/domain/group` | 群组实体(角色/邀请审核/公告/banlist) | 公会 / 群聊 / 家族 | 8304 |
+| `pkg/domain/billing` | 支付渠道注册表(购买 / 订阅 / 回调) | 验单后发货、退款通知 | — |
+| `pkg/domain/identity` | 外部登录渠道 ↔ 本地账号绑定 | 设备号 / 第三方登录后的绑定与解绑 | — |
 
 > 另有 `examples/clan`(端口 8301)演示用 relationship + tournament + wallet 组合出公会语义,不新增包。
 
@@ -338,6 +340,45 @@ m.Remove(ticketID); m.Count()
 ```
 
 超时放宽桶约束(`maxWaitSec`),避免长等待。详见 `examples/matchmaker`。
+
+## 速查:pkg/domain/billing（支付渠道注册表）
+
+按名字登记渠道。注册表不解析商店收据:调用方实现校验函数,发货仍走 `wallet`。
+名字忽略大小写。`Hook` 是回调路径上的名字,空则用渠道名。
+
+```go
+reg := billing.New()
+reg.Add("wechat", billing.Channel{
+    Verify: func(ctx context.Context, claim billing.Claim) (billing.Order, error) {
+        return billing.Order{Ref: "o1", UserID: claim.UserID, Product: claim.Product}, nil
+    },
+    ParseNotice: func(ctx context.Context, notice billing.Notice) ([]billing.Change, error) {
+        return []billing.Change{{Kind: billing.KindRefunded, Ref: "o1"}}, nil
+    },
+})
+order, _ := reg.Verify(ctx, "WeChat", billing.Claim{UserID: "u1", Product: "gem"})
+changes, _ := reg.ParseHook(ctx, "wechat", billing.Notice{Body: body})
+```
+
+只填了 `Verify` 的渠道,`VerifyPlan` / `ParseNotice` 分别返回 `ErrNoPlan` / `ErrNoNotice`。
+
+## 速查:pkg/domain/identity（外部身份绑定）
+
+渠道把凭据解析成外部 id;目录只保存绑定。`SignIn` 尚未绑定时返回 `*UnboundError`,
+调用方开户后再 `Bind`。一个账号在同一渠道上只能有一条绑定。
+
+```go
+dir := identity.New()
+dir.Add("device", identity.ResolverFunc(func(ctx context.Context, cred identity.Credential) (identity.Principal, error) {
+    return identity.Principal{ExternalID: cred.Token}, nil
+}))
+b, err := dir.SignIn(ctx, "device", identity.Credential{Token: "dev-1"})
+var unbound *identity.UnboundError
+if errors.As(err, &unbound) {
+    dir.Bind("acc-1", "device", unbound.Principal)
+}
+dir.Release("acc-1", "device")
+```
 
 ## 速查:pkg/domain/wallet（不可变账本 + 余额派生）
 

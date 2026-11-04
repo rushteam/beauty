@@ -75,6 +75,12 @@
 | GraphQL / BFF | — | [graphql-bff](graphql-bff.md) | `contrib/graphql` | [graphql-bff](../examples/graphql-bff) |
 | WASM Roadmap | [wasm-roadmap](wasm-roadmap.md) | [wasm-roadmap-en](wasm-roadmap-en.md) | `contrib/wasm*` | — |
 
+## LLM 与 Agent
+
+| 主题 | 中文 | English | 相关包 | 示例 |
+|---|---|---|---|---|
+| LLM / Agent 架构（分层、数据流、协议） | [llm-agent](llm-agent.md) | [llm-agent-en](llm-agent-en.md) | `contrib/llm` · `llmservice` · `a2a` · `agui` · `mcp` | [agentservice](../examples/agentservice) · [llm-httpui](../examples/llm-httpui) |
+
 ## 实时通信与媒体
 
 | 主题 | 中文 | English | 相关包 | 示例 |

@@ -4,6 +4,8 @@
 **输入护栏**中间件,外加一个薄 **agent 循环**(`llm/agent`)。**纯标准库、零外部依赖**
 (各家 provider 用 HTTP 直连其 REST API,不引重型 SDK),不 import beauty 核心。
 
+跨模块的分层、数据流和能力边界见 [LLM 与 Agent 架构](../../docs/llm-agent.md)。
+
 ```bash
 go get github.com/rushteam/beauty/contrib/llm@latest
 ```

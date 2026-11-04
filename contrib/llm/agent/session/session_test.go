@@ -257,6 +257,80 @@ func TestManager_RollingSummary(t *testing.T) {
 	}
 }
 
+// 内容块里的文字要进摘要;预算不够时只折完整前缀,后面的旧消息留着。
+func TestSummarizer_PartsAndInputBudget(t *testing.T) {
+	ctx := context.Background()
+	runClient := &replyClient{reply: "ok"}
+	sumClient := &replyClient{reply: "摘要"}
+	r := &agent.Runner{Client: runClient}
+	st := session.NewMemoryStore()
+	m := &session.Manager{
+		Store: st,
+		Summarizer: &session.Summarizer{
+			Client: sumClient, Model: "m",
+			MaxMessages: 4, KeepRecent: 2,
+			MaxInputTokens: 40,
+			Estimate:       func(s string) int { return len(s) },
+		},
+	}
+
+	first := llm.Request{Model: "m", Messages: []llm.Message{{
+		Role:  llm.User,
+		Parts: []llm.Part{{Type: llm.PartText, Text: "零件说明"}},
+	}}}
+	if _, err := m.Run(ctx, "s", r, first).Final(); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []string{"bbbbbbbb", "c"} {
+		if _, err := m.Run(ctx, "s", r, user(in)).Final(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sess, _ := st.Load(ctx, "s")
+	if sess.Summary != "摘要" {
+		t.Fatalf("summary = %q", sess.Summary)
+	}
+	prompt := sumClient.last.Messages[0].Content
+	if !strings.Contains(prompt, "零件说明") {
+		t.Fatalf("摘要应含内容块文字: %q", prompt)
+	}
+	if strings.Contains(prompt, "bbbbbbbb") {
+		t.Fatalf("超出预算的消息不应进摘要请求: %q", prompt)
+	}
+	if len(sess.Messages) != 4 {
+		t.Fatalf("只应折掉放得下的前缀, got %d", len(sess.Messages))
+	}
+}
+
+// 一条消息就超过预算时不调用摘要模型,会话保持原样。
+func TestSummarizer_BudgetSkipsOversizedMessage(t *testing.T) {
+	ctx := context.Background()
+	runClient := &replyClient{reply: "ok"}
+	sumClient := &replyClient{reply: "摘要"}
+	r := &agent.Runner{Client: runClient}
+	st := session.NewMemoryStore()
+	m := &session.Manager{
+		Store: st,
+		Summarizer: &session.Summarizer{
+			Client: sumClient, Model: "m",
+			MaxMessages: 1, KeepRecent: 1,
+			MaxInputTokens: 5,
+			Estimate:       func(s string) int { return len(s) },
+		},
+	}
+	if _, err := m.Run(ctx, "s", r, user("HELLOHELLO")).Final(); err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := st.Load(ctx, "s")
+	if sess.Summary != "" || len(sess.Messages) != 2 {
+		t.Fatalf("超预算时不应折叠, summary=%q msgs=%d", sess.Summary, len(sess.Messages))
+	}
+	if len(sumClient.last.Messages) != 0 {
+		t.Fatalf("不应调用摘要模型: %+v", sumClient.last.Messages)
+	}
+}
+
 // KeepRecent >= len(Messages) 时不应 panic,也不应截断消息。
 func TestManager_SummarizerKeepRecentGteLen(t *testing.T) {
 	ctx := context.Background()

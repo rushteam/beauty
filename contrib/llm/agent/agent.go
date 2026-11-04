@@ -332,6 +332,10 @@ type Runner struct {
 	// nil 时用 DefaultRecovery。
 	Recovery *Recovery
 
+	// MissingToolResult 给历史里没有对应结果的工具调用生成补上的正文。
+	// nil 时用固定说明。在每次模型调用前执行,避免厂商因悬空 tool_call 拒绝请求。
+	MissingToolResult MissingToolResult
+
 	// nestedResume 保存 AgentAsTool 等冒泡暂停时的子 Continue 回调(进程内,不入 Store)。
 	nestedResume sync.Map // runID → func(ctx, []Resolution, ...Option) iter.Seq2[Event, error]
 

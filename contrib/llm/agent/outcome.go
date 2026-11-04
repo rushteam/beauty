@@ -53,6 +53,8 @@ type RunOutcome struct {
 	Requirements     []Requirement // Paused 时非空
 	Err              error         // Status=Error 时非 nil
 	CompletingMember string        // 编排器用:完成终态的成员名(Team 等)
+	// Usage 是这次 run 里各次模型调用的用量合计,来自事件流,不从消息正文回推。
+	Usage llm.Usage
 }
 
 // IsDone 表示已得到终态文本回复。
@@ -126,20 +128,48 @@ func (e *NestedPauseError) Is(target error) bool { return target == ErrPaused }
 func CollectOutcome(seq iter.Seq2[Event, error]) RunOutcome {
 	var last *llm.Response
 	var msgs []llm.Message
+	var usage llm.Usage
+	var sawStep bool
 	for ev, err := range seq {
 		if err != nil {
-			return outcomeError("", last, msgs, err)
+			out := outcomeError("", last, msgs, err)
+			out.Usage = usage
+			return out
 		}
 		switch ev.Type {
 		case EventFinal:
-			return outcomeDone(ev.RunID, ev.Response, msgs)
+			out := outcomeDone(ev.RunID, ev.Response, msgs)
+			out.Usage = usageFromSteps(sawStep, usage, ev.Response)
+			return out
 		case EventPaused:
-			return outcomePaused(ev.RunID, ev.Response, msgs, ev.Requirements)
+			out := outcomePaused(ev.RunID, ev.Response, msgs, ev.Requirements)
+			out.Usage = usageFromSteps(sawStep, usage, ev.Response)
+			return out
 		case EventError:
-			return outcomeError(ev.RunID, ev.Response, msgs, ev.Err)
+			out := outcomeError(ev.RunID, ev.Response, msgs, ev.Err)
+			out.Usage = usageFromSteps(sawStep, usage, ev.Response)
+			return out
 		case EventStep:
 			last = ev.Response
+			if ev.Response != nil {
+				usage = usage.Add(ev.Response.Usage)
+				sawStep = true
+			}
 		}
 	}
-	return outcomeDone("", last, msgs)
+	out := outcomeDone("", last, msgs)
+	out.Usage = usageFromSteps(sawStep, usage, last)
+	return out
+}
+
+// usageFromSteps 在看到过 EventStep 时用各步之和;否则用终态响应上的用量。
+// 终态响应经常重复最后一步,两边都加会重复计数。
+func usageFromSteps(sawStep bool, stepSum llm.Usage, final *llm.Response) llm.Usage {
+	if sawStep {
+		return stepSum
+	}
+	if final != nil {
+		return final.Usage
+	}
+	return llm.Usage{}
 }

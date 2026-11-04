@@ -28,6 +28,11 @@ func TestSQLiteStore_RoundTrip(t *testing.T) {
 		Summary:   "sum",
 		Messages:  []llm.Message{{Role: llm.User, Content: "hi"}, {Role: llm.Assistant, Content: "yo"}},
 		UpdatedAt: time.Now().UTC().Truncate(time.Second),
+		Usage:     llm.Usage{InputTokens: 8, OutputTokens: 3},
+		Runs: []session.Run{{
+			Index: 0, ID: "r1", Status: "done",
+			Usage: llm.Usage{InputTokens: 8, OutputTokens: 3},
+		}},
 	}
 	if err := store.Save(ctx, in); err != nil {
 		t.Fatal(err)
@@ -38,6 +43,9 @@ func TestSQLiteStore_RoundTrip(t *testing.T) {
 	}
 	if out.Summary != "sum" || len(out.Messages) != 2 || out.Messages[1].Content != "yo" {
 		t.Fatalf("got %+v", out)
+	}
+	if out.Usage.InputTokens != 8 || len(out.Runs) != 1 || out.Runs[0].ID != "r1" {
+		t.Fatalf("usage/runs = %+v %+v", out.Usage, out.Runs)
 	}
 	// reopen
 	store.Close()

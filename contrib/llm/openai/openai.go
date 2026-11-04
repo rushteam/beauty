@@ -15,6 +15,7 @@ import (
 	"iter"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/rushteam/beauty/contrib/llm"
@@ -118,16 +119,76 @@ var (
 )
 
 type chatReq struct {
-	Model           string       `json:"model"`
-	Messages        []oaiMessage `json:"messages"`
-	MaxTokens       int          `json:"max_tokens,omitempty"`
-	Temperature     float64      `json:"temperature,omitempty"`
-	Stop            []string     `json:"stop,omitempty"`
-	Stream          bool         `json:"stream,omitempty"`
-	Tools           []oaiTool    `json:"tools,omitempty"`
-	ToolChoice      any          `json:"tool_choice,omitempty"`
-	ResponseFormat  any          `json:"response_format,omitempty"`
-	ReasoningEffort string       `json:"reasoning_effort,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []oaiMessage   `json:"messages"`
+	MaxTokens       int            `json:"max_tokens,omitempty"`
+	Temperature     float64        `json:"temperature,omitempty"`
+	Stop            []string       `json:"stop,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	Tools           []oaiTool      `json:"tools,omitempty"`
+	ToolChoice      any            `json:"tool_choice,omitempty"`
+	ResponseFormat  any            `json:"response_format,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+}
+
+// streamOptions 让流式响应在结束时带上 usage。没有它,缓存 token 不会出现在 SSE 里。
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+// oaiUsage 是 chat/completions 的 usage。缓存字段各家不完全一样,见 toUsage。
+type oaiUsage struct {
+	PromptTokens        int         `json:"prompt_tokens"`
+	CompletionTokens    int         `json:"completion_tokens"`
+	PromptTokensDetails oaiCacheUse `json:"prompt_tokens_details"`
+}
+
+type oaiCacheUse struct {
+	CachedTokens        tokenCount `json:"cached_tokens"`
+	CacheReadTokens     tokenCount `json:"cache_read_tokens"`
+	CacheCreationTokens tokenCount `json:"cache_creation_tokens"`
+}
+
+// tokenCount 只接受非负整数。缺字段、负数或网关给的 "n/a" 都当成 0,不让整段响应解码失败。
+type tokenCount int
+
+func (t *tokenCount) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return nil
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(s))
+		if err != nil || n < 0 {
+			return nil
+		}
+		*t = tokenCount(n)
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil || n < 0 {
+		return nil
+	}
+	*t = tokenCount(n)
+	return nil
+}
+
+func (u oaiUsage) toUsage() llm.Usage {
+	read := int(u.PromptTokensDetails.CacheReadTokens)
+	if read == 0 {
+		read = int(u.PromptTokensDetails.CachedTokens)
+	}
+	return llm.Usage{
+		InputTokens:              u.PromptTokens,
+		OutputTokens:             u.CompletionTokens,
+		CacheReadInputTokens:     read,
+		CacheCreationInputTokens: int(u.PromptTokensDetails.CacheCreationTokens),
+	}
 }
 
 // oaiMessage 是 OpenAI 的线上消息格式。Content 可能是 string(纯文本)或 []oaiContentPart(多模态)。
@@ -142,6 +203,12 @@ type oaiContentPart struct {
 	Type     string       `json:"type"`
 	Text     string       `json:"text,omitempty"`
 	ImageURL *oaiImageURL `json:"image_url,omitempty"`
+	File     *oaiFileRef  `json:"file,omitempty"`
+}
+
+// oaiFileRef 是厂商已托管文件。Chat Completions 用 type=file 加 file.file_id。
+type oaiFileRef struct {
+	FileID string `json:"file_id"`
 }
 
 type oaiImageURL struct {
@@ -197,7 +264,17 @@ func buildContentParts(parts []llm.Part) []oaiContentPart {
 		switch p.Type {
 		case llm.PartText:
 			out = append(out, oaiContentPart{Type: "text", Text: p.Text})
-		case llm.PartImage:
+		case llm.PartImage, llm.PartFile:
+			if p.FileID != "" {
+				out = append(out, oaiContentPart{
+					Type: "file",
+					File: &oaiFileRef{FileID: p.FileID},
+				})
+				continue
+			}
+			if p.Type != llm.PartImage || p.ImageURL == "" {
+				continue
+			}
 			detail := p.Detail
 			if detail == "" {
 				detail = "auto"
@@ -320,15 +397,12 @@ func (c *Client) generateCompletion(ctx context.Context, req llm.Request) (*llm.
 			Text         string `json:"text"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
+		Usage oaiUsage `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("openai: completion decode: %w", err)
 	}
-	r := &llm.Response{Model: out.Model, Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}}
+	r := &llm.Response{Model: out.Model, Usage: out.Usage.toUsage()}
 	if len(out.Choices) > 0 {
 		r.Content = out.Choices[0].Text
 		r.StopReason = out.Choices[0].FinishReason
@@ -396,6 +470,9 @@ func buildChatReq(req llm.Request, stream bool) chatReq {
 		Tools:  buildTools(req.Tools), ToolChoice: buildToolChoice(req.ToolChoice),
 		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 	}
+	if stream {
+		cr.StreamOptions = &streamOptions{IncludeUsage: true}
+	}
 	if req.Thinking != nil && req.Thinking.ReasoningEffort != "" {
 		cr.ReasoningEffort = req.Thinking.ReasoningEffort
 	}
@@ -425,15 +502,12 @@ func (c *Client) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
+		Usage oaiUsage `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("openai: decode: %w", err)
 	}
-	r := &llm.Response{Model: out.Model, Usage: llm.Usage{InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens}}
+	r := &llm.Response{Model: out.Model, Usage: out.Usage.toUsage()}
 	if len(out.Choices) > 0 {
 		r.Content = out.Choices[0].Message.Content
 		r.Thinking = out.Choices[0].Message.ReasoningContent
@@ -529,9 +603,16 @@ func (c *Client) Stream(ctx context.Context, req llm.Request) iter.Seq2[llm.Chun
 						} `json:"tool_calls"`
 					} `json:"delta"`
 				} `json:"choices"`
+				Usage *oaiUsage `json:"usage"`
 			}
 			if json.Unmarshal([]byte(data), &ev) != nil {
 				continue
+			}
+			if ev.Usage != nil {
+				u := ev.Usage.toUsage()
+				if !yield(llm.Chunk{Usage: &u}, nil) {
+					return
+				}
 			}
 			if len(ev.Choices) == 0 {
 				continue

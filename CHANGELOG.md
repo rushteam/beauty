@@ -4,8 +4,25 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 提交遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)。
-框架已发布语义化版本（当前 v0.10.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
+框架已发布语义化版本（当前 v1.5.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
+
+## [1.5.0] - 2026-11-04
+
+### Added
+
+- **支付渠道与外部身份**。`pkg/domain/billing` 按名称注册渠道，校验订单与方案、解析通知。`pkg/domain/identity` 按渠道登录、绑定和解绑外部身份；未绑定的登录返回 `UnboundError`。
+- **多 Fleet**。`contrib/agones` 的 `Roster` 按名称和命名空间分配，名字不区分大小写。
+- **会话 run**。每次 `Run` / `Continue` 记下顶层 run，子 run 挂在下面且不占分页名额。`RunsPage` 用 `Before` / `After` 做游标，并可按状态和时间过滤。token 用量写在 run 和会话上，续跑累加，不从被截断的消息回推。
+- **AG-UI 状态**。同一 thread 第一次发 `STATE_SNAPSHOT`，之后只发非空的 `STATE_DELTA`；内容没变则不发。
+- **摘要预算**。`Summarizer.MaxInputTokens` 只把放得下的完整前缀交给摘要模型。内容块里的文字也计入。
+- **厂商文件引用**。`llm.Part.FileID` 表示已托管文件。OpenAI 发 `file.file_id`，Anthropic 发 `source.file_id`，Gemini 发 `fileData.fileUri`。同时有 URL 时用 FileID。
+- **悬空工具调用**。发给模型前，给没有对应结果的 `tool_call` 补一条工具消息。`Runner.MissingToolResult` 可换成自己的正文。
+
+### Changed
+
+- **OpenAI 用量**。`prompt_tokens_details` 的缓存读、写记入 `Usage`。流式请求带 `include_usage`。
+- **SQLite 会话**。`extra` 列保存 pending run、用量、run 列表和 metadata。旧库自动补列。
 
 ## [1.4.0] - 2026-11-01
 

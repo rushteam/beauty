@@ -307,6 +307,14 @@ func (r *Runner) runLoop(ctx context.Context, runID string, req llm.Request, msg
 			}
 			req.Messages = compact
 		}
+		filled, err := FillMissingToolResults(ctx, req.Messages, r.MissingToolResult)
+		if err != nil {
+			out := outcomeError(runID, last, msgs, err)
+			r.afterTurn(ctx, &out)
+			return out
+		}
+		req.Messages = filled
+		msgs = filled
 
 		var modelEmit func(Event)
 		if emit != nil || r.Hooks.OnChunk != nil {

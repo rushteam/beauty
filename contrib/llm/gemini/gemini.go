@@ -123,7 +123,13 @@ type gPart struct {
 	FunctionCall     *gFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *gFunctionResponse `json:"functionResponse,omitempty"`
 	InlineData       *gInlineData       `json:"inlineData,omitempty"`
+	FileData         *gFileData         `json:"fileData,omitempty"`
 	Thought          *bool              `json:"thought,omitempty"`
+}
+
+// gFileData 是 Gemini 已托管文件。FileURI 原样传递调用方给的引用。
+type gFileData struct {
+	FileURI string `json:"fileUri,omitempty"`
 }
 
 type gFunctionCall struct {
@@ -280,8 +286,12 @@ func buildTextParts(m llm.Message) []gPart {
 			switch p.Type {
 			case llm.PartText:
 				parts = append(parts, gPart{Text: p.Text})
-			case llm.PartImage:
-				if strings.HasPrefix(p.ImageURL, "data:") {
+			case llm.PartImage, llm.PartFile:
+				if p.FileID != "" {
+					parts = append(parts, gPart{FileData: &gFileData{FileURI: p.FileID}})
+					continue
+				}
+				if p.Type == llm.PartImage && strings.HasPrefix(p.ImageURL, "data:") {
 					mt, data := parseDataURI(p.ImageURL)
 					parts = append(parts, gPart{InlineData: &gInlineData{MimeType: mt, Data: data}})
 				}

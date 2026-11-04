@@ -122,6 +122,37 @@ func TestHandler_ServeHTTP_SSE(t *testing.T) {
 	}
 }
 
+func TestHandler_StateSnapshotThenDelta(t *testing.T) {
+	h := NewHandler(&mockAgent{
+		events: []agent.Event{{Type: agent.EventFinal, Response: &llm.Response{Content: "ok"}}},
+	}, HandlerConfig{})
+	post := func(state string) string {
+		body := []byte(`{"threadId":"t","runId":"r","messages":[{"role":"user","content":"hi"}],"state":` + state + `}`)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/agent", bytes.NewReader(body))
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	first := post(`{"step":1,"name":"a"}`)
+	if !strings.Contains(first, `"type":"STATE_SNAPSHOT"`) || strings.Contains(first, `"type":"STATE_DELTA"`) {
+		t.Fatalf("first = %s", first)
+	}
+	second := post(`{"step":2,"name":"a"}`)
+	if strings.Contains(second, `"type":"STATE_SNAPSHOT"`) || !strings.Contains(second, `"type":"STATE_DELTA"`) {
+		t.Fatalf("second = %s", second)
+	}
+	if !strings.Contains(second, `"op":"replace"`) || !strings.Contains(second, `"/step"`) {
+		t.Fatalf("patch = %s", second)
+	}
+	third := post(`{"name":"a","step":2}`)
+	if strings.Contains(third, `"type":"STATE_SNAPSHOT"`) || strings.Contains(third, `"type":"STATE_DELTA"`) {
+		t.Fatalf("unchanged state still emitted: %s", third)
+	}
+}
+
 func TestNewAgent_Info(t *testing.T) {
 	a := NewAgent("http://example/agent", ClientConfig{Name: "remote", Description: "desc"})
 	info := a.Info()

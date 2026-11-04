@@ -57,7 +57,7 @@ model client    llm (Client / Embedder / middleware / providers)
 
 `Client` is the common interface: `Generate` returns once, `Stream` yields increments as `iter.Seq2`. `Embedder` sits beside it. Image generation, image edit, and speech are implemented on the OpenAI provider.
 
-A request can carry tool calls, JSON Schema structured output, text plus images, extended thinking / reasoning, and Anthropic prompt-cache markers.
+A request can carry tool calls, JSON Schema structured output, text plus images, a provider file id, extended thinking / reasoning, and Anthropic prompt-cache markers. OpenAI prompt-cache reads and writes are recorded on `Usage`.
 
 | Adapter | Coverage |
 |---|---|
@@ -85,7 +85,7 @@ Inside the loop:
 - **Hooks.** A turn, a model step, a stream chunk, and the tool boundary can rewrite the request, arguments, and result.
 - **Mailbox.** A run can receive a user aside, or a one-shot / persistent system context.
 - **History vs context.** `HistoryProvider` loads and stores the session. `ContextProvider` supplies RAG, skills, and `AGENTS.md`. Messages carry a source tag so history is not written twice.
-- **Compaction and recovery.** Tool-call JSON can be repaired. Compaction strategies include a sliding window, truncation, tool-result shrinking, and a summarizer that calls a model. `Recovery` handles context overflow and output-token limits.
+- **Compaction and recovery.** Tool-call JSON can be repaired. Compaction strategies include a sliding window, truncation, tool-result shrinking, and a summarizer that calls a model. Tool calls that have no result are filled in before the model sees the history. `Recovery` handles context overflow and output-token limits.
 - **Tool scope.** `ToolScope` filters the visible tools per step. `AgentAsTool` wraps a child agent as one tool of the parent; a child pause bubbles up.
 - **Checkpoints.** Pause snapshots go to `RunStore` (in-process by default). `Registry` tracks in-flight calls by request id for cancel and status.
 
@@ -107,7 +107,7 @@ Use code composition for simple flows. Use `llm/agent/workflow` for branches, lo
 
 ## Memory, skills, and execution
 
-- **Session.** `session.Manager` wraps any `Agent`, stores multi-turn history, and rolls a summary when the history grows. Memory and JSON files live in the llm module; SQLite / Redis live in `contrib/llmsession`.
+- **Session.** `session.Manager` wraps any `Agent`, stores multi-turn history, and rolls a summary when the history grows. A token budget keeps the summary request to a complete prefix, and text inside content parts is included. Each run is stored on its own and can be paged by cursor. Token totals live on the run and the session. Memory and JSON files live in the llm module; SQLite / Redis live in `contrib/llmsession`.
 - **Long-term memory.** `memory_add` / `memory_search` / `memory_delete`. Default search is substring. `memoryvector` uses an Embedder plus `vector.Store` for semantic search. `vector` ships an in-memory cosine store.
 - **Skills.** `SKILL.md` layout. The system prompt lists names only; the model pulls the body, references, and scripts on demand. Script execution is off by default. When enabled it is a local process with path-traversal checks. `wasmagent` can replace the executor with a wasm sandbox, or expose a wasm module as an `agent.Tool`.
 - **AGENTS.md.** Files are collected upward from the working directory and concatenated from repository root toward the current directory.
@@ -121,7 +121,7 @@ Use code composition for simple flows. Use `llm/agent/workflow` for branches, lo
 | `llmservice` | HTTP / MQ tasks enter `Agent.Run`; SSE emits the event stream. Shutdown cancels in-flight runs and flushes checkpoints. Continue takes a lock on `run_id`. |
 | `mcp` / `mcpagent` | A service exposes tools over MCP. The client bridges remote tools to `agent.Tool` and feeds text results back to the model. |
 | `a2a` | A local `StreamAgent` is an A2A HTTP server. A remote A2A agent is wrapped as `agent.Agent` and can join a Chain or Team. Tokens, tool results, and HITL pauses are mapped. |
-| `agui` | POST `RunAgentInput`, respond with SSE (`TEXT_MESSAGE_*` / `TOOL_CALL_*`, and so on). The protocol has no Continue; approval resume is simulated by appending a user message. |
+| `agui` | POST `RunAgentInput`, respond with SSE (`TEXT_MESSAGE_*` / `TOOL_CALL_*`, and so on). The first `state` for a thread is a snapshot; later changes are a JSON Patch delta. The protocol has no Continue; approval resume is simulated by appending a user message. |
 
 Runnable examples: [agentservice](../examples/agentservice) (guards, tool loop, skills, approval, session, SSE; offline stub by default), [llm-httpui](../examples/llm-httpui).
 

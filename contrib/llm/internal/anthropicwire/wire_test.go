@@ -71,6 +71,19 @@ func TestBuildParts_Multimodal(t *testing.T) {
 	}
 }
 
+func TestBuildParts_FileID(t *testing.T) {
+	blocks := BuildParts([]llm.Part{
+		{Type: llm.PartImage, FileID: "file_img", ImageURL: "https://ignored"},
+		{Type: llm.PartFile, FileID: "file_doc"},
+	})
+	if len(blocks) != 2 || blocks[0].Type != "image" || blocks[0].Source.Type != "file" || blocks[0].Source.FileID != "file_img" {
+		t.Fatalf("image file = %#v", blocks[0])
+	}
+	if blocks[1].Type != "document" || blocks[1].Source.FileID != "file_doc" {
+		t.Fatalf("document file = %#v", blocks[1])
+	}
+}
+
 func TestBuildTools_DefaultSchema(t *testing.T) {
 	ts := BuildTools([]llm.ToolDef{{Name: "noargs"}})
 	if len(ts) != 1 || string(ts[0].InputSchema) != `{"type":"object","properties":{}}` {

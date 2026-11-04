@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"
@@ -25,6 +26,9 @@ type HandlerConfig struct {
 type Handler struct {
 	Agent agent.Agent
 	Cfg   HandlerConfig
+
+	mu    sync.Mutex
+	snaps map[string]json.RawMessage
 }
 
 // NewHandler 创建 AG-UI HTTP 处理器。
@@ -69,6 +73,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RunID:     runID,
 		Timestamp: nowTimestamp(),
 	})
+	if ev, ok := h.stateEvent(threadID, input.State); ok {
+		ev.RunID = runID
+		ev.Timestamp = nowTimestamp()
+		writeEvent(w, fl, ev)
+	}
 
 	messages := inputToBeautyMessages(&input)
 	req := llm.Request{Messages: messages}

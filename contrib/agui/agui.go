@@ -73,8 +73,10 @@ type Event struct {
 	// STEP_* 字段
 	StepName string `json:"stepName,omitempty"`
 
-	// STATE_SNAPSHOT / STATE_DELTA 字段
+	// STATE_SNAPSHOT / STATE_DELTA 字段。
+	// Delta 在文本事件里是字符串;状态差量的补丁放在 Patch,序列化时同样用 "delta"。
 	Snapshot json.RawMessage `json:"snapshot,omitempty"`
+	Patch    []PatchOp       `json:"-"`
 
 	// TOOL_CALL_RESULT 字段
 	Content string `json:"content,omitempty"`

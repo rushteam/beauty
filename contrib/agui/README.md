@@ -20,7 +20,8 @@ http.Handle("/agent", h)
 ```
 
 Handler 自动补全 `threadId` / `runId`,将 agent 流式事件(token / 思考 / 工具调用 / 步骤)
-映射为 AG-UI 事件序列。
+映射为 AG-UI 事件序列。请求体里的 `state` 第一次以 `STATE_SNAPSHOT` 发出,
+之后同一 thread 只发非空的 `STATE_DELTA`(RFC 6902)。内容没变则不发。
 
 ## 客户端:消费远程 AG-UI 服务
 

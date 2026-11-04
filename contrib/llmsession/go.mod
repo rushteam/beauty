@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/redis/go-redis/v9 v9.21.0
-	github.com/rushteam/beauty/contrib/llm v0.8.6
+	github.com/rushteam/beauty/contrib/llm v1.5.0
 	modernc.org/sqlite v1.54.0
 )
 
@@ -23,5 +23,8 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// 会话字段(runs / usage)在 llm 模块里。未发版前指向本地模块;发布后去掉这行。
+replace github.com/rushteam/beauty/contrib/llm => ../llm
 
 replace github.com/rushteam/beauty => ../../

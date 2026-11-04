@@ -80,16 +80,22 @@ type PartType string
 const (
 	PartText  PartType = "text"
 	PartImage PartType = "image"
+	PartFile  PartType = "file"
 )
 
 // Part 是消息中的一个内容块(多模态)。
 //   - text: Text 非空
-//   - image: ImageURL 非空(http URL 或 data: base64),可选 Detail
+//   - image: ImageURL 或 FileID
+//   - file: FileID(厂商侧已托管的文件)
+//
+// FileID 与 ImageURL 二选一。两者都填时按 FileID 发送,不再附带 URL 或字节。
 type Part struct {
 	Type     PartType `json:"type"`
 	Text     string   `json:"text,omitempty"`
 	ImageURL string   `json:"image_url,omitempty"`
 	Detail   string   `json:"detail,omitempty"` // "auto"/"low"/"high"(OpenAI vision)
+	// FileID 是模型厂商已托管文件的不透明引用(如 OpenAI 的 file-xxx)。
+	FileID string `json:"file_id,omitempty"`
 }
 
 // ToolDef 声明一个可供模型调用的工具:名字、给模型看的描述、入参 JSON Schema。
@@ -171,10 +177,31 @@ type Request struct {
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
-	// CacheCreationInputTokens 是写入 prompt cache 的 token 数(Anthropic)。
+	// CacheCreationInputTokens 是写入 prompt cache 的 token 数。
+	// Anthropic 用 cache_creation_input_tokens;OpenAI 兼容网关用 prompt_tokens_details.cache_creation_tokens。
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	// CacheReadInputTokens 是从 prompt cache 读取的 token 数(Anthropic)。
+	// CacheReadInputTokens 是从 prompt cache 读取的 token 数。
+	// Anthropic 用 cache_read_input_tokens;OpenAI 用 prompt_tokens_details.cached_tokens,
+	// 网关若另给 cache_read_tokens 则优先用它。
 	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
+}
+
+// Add 返回两段用量之和。零值相加仍是零值。
+func (u Usage) Add(v Usage) Usage {
+	u.InputTokens += v.InputTokens
+	u.OutputTokens += v.OutputTokens
+	u.CacheCreationInputTokens += v.CacheCreationInputTokens
+	u.CacheReadInputTokens += v.CacheReadInputTokens
+	return u
+}
+
+// Sub 返回 u 减去 v。用于同一条 run 被续跑后改写合计,避免把旧值再加一遍。
+func (u Usage) Sub(v Usage) Usage {
+	u.InputTokens -= v.InputTokens
+	u.OutputTokens -= v.OutputTokens
+	u.CacheCreationInputTokens -= v.CacheCreationInputTokens
+	u.CacheReadInputTokens -= v.CacheReadInputTokens
+	return u
 }
 
 // Response 是一次非流式生成的结果。当模型决定调用工具时,ToolCalls 非空(此时 Content 可能为空),

@@ -7,8 +7,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent/session"
 	_ "modernc.org/sqlite"
 )
@@ -42,6 +44,10 @@ CREATE TABLE IF NOT EXISTS session_events (
 		_ = db.Close()
 		return nil, fmt.Errorf("llmsession: migrate: %w", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN extra TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		_ = db.Close()
+		return nil, fmt.Errorf("llmsession: migrate extra: %w", err)
+	}
 	return &SQLiteStore{db: db}, nil
 }
 
@@ -50,11 +56,11 @@ func (s *SQLiteStore) Close() error { return s.db.Close() }
 
 // Load 实现 session.Store。
 func (s *SQLiteStore) Load(ctx context.Context, id string) (*session.Session, error) {
-	var summary string
+	var summary, extra string
 	var raw []byte
 	var updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT summary, messages, updated_at FROM sessions WHERE id=?`, id).
-		Scan(&summary, &raw, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT summary, messages, updated_at, extra FROM sessions WHERE id=?`, id).
+		Scan(&summary, &raw, &updated, &extra)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -66,6 +72,16 @@ func (s *SQLiteStore) Load(ctx context.Context, id string) (*session.Session, er
 		if err := json.Unmarshal(raw, &sess.Messages); err != nil {
 			return nil, fmt.Errorf("llmsession: decode messages: %w", err)
 		}
+	}
+	if len(extra) > 0 {
+		var side sessionSide
+		if err := json.Unmarshal([]byte(extra), &side); err != nil {
+			return nil, fmt.Errorf("llmsession: decode extra: %w", err)
+		}
+		sess.PendingRunID = side.PendingRunID
+		sess.Usage = side.Usage
+		sess.Runs = side.Runs
+		sess.Metadata = side.Metadata
 	}
 	return sess, nil
 }
@@ -83,11 +99,31 @@ func (s *SQLiteStore) Save(ctx context.Context, sess *session.Session) error {
 	if updated.IsZero() {
 		updated = time.Now().UTC()
 	}
+	side, err := json.Marshal(sessionSide{
+		PendingRunID: sess.PendingRunID,
+		Usage:        sess.Usage,
+		Runs:         sess.Runs,
+		Metadata:     sess.Metadata,
+	})
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO sessions(id, summary, messages, updated_at) VALUES(?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET summary=excluded.summary, messages=excluded.messages, updated_at=excluded.updated_at
-`, sess.ID, sess.Summary, raw, updated.Unix())
+INSERT INTO sessions(id, summary, messages, updated_at, extra) VALUES(?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+  summary=excluded.summary,
+  messages=excluded.messages,
+  updated_at=excluded.updated_at,
+  extra=excluded.extra
+`, sess.ID, sess.Summary, raw, updated.Unix(), side)
 	return err
+}
+
+type sessionSide struct {
+	PendingRunID string                     `json:"pending_run_id,omitempty"`
+	Usage        llm.Usage                  `json:"usage,omitempty"`
+	Runs         []session.Run              `json:"runs,omitempty"`
+	Metadata     map[string]json.RawMessage `json:"metadata,omitempty"`
 }
 
 // AppendEvents 实现 session.EventStore。

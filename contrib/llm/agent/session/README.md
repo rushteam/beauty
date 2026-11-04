@@ -1,7 +1,13 @@
 # llm/agent/session —— 会话记忆(持久化 + 滚动摘要)
 
 给 [`llm/agent`](..) 的 `Runner` 加"记得上一轮":把多轮对话历史持久化,超长时滚动摘要。
-`Manager` 是 `Runner` 之上的薄编排,纯标准库、零外部依赖。
+`Manager` 是 `Runner` 之上的薄编排,纯标准库、零外部依赖。每次跑完会记下一条 run
+(子 run 挂在顶层下面)并把 token 用量累加到会话上,不从被摘要截断的消息回推。
+
+```go
+page, _ := sess.RunsPage(session.RunQuery{Limit: 20})          // 最新一页
+older, _ := sess.RunsPage(session.RunQuery{Limit: 20, Before: &page.Oldest})
+```
 
 ## 用法
 
@@ -20,6 +26,7 @@ mgr := &session.Manager{
     Store: session.NewMemoryStore(), // 或 session.NewFileStore("./sessions") 落盘
     Summarizer: &session.Summarizer{ // 可选:超阈值滚动摘要
         Client: cli, Model: "gpt-4o-mini", MaxMessages: 20, KeepRecent: 6,
+        MaxInputTokens: 3000, // 可选:摘要请求只带放得下的完整前缀
     },
 }
 

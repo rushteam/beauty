@@ -387,3 +387,31 @@ func TestGemini_MultiToolResponseMerge(t *testing.T) {
 		}
 	}
 }
+
+func TestGemini_FileID(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = io.WriteString(w, `{
+			"candidates": [{"content": {"role": "model", "parts": [{"text": "ok"}]}, "finishReason": "STOP"}]
+		}`)
+	}))
+	defer srv.Close()
+
+	_, err := New("test-key", WithBaseURL(srv.URL)).Generate(context.Background(), llm.Request{
+		Model: "gemini-2.0-flash",
+		Messages: []llm.Message{{
+			Role: llm.User,
+			Parts: []llm.Part{
+				{Type: llm.PartFile, FileID: "files/abc"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotBody, `"fileUri":"files/abc"`) {
+		t.Fatalf("body = %s", gotBody)
+	}
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"
+	"github.com/rushteam/beauty/contrib/llm/agent/compaction"
 )
 
 // Session 是一段对话的持久状态:滚动摘要 + 近期消息。
@@ -20,6 +21,10 @@ type Session struct {
 	Messages     []llm.Message
 	PendingRunID string
 	UpdatedAt    time.Time
+	// Usage 是各次顶层 run 的 token 合计。续跑时按 run 改写,不从被截断的消息回推。
+	Usage llm.Usage `json:"usage,omitempty"`
+	// Runs 是按发生顺序记下的 run。子 run 的 ParentID 指向顶层 run,分页时不占名额。
+	Runs []Run `json:"runs,omitempty"`
 	// Metadata 是中间件/harness 可在 session 中存储的任意 JSON 可序列化状态。
 	// key 是命名空间字符串(如 "compaction", "approval_rules", "todo"),
 	// value 是 json.RawMessage 以支持延迟反序列化。
@@ -159,10 +164,15 @@ func cloneSession(s *Session) *Session {
 			meta[k] = append(json.RawMessage(nil), v...)
 		}
 	}
+	var runs []Run
+	if len(s.Runs) > 0 {
+		runs = make([]Run, len(s.Runs))
+		copy(runs, s.Runs)
+	}
 	return &Session{
 		ID: s.ID, Summary: s.Summary, Messages: msgs,
 		PendingRunID: s.PendingRunID, UpdatedAt: s.UpdatedAt,
-		Metadata: meta,
+		Usage: s.Usage, Runs: runs, Metadata: meta,
 	}
 }
 
@@ -230,18 +240,21 @@ func (m *Manager) RunIter(ctx context.Context, id string, a agent.Agent, req llm
 		var intermediates []llm.Message
 		var final *llm.Response
 		var runID string
+		var log turnLog
 
 		for ev, err := range a.Run(ctx, full) {
 			if err != nil {
 				yield(ev, err)
 				return
 			}
+			log.see(ev)
 			runID = ev.RunID
 			switch ev.Type {
 			case agent.EventFinal:
 				final = ev.Response
 				continue
 			case agent.EventPaused:
+				log.commit(sess)
 				sess.Messages = append(sess.Messages, newMsgs...)
 				sess.Messages = append(sess.Messages, intermediates...)
 				sess.PendingRunID = ev.RunID
@@ -265,6 +278,9 @@ func (m *Manager) RunIter(ctx context.Context, id string, a agent.Agent, req llm
 					intermediates = append(intermediates, llm.Message{Role: llm.Tool, ToolCallID: ev.ToolCall.ID, Content: ev.Result})
 				}
 			case agent.EventError:
+				log.commit(sess)
+				sess.UpdatedAt = time.Now()
+				_ = m.Store.Save(ctx, sess)
 				yield(ev, ev.Err)
 				return
 			}
@@ -279,6 +295,7 @@ func (m *Manager) RunIter(ctx context.Context, id string, a agent.Agent, req llm
 			return
 		}
 		sess.PendingRunID = ""
+		log.commit(sess)
 		if err := m.persist(ctx, sess, newMsgs, intermediates, final.Content, runID); err != nil {
 			yield(agent.Event{Type: agent.EventError, Response: final, Err: err}, err)
 			return
@@ -308,17 +325,20 @@ func (m *Manager) ContinueIter(ctx context.Context, id string, a agent.Agent, re
 		var intermediates []llm.Message
 		var final *llm.Response
 		var runID string
+		var log turnLog
 		for ev, err := range a.Continue(ctx, sess.PendingRunID, resolutions) {
 			if err != nil {
 				yield(ev, err)
 				return
 			}
+			log.see(ev)
 			runID = ev.RunID
 			switch ev.Type {
 			case agent.EventFinal:
 				final = ev.Response
 				continue
 			case agent.EventPaused:
+				log.commit(sess)
 				sess.Messages = append(sess.Messages, intermediates...)
 				sess.PendingRunID = ev.RunID
 				sess.UpdatedAt = time.Now()
@@ -340,6 +360,9 @@ func (m *Manager) ContinueIter(ctx context.Context, id string, a agent.Agent, re
 					intermediates = append(intermediates, llm.Message{Role: llm.Tool, ToolCallID: ev.ToolCall.ID, Content: ev.Result})
 				}
 			case agent.EventError:
+				log.commit(sess)
+				sess.UpdatedAt = time.Now()
+				_ = m.Store.Save(ctx, sess)
 				yield(ev, ev.Err)
 				return
 			}
@@ -355,6 +378,7 @@ func (m *Manager) ContinueIter(ctx context.Context, id string, a agent.Agent, re
 		}
 		sess.PendingRunID = ""
 		content := final.Content
+		log.commit(sess)
 		if err := m.persist(ctx, sess, nil, intermediates, content, runID); err != nil {
 			yield(agent.Event{Type: agent.EventError, Err: err}, err)
 			return
@@ -377,11 +401,23 @@ func joinSystem(base, extra string) string {
 }
 
 // Summarizer 在会话消息数超过 MaxMessages 时,把最早的一批折叠进 Summary,只保留最近 KeepRecent 条。
+// MaxInputTokens > 0 时,摘要请求只带放得下的完整前缀,超出的旧消息留在会话里等下一轮。
 type Summarizer struct {
 	Client      llm.Client
 	Model       string
 	MaxMessages int
 	KeepRecent  int
+	// MaxInputTokens 是摘要请求的输入预算(估算)。0 表示不按 token 截断。
+	MaxInputTokens int
+	// Estimate 估算一段文字的 token。nil 时与 compaction.DefaultEstimate 相同。
+	Estimate func(string) int
+}
+
+func (s *Summarizer) estimate(text string) int {
+	if s.Estimate != nil {
+		return s.Estimate(text)
+	}
+	return compaction.DefaultEstimate(text)
 }
 
 func (s *Summarizer) compress(ctx context.Context, sess *Session) error {
@@ -399,33 +435,84 @@ func (s *Summarizer) compress(ctx context.Context, sess *Session) error {
 	if cut <= 0 {
 		return nil
 	}
-	older := sess.Messages[:cut]
-
-	var b strings.Builder
-	if sess.Summary != "" {
-		b.WriteString("已有摘要:\n")
-		b.WriteString(sess.Summary)
-		b.WriteString("\n\n新增对话:\n")
-	}
-	for _, msg := range older {
-		if msg.Content == "" {
-			continue
-		}
-		b.WriteString(string(msg.Role))
-		b.WriteString(": ")
-		b.WriteString(msg.Content)
-		b.WriteByte('\n')
+	take, body, ok := s.prefix(sess.Summary, sess.Messages[:cut])
+	if !ok {
+		return nil
 	}
 
 	resp, err := s.Client.Generate(ctx, llm.Request{
 		Model:    s.Model,
 		System:   "你是对话摘要器。把下面的对话压缩成简洁、信息完整的中文摘要,保留关键事实、决定与未决事项。只输出摘要本身。",
-		Messages: []llm.Message{{Role: llm.User, Content: b.String()}},
+		Messages: []llm.Message{{Role: llm.User, Content: body}},
 	})
 	if err != nil {
 		return err
 	}
 	sess.Summary = strings.TrimSpace(resp.Content)
-	sess.Messages = append([]llm.Message{}, sess.Messages[cut:]...)
+	sess.Messages = append([]llm.Message{}, sess.Messages[take:]...)
 	return nil
+}
+
+// prefix 选出从最旧消息开始、能放进预算的完整前缀。
+// 一条消息的正文是 Content,再加上文本内容块;图片块不进摘要。
+// 预算放不下一整条时停在上一条,不把一条消息拆开。
+func (s *Summarizer) prefix(summary string, older []llm.Message) (take int, body string, ok bool) {
+	var b strings.Builder
+	if summary != "" {
+		b.WriteString("已有摘要:\n")
+		b.WriteString(summary)
+		b.WriteString("\n\n新增对话:\n")
+	}
+	used := 0
+	if b.Len() > 0 {
+		used = s.estimate(b.String())
+	}
+	budget := s.MaxInputTokens
+	included := false
+	for i, msg := range older {
+		line := formatSummaryLine(msg)
+		if line != "" {
+			cost := s.estimate(line)
+			if budget > 0 && used+cost > budget {
+				break
+			}
+			used += cost
+			b.WriteString(line)
+			included = true
+		}
+		take = i + 1
+	}
+	if budget <= 0 {
+		return len(older), b.String(), true
+	}
+	if !included {
+		return 0, "", false
+	}
+	return take, b.String(), true
+}
+
+func formatSummaryLine(m llm.Message) string {
+	text := messageText(m)
+	if text == "" {
+		return ""
+	}
+	return string(m.Role) + ": " + text + "\n"
+}
+
+// messageText 把一条消息里要进摘要的文字拼起来:正文在前,文本内容块按原顺序接在后面。
+func messageText(m llm.Message) string {
+	var b strings.Builder
+	if m.Content != "" {
+		b.WriteString(m.Content)
+	}
+	for _, p := range m.Parts {
+		if p.Type != llm.PartText || p.Text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(p.Text)
+	}
+	return b.String()
 }

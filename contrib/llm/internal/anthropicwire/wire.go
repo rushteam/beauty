@@ -42,12 +42,13 @@ type Block struct {
 	CacheControl *CacheControl   `json:"cache_control,omitempty"` // prompt caching
 }
 
-// Source 是 image block 的图片来源(base64 或 url)。
+// Source 是 image / document block 的来源:base64、url,或厂商 file_id。
 type Source struct {
-	Type      string `json:"type"`       // "base64" / "url"
-	MediaType string `json:"media_type"` // "image/png" etc
+	Type      string `json:"type"`                 // "base64" / "url" / "file"
+	MediaType string `json:"media_type,omitempty"` // "image/png" etc
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 
 // Tool 是 Anthropic 的工具声明。
@@ -140,12 +141,19 @@ func BuildParts(parts []llm.Part) []Block {
 		switch p.Type {
 		case llm.PartText:
 			blocks = append(blocks, Block{Type: "text", Text: p.Text})
-		case llm.PartImage:
-			blk := Block{Type: "image"}
-			if strings.HasPrefix(p.ImageURL, "data:") {
+		case llm.PartImage, llm.PartFile:
+			kind := "image"
+			if p.Type == llm.PartFile {
+				kind = "document"
+			}
+			blk := Block{Type: kind}
+			switch {
+			case p.FileID != "":
+				blk.Source = &Source{Type: "file", FileID: p.FileID}
+			case strings.HasPrefix(p.ImageURL, "data:"):
 				mt, data := parseDataURI(p.ImageURL)
 				blk.Source = &Source{Type: "base64", MediaType: mt, Data: data}
-			} else {
+			default:
 				blk.Source = &Source{Type: "url", URL: p.ImageURL}
 			}
 			blocks = append(blocks, blk)

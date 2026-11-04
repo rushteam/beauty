@@ -23,7 +23,7 @@ cli := openai.New(key)
 r := &agent.Runner{Client: cli /*, Tools: ... */}
 
 mgr := &session.Manager{
-    Store: session.NewMemoryStore(), // 或 session.NewFileStore("./sessions") 落盘
+    Store: session.NewMemoryStore(), // 开发/测试/单副本；生产改用 contrib/llmsession
     Summarizer: &session.Summarizer{ // 可选:超阈值滚动摘要
         Client: cli, Model: "gpt-4o-mini", MaxMessages: 20, KeepRecent: 6,
         MaxInputTokens: 3000, // 可选:摘要请求只带放得下的完整前缀
@@ -54,3 +54,9 @@ for ev := range mgr.RunStream(ctx, "session-123", r, req) {
 
 存哪、何时摘要、保留多少条、摘要用哪个模型都是 policy(可配)。本包只做接口 + MemoryStore + FileStore + 编排。
 注:`Manager` 持久化的是 user/assistant 回合(对话历史),单次 `Run` 内部的工具往返是临时的,不入库。
+
+## 生产建议
+
+`MemoryStore` 在重启后丢失，不能跨副本共享；`FileStore` 适合单进程附属卷，不提供跨进程事务或写入协调。
+多副本使用 `contrib/llmsession` 的 Redis 或 SQL Store，并以业务 session ID 路由。会话写入是 Store 的一致性边界：
+若同一 session 可并发请求，Store 实现应使用版本/CAS 或业务侧串行化，避免最后一次写入覆盖另一轮。

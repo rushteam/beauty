@@ -2,7 +2,9 @@ package agui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sort"
 	"strconv"
@@ -96,29 +98,40 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 }
 
 // stateEvent 比较该 thread 上一次快照。第一次发整份快照,之后只发非空差量。
-func (h *Handler) stateEvent(threadID string, raw json.RawMessage) (Event, bool) {
+// 多副本共享 StateStore 时，CAS 冲突后重读并重算补丁，避免以旧基线覆盖新状态。
+func (h *Handler) stateEvent(ctx context.Context, threadID string, raw json.RawMessage) (Event, bool) {
 	canon, ok := canonicalState(raw)
 	if !ok {
 		return Event{}, false
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.snaps == nil {
-		h.snaps = map[string]json.RawMessage{}
+	for attempts := 0; attempts < 4; attempts++ {
+		prev, seen, err := h.stateStore.Load(ctx, threadID)
+		if err != nil {
+			return Event{}, false
+		}
+		if seen && bytes.Equal(prev.State, canon) {
+			return Event{}, false
+		}
+		version := uint64(0)
+		if seen {
+			version = prev.Version
+		}
+		if _, err := h.stateStore.CompareAndSwap(ctx, threadID, version, canon); err != nil {
+			if errors.Is(err, ErrStateConflict) {
+				continue
+			}
+			return Event{}, false
+		}
+		if !seen {
+			return Event{Type: EventStateSnapshot, ThreadID: threadID, Snapshot: canon}, true
+		}
+		ops := diffState(prev.State, canon)
+		if len(ops) == 0 {
+			return Event{}, false
+		}
+		return Event{Type: EventStateDelta, ThreadID: threadID, Patch: ops}, true
 	}
-	prev, seen := h.snaps[threadID]
-	h.snaps[threadID] = canon
-	if !seen {
-		return Event{Type: EventStateSnapshot, ThreadID: threadID, Snapshot: canon}, true
-	}
-	if bytes.Equal(prev, canon) {
-		return Event{}, false
-	}
-	ops := diffState(prev, canon)
-	if len(ops) == 0 {
-		return Event{}, false
-	}
-	return Event{Type: EventStateDelta, ThreadID: threadID, Patch: ops}, true
+	return Event{}, false
 }
 
 func canonicalState(raw json.RawMessage) (json.RawMessage, bool) {

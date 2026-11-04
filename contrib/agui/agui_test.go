@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,32 @@ func TestHandler_StateSnapshotThenDelta(t *testing.T) {
 	third := post(`{"name":"a","step":2}`)
 	if strings.Contains(third, `"type":"STATE_SNAPSHOT"`) || strings.Contains(third, `"type":"STATE_DELTA"`) {
 		t.Fatalf("unchanged state still emitted: %s", third)
+	}
+}
+
+func TestHandler_SharedStateStoreSurvivesHandlerRestart(t *testing.T) {
+	store := NewMemoryStateStore()
+	events := []agent.Event{{Type: agent.EventFinal, Response: &llm.Response{Content: "ok"}}}
+	first := NewHandler(&mockAgent{events: events}, HandlerConfig{StateStore: store})
+	second := NewHandler(&mockAgent{events: events}, HandlerConfig{StateStore: store})
+	if ev, ok := first.stateEvent(context.Background(), "t", json.RawMessage(`{"n":1}`)); !ok || ev.Type != EventStateSnapshot {
+		t.Fatalf("first = %+v ok=%v", ev, ok)
+	}
+	ev, ok := second.stateEvent(context.Background(), "t", json.RawMessage(`{"n":2}`))
+	if !ok || ev.Type != EventStateDelta || len(ev.Patch) != 1 {
+		t.Fatalf("second = %+v ok=%v", ev, ok)
+	}
+}
+
+func TestMemoryStateStore_CompareAndSwap(t *testing.T) {
+	store := NewMemoryStateStore()
+	ctx := context.Background()
+	first, err := store.CompareAndSwap(ctx, "t", 0, json.RawMessage(`{"n":1}`))
+	if err != nil || first.Version != 1 {
+		t.Fatalf("first = %+v err=%v", first, err)
+	}
+	if _, err := store.CompareAndSwap(ctx, "t", 0, json.RawMessage(`{"n":2}`)); !errors.Is(err, ErrStateConflict) {
+		t.Fatalf("err = %v", err)
 	}
 }
 

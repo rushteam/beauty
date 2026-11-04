@@ -49,7 +49,14 @@ func (r *Runner) Continue(ctx context.Context, runID string, resolutions []Resol
 			yield(e, nil)
 		}
 
-		out := r.continueLoop(ctx, runID, resolutions, emit, tools, maxSteps)
+		leaseCtx, release, err := r.claimRun(ctx, runID)
+		if err != nil {
+			out := leaseError(runID, err)
+			yield(Event{Type: EventError, RunID: runID, Err: out.Err, AgentName: r.Name, TriggerType: tt, TriggerID: tid}, out.Err)
+			return
+		}
+		defer release()
+		out := r.continueLoop(leaseCtx, runID, resolutions, emit, tools, maxSteps)
 		switch out.Status {
 		case StatusDone:
 			yield(Event{Type: EventFinal, Response: out.Response, RunID: out.RunID, AgentName: r.Name, TriggerType: tt, TriggerID: tid}, nil)

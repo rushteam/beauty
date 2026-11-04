@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"
@@ -14,6 +13,9 @@ import (
 type HandlerConfig struct {
 	// AgentName 覆盖 agent.Info().Name。
 	AgentName string
+	// StateStore 保存 STATE_SNAPSHOT / STATE_DELTA 的基线。nil 时使用进程内 Store，
+	// 后者仅适合开发、测试和单副本部署；多副本必须注入支持原子 CAS 的共享实现。
+	StateStore StateStore
 }
 
 // Handler 将 beauty Agent 暴露为 AG-UI HTTP 端点。
@@ -24,16 +26,18 @@ type HandlerConfig struct {
 //	h := agui.NewHandler(myAgent, agui.HandlerConfig{})
 //	http.Handle("/agent", h)
 type Handler struct {
-	Agent agent.Agent
-	Cfg   HandlerConfig
-
-	mu    sync.Mutex
-	snaps map[string]json.RawMessage
+	Agent      agent.Agent
+	Cfg        HandlerConfig
+	stateStore StateStore
 }
 
 // NewHandler 创建 AG-UI HTTP 处理器。
 func NewHandler(a agent.Agent, cfg HandlerConfig) *Handler {
-	return &Handler{Agent: a, Cfg: cfg}
+	store := cfg.StateStore
+	if store == nil {
+		store = NewMemoryStateStore()
+	}
+	return &Handler{Agent: a, Cfg: cfg, stateStore: store}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RunID:     runID,
 		Timestamp: nowTimestamp(),
 	})
-	if ev, ok := h.stateEvent(threadID, input.State); ok {
+	if ev, ok := h.stateEvent(r.Context(), threadID, input.State); ok {
 		ev.RunID = runID
 		ev.Timestamp = nowTimestamp()
 		writeEvent(w, fl, ev)

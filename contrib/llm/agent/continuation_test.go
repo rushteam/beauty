@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -54,6 +55,37 @@ func TestMemoryContinuationStore_CRUD(t *testing.T) {
 	}
 	if _, err := store.Poll(ctx, token); err == nil {
 		t.Fatal("Poll after Delete should fail")
+	}
+}
+
+func TestMemoryContinuationStore_VersionAndTTL(t *testing.T) {
+	store := agent.NewMemoryContinuationStore()
+	ctx := context.Background()
+	token, err := store.StartWithTTL(ctx, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.Poll(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Version != 1 || current.ExpiresAt.IsZero() {
+		t.Fatalf("initial = %+v", current)
+	}
+	if _, err := store.UpdateIfVersion(ctx, token, current.Version+1, agent.ContinuationResult{
+		State: agent.ContinuationCompleted,
+	}); !errors.Is(err, agent.ErrContinuationConflict) {
+		t.Fatalf("conflict error = %v", err)
+	}
+	version, err := store.UpdateIfVersion(ctx, token, current.Version, agent.ContinuationResult{
+		State: agent.ContinuationCompleted,
+	})
+	if err != nil || version != 2 {
+		t.Fatalf("update version=%d err=%v", version, err)
+	}
+	time.Sleep(15 * time.Millisecond)
+	if _, err := store.Poll(ctx, token); !errors.Is(err, agent.ErrContinuationExpired) {
+		t.Fatalf("expiry error = %v", err)
 	}
 }
 

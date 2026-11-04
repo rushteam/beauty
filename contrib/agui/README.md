@@ -23,6 +23,17 @@ Handler 自动补全 `threadId` / `runId`,将 agent 流式事件(token / 思考 
 映射为 AG-UI 事件序列。请求体里的 `state` 第一次以 `STATE_SNAPSHOT` 发出,
 之后同一 thread 只发非空的 `STATE_DELTA`(RFC 6902)。内容没变则不发。
 
+多副本需注入共享 `StateStore`：
+
+```go
+h := aguix.NewHandler(myStreamAgent, aguix.HandlerConfig{
+    StateStore: myStateStore, // Load + CompareAndSwap 必须是原子操作
+})
+```
+
+默认 `MemoryStateStore` 仅适合开发、测试和单副本；重启会丢状态。Redis 实现应使用
+Lua/WATCH，SQL 实现应使用 `WHERE version=?` 的条件更新，CAS 冲突时由 Handler 重读并重算 patch。
+
 ## 客户端:消费远程 AG-UI 服务
 
 ```go

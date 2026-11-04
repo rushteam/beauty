@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/rushteam/beauty/contrib/llm"
 )
@@ -30,11 +32,15 @@ const (
 
 // ContinuationResult 是异步任务的结果快照。
 type ContinuationResult struct {
-	Token        string            `json:"token"`
-	State        ContinuationState `json:"state"`
-	Outcome      *RunOutcome       `json:"outcome,omitempty"`      // 完成/失败时有值
-	Events       []Event           `json:"events,omitempty"`       // 累积的事件(可选)
-	Requirements []Requirement     `json:"requirements,omitempty"` // 暂停时的审批需求
+	Token string            `json:"token"`
+	State ContinuationState `json:"state"`
+	// Version 单调递增。生产 Store 应用它拒绝旧 worker 覆盖新状态。
+	Version uint64 `json:"version"`
+	// ExpiresAt 由支持 TTL 的 Store 填入。到期后结果不可再恢复。
+	ExpiresAt    time.Time     `json:"expires_at,omitempty"`
+	Outcome      *RunOutcome   `json:"outcome,omitempty"`      // 完成/失败时有值
+	Events       []Event       `json:"events,omitempty"`       // 累积的事件(可选)
+	Requirements []Requirement `json:"requirements,omitempty"` // 暂停时的审批需求
 }
 
 // ContinuationStore 管理异步任务的生命周期。
@@ -49,7 +55,27 @@ type ContinuationStore interface {
 	Delete(ctx context.Context, token string) error
 }
 
-// MemoryContinuationStore 是内存实现的 ContinuationStore。
+var (
+	// ErrContinuationConflict 表示条件写入的版本已过期。
+	ErrContinuationConflict = errors.New("agent: continuation version conflict")
+	// ErrContinuationExpired 表示 continuation 已过期并被清理。
+	ErrContinuationExpired = errors.New("agent: continuation expired")
+)
+
+// VersionedContinuationStore 让异步 worker 用 CAS 更新任务状态。
+// UpdateIfVersion 必须只在当前 Version 等于 expected 时成功，并返回新版本。
+type VersionedContinuationStore interface {
+	ContinuationStore
+	UpdateIfVersion(ctx context.Context, token string, expected uint64, result ContinuationResult) (uint64, error)
+}
+
+// ExpiringContinuationStore 支持创建带 TTL 的 continuation。ttl 必须由 Store 原子执行。
+type ExpiringContinuationStore interface {
+	ContinuationStore
+	StartWithTTL(ctx context.Context, ttl time.Duration) (token string, err error)
+}
+
+// MemoryContinuationStore 是内存实现的 ContinuationStore，仅用于开发、测试或单副本部署。
 type MemoryContinuationStore struct {
 	mu sync.RWMutex
 	m  map[string]*ContinuationResult
@@ -62,6 +88,11 @@ func NewMemoryContinuationStore() *MemoryContinuationStore {
 
 // Start 生成 token 并以 Running 状态写入 store。
 func (s *MemoryContinuationStore) Start(_ context.Context) (string, error) {
+	return s.StartWithTTL(context.Background(), 0)
+}
+
+// StartWithTTL 创建带可选到期时间的 continuation。仅用于开发、测试或单副本部署。
+func (s *MemoryContinuationStore) StartWithTTL(_ context.Context, ttl time.Duration) (string, error) {
 	if s == nil {
 		return "", fmt.Errorf("agent: nil ContinuationStore")
 	}
@@ -71,26 +102,48 @@ func (s *MemoryContinuationStore) Start(_ context.Context) (string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[token] = &ContinuationResult{Token: token, State: ContinuationRunning}
+	result := &ContinuationResult{Token: token, State: ContinuationRunning, Version: 1}
+	if ttl > 0 {
+		result.ExpiresAt = time.Now().Add(ttl)
+	}
+	s.m[token] = result
 	return token, nil
 }
 
 // Update 替换指定 token 的快照(深拷贝存入)。
 func (s *MemoryContinuationStore) Update(_ context.Context, token string, result ContinuationResult) error {
+	_, err := s.UpdateIfVersion(context.Background(), token, 0, result)
+	return err
+}
+
+// UpdateIfVersion 实现 VersionedContinuationStore。expected=0 表示不检查版本，保留旧 Update 兼容性。
+func (s *MemoryContinuationStore) UpdateIfVersion(_ context.Context, token string, expected uint64, result ContinuationResult) (uint64, error) {
 	if s == nil {
-		return fmt.Errorf("agent: nil ContinuationStore")
+		return 0, fmt.Errorf("agent: nil ContinuationStore")
 	}
 	if token == "" {
-		return fmt.Errorf("agent: Update requires token")
+		return 0, fmt.Errorf("agent: Update requires token")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[token]; !ok {
-		return fmt.Errorf("agent: continuation token %q not found", token)
+	current, ok := s.m[token]
+	if !ok {
+		return 0, fmt.Errorf("agent: continuation token %q not found", token)
+	}
+	if !current.ExpiresAt.IsZero() && !current.ExpiresAt.After(time.Now()) {
+		delete(s.m, token)
+		return 0, ErrContinuationExpired
+	}
+	if expected != 0 && current.Version != expected {
+		return 0, ErrContinuationConflict
 	}
 	result.Token = token
+	result.Version = current.Version + 1
+	if result.ExpiresAt.IsZero() {
+		result.ExpiresAt = current.ExpiresAt
+	}
 	s.m[token] = cloneContinuationResult(&result)
-	return nil
+	return result.Version, nil
 }
 
 // Poll 返回 token 对应快照的深拷贝。
@@ -106,6 +159,10 @@ func (s *MemoryContinuationStore) Poll(_ context.Context, token string) (*Contin
 	result, ok := s.m[token]
 	if !ok {
 		return nil, fmt.Errorf("agent: continuation token %q not found", token)
+	}
+	if !result.ExpiresAt.IsZero() && !result.ExpiresAt.After(time.Now()) {
+		delete(s.m, token)
+		return nil, ErrContinuationExpired
 	}
 	return cloneContinuationResult(result), nil
 }
@@ -196,7 +253,7 @@ func ContinueAsync(ctx context.Context, store ContinuationStore, a Agent, runID 
 func runAsyncLoop(ctx context.Context, store ContinuationStore, token string, seq iter.Seq2[Event, error]) {
 	defer func() {
 		if r := recover(); r != nil {
-			if err := store.Update(ctx, token, ContinuationResult{
+			if err := updateContinuation(ctx, store, token, ContinuationResult{
 				Token: token,
 				State: ContinuationFailed,
 				Outcome: &RunOutcome{
@@ -214,7 +271,7 @@ func runAsyncLoop(ctx context.Context, store ContinuationStore, token string, se
 	var runID string
 
 	updateTerminal := func(state ContinuationState, outcome *RunOutcome, reqs []Requirement) {
-		if err := store.Update(ctx, token, ContinuationResult{
+		if err := updateContinuation(ctx, store, token, ContinuationResult{
 			Token:        token,
 			State:        state,
 			Outcome:      outcome,
@@ -249,7 +306,7 @@ func runAsyncLoop(ctx context.Context, store ContinuationStore, token string, se
 			last = ev.Response
 			runID = ev.RunID
 		}
-		if err := store.Update(ctx, token, ContinuationResult{
+		if err := updateContinuation(ctx, store, token, ContinuationResult{
 			Token: token,
 			State: ContinuationRunning,
 		}); err != nil {
@@ -258,4 +315,18 @@ func runAsyncLoop(ctx context.Context, store ContinuationStore, token string, se
 	}
 	out := outcomeDone(runID, last, nil)
 	updateTerminal(ContinuationCompleted, &out, nil)
+}
+
+// updateContinuation 优先用版本条件写入，防止迟到的 worker 覆盖新的终态。
+func updateContinuation(ctx context.Context, store ContinuationStore, token string, result ContinuationResult) error {
+	versioned, ok := store.(VersionedContinuationStore)
+	if !ok {
+		return store.Update(ctx, token, result)
+	}
+	current, err := versioned.Poll(ctx, token)
+	if err != nil {
+		return err
+	}
+	_, err = versioned.UpdateIfVersion(ctx, token, current.Version, result)
+	return err
 }

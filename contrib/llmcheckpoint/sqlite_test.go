@@ -3,7 +3,9 @@ package llmcheckpoint_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent"
@@ -64,5 +66,30 @@ func TestSQLiteSnapshotRoundTrip(t *testing.T) {
 	}
 	if err := store.Save(context.Background(), "r1", snap); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSQLiteRunLease(t *testing.T) {
+	store, err := llmcheckpoint.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	lease, err := store.Claim(ctx, "r1", "one", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Claim(ctx, "r1", "two", time.Second); !errors.Is(err, agent.ErrRunClaimed) {
+		t.Fatalf("claim error = %v", err)
+	}
+	if _, err := store.Renew(ctx, "r1", lease, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Release(ctx, "r1", lease); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Claim(ctx, "r1", "two", time.Second); err != nil {
+		t.Fatalf("claim after release: %v", err)
 	}
 }

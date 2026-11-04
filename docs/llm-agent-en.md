@@ -136,3 +136,20 @@ Runnable examples: [agentservice](../examples/agentservice) (guards, tool loop, 
 - Evaluation is the `EvaluatorMiddleware` callback. There is no built-in eval set.
 - Group-chat speaker selection defaults to round-robin. To let a model pick the next speaker, set `GroupChatManager.SelectNextAgent`.
 - Image generation, image edit, and speech exist on the OpenAI provider. Gemini, Anthropic, and Bedrock cover chat, streaming, and tool calls (and some embeddings).
+
+## Production assembly
+
+Memory implementations are for tests, development, and a single replica; adding replicas does not make their state durable.
+
+| State | Default | Multi-replica requirement | Included adapter |
+|---|---|---|---|
+| Paused runs / replay | `MemoryRunStore` | `RunStore` plus atomic `RunCoordinator` leases | `contrib/llmcheckpoint` SQLite / Redis |
+| Async outcomes | `MemoryContinuationStore` | versioned conditional write and TTL | application Redis / SQL adapter |
+| Session / token ledger | `session.MemoryStore` | durable Store; serialize or CAS one session | `contrib/llmsession` SQLite / Redis |
+| AG-UI state delta | `MemoryStateStore` | atomic `StateStore` CAS | application Redis / SQL adapter |
+| Long-term memory | in-memory vector scan | persistent vector index and backups | implement `vector.Store` |
+
+`RunCoordinator` only serializes resume attempts for one `runID`; it cannot make a remote tool exactly-once. Tools,
+payments, and database writes still need idempotency keys, transactions, or an Outbox. SQLite fits one instance or one
+durable volume. Redis needs a separate key prefix, TTL, persistence, and HA. Decide failures explicitly: approval,
+payments, and authorization usually fail closed; cache-like state can degrade.

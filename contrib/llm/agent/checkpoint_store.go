@@ -14,7 +14,7 @@ type CheckpointStore interface {
 	checkpoint.EventLog
 }
 
-// MemoryCheckpointStore 是内存版 CheckpointStore(测试/单机)。
+// MemoryCheckpointStore 是内存版 CheckpointStore，仅用于测试、开发或单副本部署。
 type MemoryCheckpointStore struct {
 	*MemoryRunStore
 	log *checkpoint.MemoryEventLog

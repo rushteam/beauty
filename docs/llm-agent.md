@@ -136,3 +136,19 @@ Agent 运行时  llm/agent（循环、编排、技能、会话、审批）
 - 评估是 `EvaluatorMiddleware` 的一个回调，没有内置评测集。
 - 群聊发言人默认轮询。要让模型选下一个发言者，实现 `GroupChatManager.SelectNextAgent`。
 - 图片生成、编辑、语音只在 OpenAI provider 上。Gemini / Anthropic / Bedrock 覆盖对话、流式和工具调用（及部分 embedding）。
+
+## 生产装配
+
+内存实现都可用于测试、开发和单副本，但不是“接上副本数就自动生产化”。生产状态按下面的接口替换：
+
+| 状态 | 默认 | 多副本生产要求 | 现成适配 |
+|---|---|---|---|
+| 暂停 run / 回放 | `MemoryRunStore` | `RunStore` + 原子 `RunCoordinator` lease | `contrib/llmcheckpoint` SQLite / Redis |
+| 异步结果 | `MemoryContinuationStore` | `VersionedContinuationStore` 条件写 + TTL | 使用方 Redis / SQL 实现 |
+| 会话 / token ledger | `session.MemoryStore` | 持久 Store；同 session 串行或 CAS | `contrib/llmsession` SQLite / Redis |
+| AG-UI 状态差量 | `MemoryStateStore` | `StateStore` 原子 CAS | 使用方 Redis / SQL 实现 |
+| 长期记忆 | 内存向量暴力检索 | 持久向量库、索引和备份 | 实现 `vector.Store` |
+
+`RunCoordinator` 只串行同一 `runID` 的恢复；它不能让外部工具调用自动变成 exactly-once。工具、扣款和写库仍需要幂等键、
+事务或 Outbox。SQLite 适合单实例/单持久卷；Redis 使用独立 key 前缀、TTL、持久化和 HA。所有生产 Store 的故障策略
+应由业务明确：审批、扣款和权限通常 fail-closed，缓存类状态才适合降级。

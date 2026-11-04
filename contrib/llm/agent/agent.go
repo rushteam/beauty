@@ -13,6 +13,7 @@ import (
 	"iter"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rushteam/beauty/contrib/llm"
 	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
@@ -304,6 +305,9 @@ type Runner struct {
 
 	// Store 持久化暂停快照;nil 时用内置 MemoryRunStore(进程内)。
 	Store RunStore
+	// RunLeaseTTL 是多副本 Continue 的排他租约时长。Store 实现 RunCoordinator 时生效。
+	// 零值为 30 秒；长时间工具调用期间 Runner 自动续约。
+	RunLeaseTTL time.Duration
 
 	// ---- 新增:双层中间件 + History/Context Provider ----
 

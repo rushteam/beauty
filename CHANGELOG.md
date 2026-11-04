@@ -4,8 +4,20 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 提交遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)。
-框架已发布语义化版本（当前 v1.5.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
+框架已发布语义化版本（当前 v1.6.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
+
+## [1.6.0] - 2026-11-04
+
+### Added
+
+- **Run 租约**。`RunCoordinator` 为同一 `runID` 的 `Continue` 提供可续约排他租约。内存、SQLite、Redis 检查点存储都实现该接口；未实现时保持单写者兼容。
+- **异步结果版本**。`VersionedContinuationStore` 按版本条件更新，`ExpiringContinuationStore` 支持 TTL。旧 worker 不能覆盖新状态。
+- **AG-UI 状态存储**。`StateStore` 用 `Load` + `CompareAndSwap` 保存 snapshot/delta 基线。多副本注入共享实现后，冲突会重读并重算补丁。
+
+### Changed
+
+- 内存会话、检查点、异步结果和 AG-UI 状态明确只用于开发、测试和单副本。生产装配、SQLite/Redis 适用范围和失败策略写在对应文档。
 
 ## [1.5.0] - 2026-11-04
 

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/rushteam/beauty/contrib/llm/agent"
 	"github.com/rushteam/beauty/contrib/llm/agent/checkpoint"
@@ -37,6 +38,11 @@ CREATE TABLE IF NOT EXISTS run_snapshots (
 CREATE TABLE IF NOT EXISTS run_events (
   id TEXT PRIMARY KEY,
   events BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_leases (
+  id TEXT PRIMARY KEY,
+  token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
 )`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("llmcheckpoint: migrate: %w", err)
@@ -84,6 +90,75 @@ func (s *SQLiteStore) Load(ctx context.Context, id string) (*agent.RunSnapshot, 
 func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM run_snapshots WHERE id=?`, id)
 	return err
+}
+
+// Claim 实现 agent.RunCoordinator。条件 UPSERT 只在旧租约过期时接管。
+func (s *SQLiteStore) Claim(ctx context.Context, runID, _ string, ttl time.Duration) (agent.RunLease, error) {
+	if runID == "" || ttl <= 0 {
+		return agent.RunLease{}, fmt.Errorf("llmcheckpoint: claim requires runID and positive ttl")
+	}
+	token, err := redisLeaseToken()
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	now := time.Now()
+	expires := now.Add(ttl)
+	result, err := s.db.ExecContext(ctx, `
+INSERT INTO run_leases(id, token, expires_at) VALUES(?,?,?)
+ON CONFLICT(id) DO UPDATE SET token=excluded.token, expires_at=excluded.expires_at
+WHERE run_leases.expires_at <= ?
+`, runID, token, expires.UnixMilli(), now.UnixMilli())
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	if affected == 0 {
+		return agent.RunLease{}, agent.ErrRunClaimed
+	}
+	return agent.RunLease{Token: token, ExpiresAt: expires}, nil
+}
+
+// Renew 实现 agent.RunCoordinator。
+func (s *SQLiteStore) Renew(ctx context.Context, runID string, lease agent.RunLease, ttl time.Duration) (agent.RunLease, error) {
+	if runID == "" || lease.Token == "" || ttl <= 0 {
+		return agent.RunLease{}, agent.ErrLeaseLost
+	}
+	now := time.Now()
+	expires := now.Add(ttl)
+	result, err := s.db.ExecContext(ctx, `
+UPDATE run_leases SET expires_at=?
+WHERE id=? AND token=? AND expires_at > ?
+`, expires.UnixMilli(), runID, lease.Token, now.UnixMilli())
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	if affected == 0 {
+		return agent.RunLease{}, agent.ErrLeaseLost
+	}
+	return agent.RunLease{Token: lease.Token, ExpiresAt: expires}, nil
+}
+
+// Release 实现 agent.RunCoordinator。
+func (s *SQLiteStore) Release(ctx context.Context, runID string, lease agent.RunLease) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM run_leases WHERE id=? AND token=?`, runID, lease.Token)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return agent.ErrLeaseLost
+	}
+	return nil
 }
 
 // AppendEvents 实现 checkpoint.EventLog。
@@ -137,4 +212,7 @@ func (s *SQLiteStore) EventCount(ctx context.Context, runID string) (int, error)
 	return len(events), nil
 }
 
-var _ agent.CheckpointStore = (*SQLiteStore)(nil)
+var (
+	_ agent.CheckpointStore = (*SQLiteStore)(nil)
+	_ agent.RunCoordinator  = (*SQLiteStore)(nil)
+)

@@ -2,6 +2,7 @@ package llmcheckpoint
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -58,6 +59,14 @@ func (s *RedisStore) eventsKey(id string) (string, error) {
 		return "", err
 	}
 	return s.prefix + safe + ":events", nil
+}
+
+func (s *RedisStore) leaseKey(id string) (string, error) {
+	safe, err := sanitizeRunID(id)
+	if err != nil {
+		return "", err
+	}
+	return s.prefix + safe + ":lease", nil
 }
 
 func sanitizeRunID(id string) (string, error) {
@@ -122,6 +131,74 @@ func (s *RedisStore) Delete(ctx context.Context, id string) error {
 	return s.rdb.Del(ctx, key).Err()
 }
 
+// Claim 实现 agent.RunCoordinator。SET NX PX 让多个副本只允许一个恢复同一 run。
+func (s *RedisStore) Claim(ctx context.Context, runID, _ string, ttl time.Duration) (agent.RunLease, error) {
+	if ttl <= 0 {
+		return agent.RunLease{}, fmt.Errorf("llmcheckpoint: claim requires positive ttl")
+	}
+	key, err := s.leaseKey(runID)
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	token, err := redisLeaseToken()
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	ok, err := s.rdb.SetNX(ctx, key, token, ttl).Result()
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	if !ok {
+		return agent.RunLease{}, agent.ErrRunClaimed
+	}
+	return agent.RunLease{Token: token, ExpiresAt: time.Now().Add(ttl)}, nil
+}
+
+// Renew 只有 token 仍匹配时才延长租约。
+func (s *RedisStore) Renew(ctx context.Context, runID string, lease agent.RunLease, ttl time.Duration) (agent.RunLease, error) {
+	if ttl <= 0 || lease.Token == "" {
+		return agent.RunLease{}, agent.ErrLeaseLost
+	}
+	key, err := s.leaseKey(runID)
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	const script = `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("PEXPIRE", KEYS[1], ARGV[2]) else return 0 end`
+	ok, err := s.rdb.Eval(ctx, script, []string{key}, lease.Token, ttl.Milliseconds()).Int()
+	if err != nil {
+		return agent.RunLease{}, err
+	}
+	if ok == 0 {
+		return agent.RunLease{}, agent.ErrLeaseLost
+	}
+	return agent.RunLease{Token: lease.Token, ExpiresAt: time.Now().Add(ttl)}, nil
+}
+
+// Release 只删除自己持有的租约。
+func (s *RedisStore) Release(ctx context.Context, runID string, lease agent.RunLease) error {
+	key, err := s.leaseKey(runID)
+	if err != nil {
+		return err
+	}
+	const script = `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`
+	ok, err := s.rdb.Eval(ctx, script, []string{key}, lease.Token).Int()
+	if err != nil {
+		return err
+	}
+	if ok == 0 {
+		return agent.ErrLeaseLost
+	}
+	return nil
+}
+
+func redisLeaseToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("llmcheckpoint: lease token: %w", err)
+	}
+	return fmt.Sprintf("%x", b[:]), nil
+}
+
 // AppendEvents 实现 checkpoint.EventLog。
 func (s *RedisStore) AppendEvents(ctx context.Context, runID string, events ...checkpoint.Event) error {
 	if len(events) == 0 {
@@ -175,4 +252,7 @@ func (s *RedisStore) EventCount(ctx context.Context, runID string) (int, error) 
 	return len(events), nil
 }
 
-var _ agent.CheckpointStore = (*RedisStore)(nil)
+var (
+	_ agent.CheckpointStore = (*RedisStore)(nil)
+	_ agent.RunCoordinator  = (*RedisStore)(nil)
+)

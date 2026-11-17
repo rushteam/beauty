@@ -38,6 +38,9 @@ app := beauty.New(beauty.WithService(srv))`},
 	{Name: "ginadapt", Summary: "beauty HTTP 中间件 → gin.HandlerFunc 适配"},
 	{Name: "gorm", Summary: "GORM：读写分离、otelgorm、slog 日志、DB 弹性"},
 	{Name: "graphql", Summary: "gqlgen GraphQL/BFF 服务"},
+	{Name: "jsvm", Summary: "JavaScript 扩展层(goja):路由/cron/钩子 + $http/$security/$filesystem",
+		Usage: `vm, err := jsvm.New(jsvm.WithDir("hooks"), jsvm.WithBucket(bucket))
+app := beauty.New(beauty.WithService(vm), beauty.WithWebServer(":8080", vm))`},
 	{Name: "kafka", Summary: "mq.Publisher/Subscriber 的 Kafka 实现(franz-go)",
 		Usage: `pub, err := kafka.NewPublisher([]string{"localhost:9092"})
 sub := kafka.NewSubscriber([]string{"localhost:9092"}) // pub/sub 实现 pkg/messaging/mq 接口`},
@@ -61,12 +64,15 @@ sub := kafka.NewSubscriber([]string{"localhost:9092"}) // pub/sub 实现 pkg/mes
 	{Name: "rabbitmq", Summary: "mq 的 RabbitMQ 实现"},
 	{Name: "redisqueue", Summary: "Redis 分布式任务队列(BullMQ 风格)"},
 	{Name: "redisstream", Summary: "mq 的 Redis Streams 实现"},
+	{Name: "s3blob", Summary: "blob.Bucket 的 S3 实现(AWS/MinIO/R2/OSS)",
+		Usage: `bucket, err := s3blob.New(s3blob.Config{Endpoint: "s3.amazonaws.com", Bucket: "my-bucket", Region: "us-east-1", AccessKey: ak, SecretKey: sk, UseSSL: true})`},
 	{Name: "spire", Summary: "SPIFFE/SPIRE X509-SVID mTLS"},
 	{Name: "sqldb", Summary: "database/sql 读写分离 + OTel + DB 弹性"},
 	{Name: "vector", Summary: "向量存储 / RAG 检索"},
 	{Name: "wasm", Summary: "wazero WebAssembly 插件运行时"},
 	{Name: "wasmagent", Summary: "wasm 沙箱执行接入 llm/agent"},
 	{Name: "wasmopa", Summary: "OPA Rego wasm 实现 authz.Enforcer"},
+	{Name: "webpush", Summary: "Web Push(VAPID):订阅存储 + 推送"},
 }
 
 func findContrib(name string) (contribInfo, bool) {

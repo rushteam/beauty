@@ -59,6 +59,7 @@ jobs:
           - ginadapt
           - gorm
           - graphql
+          - jsvm
           - kafka
           - kitex
           - llm
@@ -80,6 +81,7 @@ jobs:
           - rabbitmq
           - redisqueue
           - redisstream
+          - s3blob
           - spire
           - sqldb
           - vector

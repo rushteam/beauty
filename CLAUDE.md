@@ -58,7 +58,8 @@ The whole framework is `beauty.go` + a small set of interfaces. Read `beauty.go`
 - `pkg/foundation/` — zero-dep primitives & data structures (`ctxkey`, `safe`, `generic`, `fsm`, `bitmap`, `roaring`, `skiplist`, `intervaltree`, `sketch`, `filter`, `simhash`, `crdt`, `diff`, `actrie`, `ringbuffer`, `chanx`, `priority`, `dag`, `syncx`, `xgo`, `semaphore`, …). `roaring` ships the official cross-language RoaringFormatSpec; `crdt` supports delta-state sync; `actrie` double-array AC supports normalization (anti-evasion); `diff` has Myers + JSON Patch (RFC6902) + 3-way merge.
 - `pkg/idgen/` — distributed unique IDs: `Generator` (Snowflake, 64-bit, clock-based) + `SegmentID` (leaf-segment, double-buffered; DB backend in `contrib/gorm`).
 - `pkg/resilience/` — fault tolerance & flow control (`backoff`, `circuitbreaker`, `ratelimit`, `hedge`, `timeout`, `throttle`, `cooldown`, `counter`, `bulkhead`).
-- `pkg/store/` — storage & shared state (`kvstore`, `cache`, `dlock`, `ephemeral`, `idempotency`, `tally`, `shard`, `loadbalance`).
+- `pkg/store/` — storage & shared state (`kvstore`, `cache`, `dlock`, `ephemeral`, `idempotency`, `tally`, `shard`, `loadbalance`, `blob` object storage: Local/Memory, S3 in `contrib/s3blob`).
+- `pkg/security/` — random strings, hashes/HMAC, constant-time compare, AES-GCM, bcrypt, generic HS256 JWT (session-token lifecycle stays in `pkg/api/token`).
 - `pkg/messaging/` — messaging & events (`mq`, `eventbus`, `stream`, `webhook`).
 - `pkg/transport/` — realtime transport (`ws`, `sse`, `quic`, `p2p`, `presence`, `router`, `resume`).
 - `pkg/api/` — HTTP/API/security/observability (`handler`, `errors`, `authz`, `token`, `metadata`, `featureflag`, `afterwork`, `callbacks`, …).

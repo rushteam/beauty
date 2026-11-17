@@ -7,7 +7,7 @@ toolchain go1.26.5
 require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/minio/minio-go/v7 v7.4.1
-	github.com/rushteam/beauty v0.0.0
+	github.com/rushteam/beauty v1.7.0
 )
 
 require (
@@ -33,5 +33,3 @@ require (
 	golang.org/x/tools v0.50.0 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 )
-
-replace github.com/rushteam/beauty => ../../

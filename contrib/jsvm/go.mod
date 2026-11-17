@@ -6,7 +6,8 @@ toolchain go1.26.5
 
 require (
 	github.com/dop251/goja v0.0.0-20261116234614-2eded47d7035
-	github.com/rushteam/beauty v0.0.0
+	github.com/fsnotify/fsnotify v1.9.0
+	github.com/rushteam/beauty v1.7.0
 )
 
 require (
@@ -16,7 +17,6 @@ require (
 	github.com/dlclark/regexp2/v2 v2.11.0 // indirect
 	github.com/dubonzi/otelresty v1.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-resty/resty/v2 v2.16.5 // indirect
@@ -65,5 +65,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/rushteam/beauty => ../../

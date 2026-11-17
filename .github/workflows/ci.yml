@@ -68,6 +68,7 @@ jobs:
           - llmsession
           - mcp
           - mcpagent
+          - mdrt
           - memoryvector
           - modbus
           - mqtt

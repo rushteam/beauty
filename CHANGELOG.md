@@ -4,8 +4,14 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 提交遵循 [约定式提交](https://www.conventionalcommits.org/zh-hans/)。
-框架已发布语义化版本（当前 v1.6.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
+框架已发布语义化版本（当前 v1.8.0），`Unreleased` 记录尚未发版的变更；`tools` 单独维护语义化版本
 （见 [tools/README.md](tools/README.md) 的更新日志）。
+
+## [1.8.0] - 2026-11-18
+
+### Added
+
+- **Markdown 即代码**。`contrib/mdrt` 监听受限方言的 spec,把路由、入参和例子下降成 jsvm 脚本并热切换。只有「行为」段交给 `llm.Client` 写函数体;例子不过则继续跑上一版。`example/llm` 用 OpenAI 兼容接口在开发模式里接上真实模型。生产可以只嵌入 `mdrt.Build` 的脚本,不必链接 mdrt 或 llm。
 
 ## [1.6.0] - 2026-11-04
 

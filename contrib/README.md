@@ -70,6 +70,7 @@ cd contrib/gorm && go test ./...
 | [`contrib/proxywasm`](proxywasm) | Proxy-Wasm ABI v0.2.1 兼容:Higress/Envoy 生态 WASM 插件无需修改即可作为 Beauty HTTP 中间件运行;HTTP Filter 子集(header/body/log/properties/send_local_response) | tetratelabs/wazero |
 | [`contrib/s3blob`](s3blob) | `pkg/store/blob.Bucket` 的 S3 实现(AWS S3 / MinIO / R2 / OSS / COS 等 S3 协议存储):桶内前缀隔离、Range 下载、预签名直链 | minio/minio-go/v7 |
 | [`contrib/jsvm`](jsvm) | JavaScript 扩展层(PocketBase JSVM 风格,goja 纯 Go):脚本里 `routerAdd`/`routerUse`/`cronAdd`/`hookAdd`/`eventSubscribe` 注册扩展,`$app`/`$http`/`$security`/`$filesystem`/`$os` 访问核心能力;实例池并发、超时中断、panic 自动重建实例;`WithGlobal` 暴露自定义 Go 能力 | dop251/goja |
+| [`contrib/mdrt`](mdrt) | Markdown 即代码:监听受限方言的 spec,下降成 jsvm 脚本并热切换;行为段由 LLM 生成函数体,例子不过不换代 | jsvm + llm |
 | [`contrib/wasmagent`](wasmagent) | 胶水:把 `wasm` 的沙箱执行能力接到 `llm/agent`(技能脚本 wasm 执行 + wasm 模块即 agent.Tool) | wasm + llm |
 | [`contrib/wasmopa`](wasmopa) | OPA 策略即 wasm:Rego 编译的 wasm 实现 `pkg/api/authz.Enforcer`,纯 Go 策略求值 | tetratelabs/wazero |
 | [`contrib/casbin`](casbin) | `pkg/api/authz` 的 Casbin 授权引擎(RBAC 域/继承、ABAC、策略文件/DB) | casbin/v2 |

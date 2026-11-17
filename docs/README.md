@@ -80,6 +80,7 @@
 | 主题 | 中文 | English | 相关包 | 示例 |
 |---|---|---|---|---|
 | LLM / Agent 架构（分层、数据流、协议） | [llm-agent](llm-agent.md) | [llm-agent-en](llm-agent-en.md) | `contrib/llm` · `llmservice` · `a2a` · `agui` · `mcp` | [agentservice](../examples/agentservice) · [llm-httpui](../examples/llm-httpui) |
+| Markdown 即代码运行时 | [markdown-runtime](markdown-runtime.md) | — | `contrib/mdrt` · `contrib/jsvm` · `contrib/llm` | [离线](../contrib/mdrt/example) · [接模型](../contrib/mdrt/example/llm) |
 
 ## 实时通信与媒体
 

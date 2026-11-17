@@ -12,3 +12,9 @@ go.work.sum
 # 误提交的构建产物(根锚定,避免误伤 contrib/console、examples/console 目录)
 /console
 
+# mdrt 本地编译缓存、诊断和锁文件(冻结进 git 的是 example/frozen/gen)
+contrib/mdrt/.mdrt/
+contrib/mdrt/mdrt.lock.json
+contrib/mdrt/example/llm/.mdrt/
+contrib/mdrt/example/llm/mdrt.lock.json
+

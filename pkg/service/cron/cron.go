@@ -2,8 +2,11 @@ package cron
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -15,6 +18,9 @@ import (
 	"github.com/rushteam/beauty/pkg/service/logger"
 	"github.com/rushteam/beauty/pkg/store/dlock"
 )
+
+// specParser 与 cron.WithSeconds() 使用的解析器一致,用于在 Start 前提前校验 spec。
+var specParser = cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
 type cronHandler struct {
 	Name    string
@@ -47,7 +53,13 @@ type Cron struct {
 	meter         metric.Meter
 
 	metricsJobSpentDuration metric.Float64Histogram
-	handlers                []cronHandler
+
+	// mu 保护 handlers / entries / runCtx:Start 前 Add/Remove 只改 handlers,
+	// Start 后直接增删底层调度表并记录在 entries。
+	mu       sync.Mutex
+	handlers []cronHandler
+	entries  map[string][]cron.EntryID
+	runCtx   context.Context
 
 	recoverHandler func(r any)
 
@@ -60,6 +72,7 @@ func New(opts ...CronOptions) *Cron {
 	c := &Cron{
 		Cron:     cron.New(cron.WithSeconds()),
 		handlers: []cronHandler{},
+		entries:  map[string][]cron.EntryID{},
 	}
 	for _, o := range opts {
 		o(c)
@@ -98,28 +111,96 @@ func New(opts ...CronOptions) *Cron {
 // AddFunc 只是登记条目,真正开始触发要靠 Cron.Start()——所以无论是否配置
 // 选主都可以在 Start 一开始就注册,选主只需要控制 Cron.Start()/Stop() 本身。
 func (s *Cron) register(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runCtx = ctx
 	for _, v := range s.handlers {
-		func(v cronHandler) {
-			logger.Info("register cron", slog.String("name", v.Name), slog.String("expr", v.Spec))
-			if _, err := s.Cron.AddFunc(v.Spec, func() {
-				defer func() {
-					if r := recover(); r != nil {
-						if s.recoverHandler != nil {
-							s.recoverHandler(r)
-						} else {
-							logger.Error("panic recovered", slog.Any("name", v.Name), slog.Any("panic", r), slog.String("stack", string(debug.Stack())))
-						}
-					}
-				}()
-				if err := v.Handler(ctx); err != nil {
-					logger.Error("cron handler failed", slog.Any("err", err))
-				}
-				logger.Debug("cron handler success", slog.String("date", time.Now().Format("20060102")))
-			}); err != nil {
-				logger.Error("register cron failed", slog.String("name", v.Name), slog.String("expr", v.Spec), slog.Any("err", err))
-			}
-		}(v)
+		logger.Info("register cron", slog.String("name", v.Name), slog.String("expr", v.Spec))
+		id, err := s.addEntry(ctx, v)
+		if err != nil {
+			logger.Error("register cron failed", slog.String("name", v.Name), slog.String("expr", v.Spec), slog.Any("err", err))
+			continue
+		}
+		s.entries[v.Name] = append(s.entries[v.Name], id)
 	}
+}
+
+func (s *Cron) addEntry(ctx context.Context, v cronHandler) (cron.EntryID, error) {
+	return s.Cron.AddFunc(v.Spec, func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if s.recoverHandler != nil {
+					s.recoverHandler(r)
+				} else {
+					logger.Error("panic recovered", slog.Any("name", v.Name), slog.Any("panic", r), slog.String("stack", string(debug.Stack())))
+				}
+			}
+		}()
+		if err := v.Handler(ctx); err != nil {
+			logger.Error("cron handler failed", slog.Any("err", err))
+		}
+		logger.Debug("cron handler success", slog.String("date", time.Now().Format("20060102")))
+	})
+}
+
+// Add 在运行期注册一个定时任务;已有同名任务时先移除再注册(替换语义)。
+// Start 前调用效果等同 WithCronHandler(但会替换同名任务),Start 后立即进入调度表。
+// spec 非法时返回错误。
+//
+// 任务名默认取 handler 的函数名,匿名闭包的自动名很容易重复,运行期增删请用 HandlerName 显式命名。
+func (s *Cron) Add(spec string, handler func(ctx context.Context) error, opts ...CronHandlerOptions) error {
+	if _, err := specParser.Parse(spec); err != nil {
+		return fmt.Errorf("cron: invalid spec %q: %w", spec, err)
+	}
+	h := newCronHandler(s, spec, handler, opts...)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handlers = slices.DeleteFunc(s.handlers, func(v cronHandler) bool { return v.Name == h.Name })
+	s.handlers = append(s.handlers, h)
+	if s.runCtx == nil {
+		return nil
+	}
+	for _, id := range s.entries[h.Name] {
+		s.Cron.Remove(id)
+	}
+	delete(s.entries, h.Name)
+	id, err := s.addEntry(s.runCtx, h)
+	if err != nil {
+		return err
+	}
+	s.entries[h.Name] = []cron.EntryID{id}
+	logger.Info("register cron", slog.String("name", h.Name), slog.String("expr", h.Spec))
+	return nil
+}
+
+// Remove 按名字移除定时任务(含 WithCronHandler 注册的同名任务),返回是否存在。
+// 正在执行中的那一次不会被打断。
+func (s *Cron) Remove(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(s.handlers)
+	s.handlers = slices.DeleteFunc(s.handlers, func(v cronHandler) bool { return v.Name == name })
+	found := len(s.handlers) != n
+	for _, id := range s.entries[name] {
+		s.Cron.Remove(id)
+		found = true
+	}
+	delete(s.entries, name)
+	return found
+}
+
+// Names 返回当前登记的任务名(按注册顺序,重名只出现一次)。
+func (s *Cron) Names() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	names := make([]string, 0, len(s.handlers))
+	for _, v := range s.handlers {
+		if !slices.Contains(names, v.Name) {
+			names = append(names, v.Name)
+		}
+	}
+	return names
 }
 
 func (s *Cron) Start(ctx context.Context) error {

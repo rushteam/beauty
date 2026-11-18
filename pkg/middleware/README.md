@@ -59,6 +59,26 @@ import "github.com/rushteam/beauty/pkg/middleware/idempotencykey"
 mux.Handle("POST /orders", idempotencykey.Middleware()(orderHandler))
 ```
 
+### 🛡️ 浏览器风控签名 (`botguard/`)
+a_bogus / X-Bogus 一类的 Web 防重放与反自动化方案，内置浏览器 SDK（`botguard.js`，go:embed）：
+- **令牌下发**：AES-GCM 密封令牌，绑定 IP 段 + 设备指纹，会话密钥由服务端派生，无状态
+- **请求绑定签名**：载荷经会话密钥加密，AAD = SHA256(method, path, 排序 query, body)，篡改即失败。默认 AES-GCM（`v1`），`WithCipher` / `WithAcceptCiphers` 可换成魔改算法并在轮换期同时验旧算法；浏览器侧 `BotGuard.registerCipher`
+- **防重放**：时间窗口 + Nonce（kvstore SetNX）
+- **风险评分**：指纹/行为/环境/UA/频控规则可替换；分级处置 放行 / PoW 挑战 / 蜜罐 / 拦截
+- **一键降级**：`SetMode(ModeMonitor)` 只观测不拦截，`ModeOff` 全关
+
+```go
+import "github.com/rushteam/beauty/pkg/middleware/botguard"
+
+g, _ := botguard.New(redisStore, masterKey, botguard.WithDeceive(honeypot))
+mux.Handle("POST /_botguard/token", g.TokenHandler())
+mux.Handle("GET /_botguard/sdk.js", botguard.SDKHandler())
+mux.Handle("/api/", g.Middleware()(api))
+// 前端：await BotGuard.init(); BotGuard.fetch('/api/items', {...})
+```
+
+完整示例见 `examples/botguard`。
+
 ### ⏱️ 超时控制中间件 (`timeout/`)
 请求超时保护和慢请求监控：
 - **灵活超时配置**：可配置超时时间和慢请求阈值

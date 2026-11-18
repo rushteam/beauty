@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>botguard demo</title>
+  <script src="/_botguard/sdk.js"></script>
+</head>
+<body>
+  <h1>botguard demo</h1>
+  <p>先随意移动鼠标，再点击按钮。</p>
+  <button id="get">GET /api/items</button>
+  <button id="post">POST /api/items</button>
+  <pre id="out"></pre>
+  <script>
+    const out = document.getElementById('out');
+    BotGuard.init({ tokenURL: '/_botguard/token' }).catch(e => { out.textContent = String(e); });
+    async function call(method) {
+      const res = await BotGuard.fetch('/api/items?page=1&q=' + encodeURIComponent('中文 测试'), {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: method === 'POST' ? JSON.stringify({ hello: 'world' }) : undefined,
+      });
+      out.textContent = res.status + '\n' + await res.text();
+    }
+    document.getElementById('get').onclick = () => call('GET');
+    document.getElementById('post').onclick = () => call('POST');
+  </script>
+</body>
+</html>
